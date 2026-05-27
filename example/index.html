@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>prototype-comments — 範例</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f3f4f6; }
+
+    header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 24px; height: 52px;
+      background: #fff; border-bottom: 1px solid #e5e7eb;
+    }
+    header h1 { font-size: 15px; font-weight: 700; color: #111827; flex: 1; }
+
+    .main { display: flex; gap: 0; height: calc(100vh - 52px); overflow: hidden; }
+
+    /* Phone frame */
+    #phone {
+      position: relative;
+      width: 375px; min-width: 375px;
+      height: 100%;
+      overflow: hidden;
+      background: #fff;
+      border-right: 1px solid #e5e7eb;
+    }
+    .screen {
+      position: absolute; inset: 0;
+      display: none; flex-direction: column;
+      background: #fff;
+    }
+    .screen.active { display: flex; }
+    .screen-title {
+      padding: 20px 20px 8px;
+      font-size: 20px; font-weight: 700; color: #111;
+    }
+    .screen-body { flex: 1; padding: 0 20px; overflow-y: auto; }
+
+    /* Sidebar */
+    .sidebar {
+      width: 200px; min-width: 200px;
+      background: #fff; border-right: 1px solid #e5e7eb;
+      padding: 16px 12px; overflow-y: auto;
+    }
+    .sidebar-item {
+      padding: 8px 10px; border-radius: 8px;
+      font-size: 13px; cursor: pointer; color: #374151;
+    }
+    .sidebar-item:hover { background: #f9fafb; }
+    .sidebar-item.active { background: #f0fdf9; color: #0FA0A0; font-weight: 600; }
+
+    /* Info panel */
+    .info { flex: 1; padding: 24px; overflow-y: auto; }
+    .info-title { font-size: 14px; font-weight: 700; color: #111827; margin-bottom: 8px; }
+
+    /* Dev notes */
+    .dev-note-v2 {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 8px 12px; border-radius: 6px;
+      background: #fafafa; border: 1px solid #f0f0f0;
+      margin-bottom: 6px; font-size: 13px;
+    }
+    .snc-tag {
+      display: inline-block; padding: 2px 8px; border-radius: 999px;
+      font-size: 11px; font-weight: 700; flex-shrink: 0;
+    }
+    .tag-api  { background: #dbeafe; color: #1d4ed8; }
+    .tag-note { background: #fef3c7; color: #92400e; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>My Prototype</h1>
+  <!-- prototype-comments will inject its auth bar here -->
+</header>
+
+<div class="main">
+  <nav class="sidebar">
+    <div class="sidebar-item active" onclick="goto('s1')">畫面一</div>
+    <div class="sidebar-item" onclick="goto('s2')">畫面二</div>
+    <div class="sidebar-item" onclick="goto('s3')">畫面三</div>
+  </nav>
+
+  <!-- Phone / design target -->
+  <div id="phone">
+    <div class="screen active" id="screen-s1">
+      <div class="screen-title">畫面一</div>
+      <div class="screen-body">
+        <p style="color:#6b7280;font-size:14px;">這是第一個畫面的內容。<br>在留言模式下點擊任意位置可留下 pin。</p>
+      </div>
+    </div>
+    <div class="screen" id="screen-s2">
+      <div class="screen-title">畫面二</div>
+      <div class="screen-body">
+        <p style="color:#6b7280;font-size:14px;">這是第二個畫面。</p>
+      </div>
+    </div>
+    <div class="screen" id="screen-s3">
+      <div class="screen-title">畫面三</div>
+      <div class="screen-body">
+        <p style="color:#6b7280;font-size:14px;">這是第三個畫面。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Info panel with dev notes -->
+  <div class="info">
+    <div class="info-title">Dev Notes</div>
+
+    <div class="dev-note-v2" data-tag="API" data-text="此 API 尚未確認 response schema">
+      <span class="snc-tag tag-api">API</span>
+      <span>此 API 尚未確認 response schema</span>
+    </div>
+
+    <div class="dev-note-v2" data-tag="注意事項" data-text="空狀態需要設計">
+      <span class="snc-tag tag-note">注意事項</span>
+      <span>空狀態需要設計</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── Prototype state ──────────────────────────────────────────────────────
+  let currentScreen = 's1';
+  window.currentScreen = currentScreen;
+  window.currentMode   = 'design';
+
+  function goto(id) {
+    currentScreen = id;
+    window.currentScreen = id;
+
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    const scr = document.getElementById(`screen-${id}`);
+    if (scr) scr.classList.add('active');
+
+    document.querySelectorAll('.sidebar-item').forEach((item, i) => {
+      item.classList.toggle('active', ['s1','s2','s3'][i] === id);
+    });
+
+    // Notify prototype-comments
+    document.dispatchEvent(new CustomEvent('pc:screen-change', { detail: { screenId: id } }));
+  }
+</script>
+
+<!-- ── prototype-comments ─────────────────────────────────────────────── -->
+<script type="module">
+  import { initPrototypeComments } from
+    'https://cdn.jsdelivr.net/gh/mpragnarok/prototype-comments@main/src/index.js';
+
+  // !! Replace with your own Firebase project config !!
+  // Never commit real config to a public repo.
+  // You can load this from an environment variable or a gitignored config file.
+  const firebaseConfig = {
+    apiKey:            'YOUR_API_KEY',
+    authDomain:        'YOUR_PROJECT.firebaseapp.com',
+    projectId:         'YOUR_PROJECT_ID',
+    storageBucket:     'YOUR_PROJECT.appspot.com',
+    messagingSenderId: 'YOUR_SENDER_ID',
+    appId:             'YOUR_APP_ID',
+  };
+
+  initPrototypeComments({
+    firebaseConfig,
+    projectId:       'my-prototype',          // Firestore namespace
+    getScreenId:     () => window.currentScreen,
+    getMode:         () => window.currentMode,
+    designTarget:    '#phone',
+    engNoteSelector: '.eng-note-row',
+  });
+</script>
+
+</body>
+</html>
