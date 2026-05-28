@@ -262,7 +262,7 @@ export const STYLES = `
 }
 .pc-note-badge:hover { background: rgba(15,160,160,.2); }
 .pc-note-comment-btn {
-  display: none;
+  display: flex;
   align-items: center;
   gap: 3px;
   font-size: 10px;
@@ -275,11 +275,12 @@ export const STYLES = `
   font-family: inherit;
   margin-left: auto;
   flex-shrink: 0;
-  transition: color .15s;
+  opacity: 0.3;
+  transition: color .15s, opacity .15s;
 }
 .pc-note-comment-btn:hover { color: #0FA0A0; }
 .eng-note-row:hover .pc-note-comment-btn,
-.dev-note-v2:hover .pc-note-comment-btn { display: flex; }
+.dev-note-v2:hover .pc-note-comment-btn { opacity: 1; }
 .pc-note-thread {
   display: none;
   flex-direction: column;

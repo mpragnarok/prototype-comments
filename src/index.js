@@ -660,14 +660,27 @@ export async function initPrototypeComments(opts = {}) {
         item.onclick = () => navigateToComment(c);
 
         const topRow = el('div', 'pc-panel-top-row');
-        if (c.screenId) {
-          const chip = el('span', 'pc-panel-chip'); chip.textContent = c.screenId;
-          topRow.appendChild(chip);
+        const modeChip = el('span', 'pc-panel-chip');
+        if (c.type === 'note') {
+          modeChip.textContent = '🔧 工程';
+          modeChip.style.cssText = 'background:rgba(99,102,241,.12);color:#6366f1;';
+        } else {
+          modeChip.textContent = '🎨 設計';
         }
-        if (c.type === 'positional' && pinNums[c.screenId]?.[c.id]) {
-          const num = el('span', 'pc-panel-num');
-          num.textContent = `#${pinNums[c.screenId][c.id]}`;
-          topRow.appendChild(num);
+        topRow.appendChild(modeChip);
+        if (c.type === 'note' && c.noteTag) {
+          const tagChip = el('span', 'pc-panel-chip'); tagChip.textContent = c.noteTag;
+          topRow.appendChild(tagChip);
+        } else if (c.type === 'positional') {
+          if (c.screenId) {
+            const chip = el('span', 'pc-panel-chip'); chip.textContent = c.screenId;
+            topRow.appendChild(chip);
+          }
+          if (pinNums[c.screenId]?.[c.id]) {
+            const num = el('span', 'pc-panel-num');
+            num.textContent = `#${pinNums[c.screenId][c.id]}`;
+            topRow.appendChild(num);
+          }
         }
         if (c.resolved) {
           const rb = el('span', 'pc-panel-resolved-badge'); rb.textContent = '✓ 已解決';
@@ -758,7 +771,7 @@ export async function initPrototypeComments(opts = {}) {
       renderPins();
       noteModule.injectAll();
     }, 30);
-    if (getMode() !== 'eng') subscribe();
+    subscribe();
   });
 
   const observer = new MutationObserver(() => {
