@@ -173,10 +173,17 @@ export async function initPrototypeComments(opts = {}) {
 
   function mountAuthBar() {
     const wrap = el('div');
-    wrap.style.cssText = 'position:fixed;top:60px;right:16px;z-index:9000;';
     const { bar } = buildAuthBar();
     wrap.appendChild(bar);
-    document.body.appendChild(wrap);
+    const headerEl = document.querySelector('header, .header');
+    if (headerEl) {
+      wrap.style.marginLeft = 'auto';
+      wrap.style.flexShrink = '0';
+      headerEl.appendChild(wrap);
+    } else {
+      wrap.style.cssText = 'position:fixed;top:12px;right:16px;z-index:9000;';
+      document.body.appendChild(wrap);
+    }
   }
 
   // ── Overlay & Positional Pins ──────────────────────────────────────────────
