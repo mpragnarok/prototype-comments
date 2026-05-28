@@ -173,7 +173,7 @@ export async function initPrototypeComments(opts = {}) {
 
   function mountAuthBar() {
     const wrap = el('div');
-    wrap.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:9000;';
+    wrap.style.cssText = 'position:fixed;top:60px;right:16px;z-index:9000;';
     const { bar } = buildAuthBar();
     wrap.appendChild(bar);
     document.body.appendChild(wrap);
