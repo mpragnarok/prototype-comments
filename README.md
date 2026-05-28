@@ -88,6 +88,34 @@ function switchMode(mode) {
 <div class="eng-note-row" data-tag="API" data-text="此 API 尚未確認">...</div>
 ```
 
+**④ 使用 `authBarTarget` 讓 auth bar 整合進 header（推薦）**
+
+在 `initPrototypeComments` 加上 `authBarTarget`，auth bar 會注入成 header flex row 的最後一個子元素，不以 `position:fixed` 浮動覆蓋內容：
+
+```js
+initPrototypeComments({
+  ...
+  authBarTarget: '.header',   // CSS selector，需對應 display:flex 的 header 元素
+});
+```
+
+同時在 header CSS 讓最後一個導覽元素（如 mode-switcher）有 `margin-left:auto`，
+使它靠右，auth bar 緊接其後：
+
+```css
+.mode-switcher {
+  margin-left: auto;    /* 推到右側，auth bar 緊接在後 */
+  padding-left: 16px;
+  border-left: 1px solid #e5e7eb;
+}
+```
+
+結果：`[title][flow buttons] ←自動空間→ |[設計][工程] |[avatar …]`
+
+> **跨頁面守則（每個新 UI flow HTML 只需 2 個設定）：**
+> 1. `initPrototypeComments({ authBarTarget: '.my-header' })`
+> 2. header 的最後一個導覽元素加 `margin-left: auto`
+
 ### 5. 設定 Firestore Rules
 
 在 `firestore.rules` 加上：
@@ -122,6 +150,8 @@ initPrototypeComments(opts: {
   getMode?:         () => string;    // 'design' | 'eng'，預設 () => 'design'
   designTarget?:    string;          // CSS selector for pin container，預設 '#phone'
   engNoteSelector?: string;          // CSS selector for eng note rows，預設 '.eng-note-row'
+  authBarTarget?:   string;          // CSS selector for flex header to inject auth bar into
+                                     // 未設定時 fallback 到 position:fixed;top:12px;right:16px
 }): Promise<{ setCommentMode, getComments, subscribe }>
 ```
 

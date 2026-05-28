@@ -76,6 +76,7 @@ export async function initPrototypeComments(opts = {}) {
     designTarget    = '#phone',
     engNoteSelector = '.eng-note-row',
     navigateTo      = null,   // (screenId: string) => void  — consumer provides
+    authBarTarget   = null,   // CSS selector for a flex header to inject auth bar into
   } = opts;
 
   if (!firebaseConfig) {
@@ -175,11 +176,10 @@ export async function initPrototypeComments(opts = {}) {
     const wrap = el('div');
     const { bar } = buildAuthBar();
     wrap.appendChild(bar);
-    const headerEl = document.querySelector('header, .header');
-    if (headerEl) {
-      wrap.style.marginLeft = 'auto';
+    const targetEl = authBarTarget ? document.querySelector(authBarTarget) : null;
+    if (targetEl) {
       wrap.style.flexShrink = '0';
-      headerEl.appendChild(wrap);
+      targetEl.appendChild(wrap);
     } else {
       wrap.style.cssText = 'position:fixed;top:12px;right:16px;z-index:9000;';
       document.body.appendChild(wrap);
