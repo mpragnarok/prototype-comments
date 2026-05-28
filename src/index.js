@@ -193,10 +193,10 @@ export async function initPrototypeComments(opts = {}) {
       const rect = overlay.getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width * 100).toFixed(2);
       const y = ((e.clientY - rect.top) / rect.height * 100).toFixed(2);
-      // Save coords BEFORE closeAllPopovers() — it resets pendingPin to null
-      const coords = { x: parseFloat(x), y: parseFloat(y) };
       closeAllPopovers();
-      pendingPin = coords;  // restore after close
+      // Set AFTER closeAllPopovers (which no longer clears pendingPin)
+      pendingPin = { x: parseFloat(x), y: parseFloat(y) };
+      console.log('[pc] overlay click → pendingPin set to', pendingPin);
       showInputPopover(e.clientX, e.clientY, null);
     });
   }
@@ -207,7 +207,7 @@ export async function initPrototypeComments(opts = {}) {
     if (overlay) overlay.classList.toggle('active', active);
     const toggle = document.getElementById('pc-comment-toggle');
     if (toggle) toggle.classList.toggle('active', active);
-    if (!active) closeAllPopovers();
+    if (!active) { pendingPin = null; closeAllPopovers(); }
   }
 
   // ── Popover (input / thread) ───────────────────────────────────────────────
@@ -216,7 +216,9 @@ export async function initPrototypeComments(opts = {}) {
   function closeAllPopovers() {
     if (popoverEl) { popoverEl.remove(); popoverEl = null; }
     openPopoverId = null;
-    pendingPin = null;
+    // pendingPin is NOT reset here — the overlay click flow sets it just
+    // before calling showInputPopover, and showInputPopover calls this too.
+    // pendingPin is explicitly cleared only at submit / cancel / outside-click.
   }
 
   function showInputPopover(clientX, clientY, commentId) {
@@ -237,7 +239,7 @@ export async function initPrototypeComments(opts = {}) {
     hdr.appendChild(author);
     const closeBtn = el('button', 'pc-popover-close');
     closeBtn.textContent = '✕';
-    closeBtn.onclick = closeAllPopovers;
+    closeBtn.onclick = () => { pendingPin = null; closeAllPopovers(); };
     hdr.appendChild(closeBtn);
     pop.appendChild(hdr);
 
@@ -255,7 +257,7 @@ export async function initPrototypeComments(opts = {}) {
     const actions = el('div', 'pc-popover-actions');
     const cancelBtn = el('button', 'pc-btn-cancel');
     cancelBtn.textContent = '取消';
-    cancelBtn.onclick = closeAllPopovers;
+    cancelBtn.onclick = () => { pendingPin = null; closeAllPopovers(); };
     const submitBtn = el('button', 'pc-btn-submit', { disabled: '' });
     submitBtn.textContent = '送出';
 
@@ -441,6 +443,7 @@ export async function initPrototypeComments(opts = {}) {
     const screenId = getScreenId();
     const positional = comments.filter(
       c => c.type === 'positional' && c.screenId === screenId && !c.parentId
+        && c.x != null && c.y != null   // skip old bad-data docs with null coords
     );
     console.log('[pc] renderPins screenId=', screenId, 'total comments=', comments.length, 'positional this screen=', positional.length);
 
@@ -779,7 +782,7 @@ export async function initPrototypeComments(opts = {}) {
   document.addEventListener('click', e => {
     if (popoverEl && !popoverEl.contains(e.target)) {
       const isPin = e.target.closest('.pc-pin');
-      if (!isPin) closeAllPopovers();
+      if (!isPin) { pendingPin = null; closeAllPopovers(); }
     }
   });
 
