@@ -443,9 +443,10 @@ export async function initPrototypeComments(opts = {}) {
 
   function positionPopover(pop, cx, cy) {
     const vw = window.innerWidth, vh = window.innerHeight;
-    const pw = 268, ph = 200;
+    const pw = pop.offsetWidth || 268, ph = pop.scrollHeight || 200;
     let left = cx + 10, top = cy - 10;
     if (left + pw > vw - 10) left = cx - pw - 10;
+    if (left < 10) left = 10;
     if (top + ph > vh - 10) top = vh - ph - 10;
     if (top < 10) top = 10;
     pop.style.left = `${left}px`;
