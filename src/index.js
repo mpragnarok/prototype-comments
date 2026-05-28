@@ -366,11 +366,13 @@ export async function initPrototypeComments(opts = {}) {
 
   // ── Render Pins ───────────────────────────────────────────────────────────
   function renderPins() {
-    const target = getDesignTarget();
-    if (!target) return;
+    // Pins are appended INTO the overlay so their left/top percentages
+    // use the exact same coordinate system as the click calculation.
+    const overlay = document.getElementById('pc-overlay');
+    if (!overlay) return;
 
-    // Remove existing pins
-    target.querySelectorAll('.pc-pin').forEach(p => p.remove());
+    // Remove existing pins from overlay
+    overlay.querySelectorAll('.pc-pin').forEach(p => p.remove());
 
     const screenId = getScreenId();
     const positional = comments.filter(
@@ -391,7 +393,7 @@ export async function initPrototypeComments(opts = {}) {
         openPopoverId = c.id;
         showThreadPopover(e.clientX, e.clientY, c.id);
       });
-      target.appendChild(pin);
+      overlay.appendChild(pin);
     });
   }
 

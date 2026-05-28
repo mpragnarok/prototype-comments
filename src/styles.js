@@ -71,12 +71,17 @@ export const STYLES = `
   position: absolute;
   inset: 0;
   z-index: 200;
-  pointer-events: none;
+  pointer-events: none; /* overlay itself doesn't block clicks unless active */
   border-radius: inherit;
 }
 .pc-overlay.active {
   pointer-events: all;
   cursor: crosshair;
+}
+/* Pins inside overlay are always clickable regardless of overlay state */
+.pc-overlay .pc-pin {
+  pointer-events: all !important;
+  cursor: pointer;
 }
 
 /* Comment Pin */
