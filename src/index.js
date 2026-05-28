@@ -20,7 +20,7 @@ async function loadFirebase() {
   const [
     { initializeApp, getApps, getApp },
     { getFirestore, collection, addDoc, onSnapshot, query, where,
-      serverTimestamp, deleteDoc, doc, updateDoc, orderBy },
+      serverTimestamp, deleteDoc, doc, updateDoc },
     { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged },
   ] = await Promise.all([
     import(`${FB_BASE}/firebase-app.js`),
@@ -30,7 +30,7 @@ async function loadFirebase() {
   return {
     initializeApp, getApps, getApp,
     getFirestore, collection, addDoc, onSnapshot, query, where,
-    serverTimestamp, deleteDoc, doc, updateDoc, orderBy,
+    serverTimestamp, deleteDoc, doc, updateDoc,
     getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
   };
 }
@@ -623,21 +623,22 @@ export async function initPrototypeComments(opts = {}) {
     if (mode === 'eng') {
       // Eng mode: subscribe to all note-type comments for this project
       q = fb.query(colPath(),
-        fb.where('type', '==', 'note'),
-        fb.orderBy('createdAt', 'asc')
+        fb.where('type', '==', 'note')
       );
     } else {
       // Design mode: subscribe to current screen (positional + note)
       const screenId = getScreenId();
       q = fb.query(colPath(),
-        fb.where('screenId', '==', screenId),
-        fb.orderBy('createdAt', 'asc')
+        fb.where('screenId', '==', screenId)
       );
     }
 
     unsub = fb.onSnapshot(q, snapshot => {
       // Merge: keep comments from other screens, replace for current screen/mode
-      const incoming = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Sort client-side by createdAt to avoid needing composite Firestore indexes
+      const incoming = snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0));
 
       if (mode === 'eng') {
         // Replace note comments entirely
