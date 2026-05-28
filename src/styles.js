@@ -83,33 +83,30 @@ export const STYLES = `
 .pc-pin {
   position: absolute;
   transform: translate(-50%, -50%);
-  width: 26px;
-  height: 26px;
-  border-radius: 50% 50% 50% 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
   background: #0FA0A0;
   color: #fff;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   z-index: 210;
-  box-shadow: 0 2px 8px rgba(15,160,160,.4);
+  box-shadow: 0 2px 8px rgba(15,160,160,.5), 0 0 0 2px #fff;
   transition: transform .15s, opacity .15s;
   pointer-events: all;
   font-family: monospace;
-  rotate: -45deg;
 }
-.pc-pin:hover { transform: translate(-50%, -50%) scale(1.15); }
+.pc-pin:hover { transform: translate(-50%, -50%) scale(1.2); }
 .pc-pin.resolved {
   background: #d1d5db;
-  box-shadow: none;
+  box-shadow: 0 0 0 2px #fff;
   opacity: .6;
 }
-.pc-pin-label {
-  rotate: 45deg;
-}
+.pc-pin-label { line-height: 1; }
 
 /* Input Popover */
 .pc-popover {
