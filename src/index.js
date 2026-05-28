@@ -671,17 +671,24 @@ export async function initPrototypeComments(opts = {}) {
   }
 
   // ── Screen-change listener ─────────────────────────────────────────────────
+  // renderScreen() uses innerHTML= which destroys the overlay and pins.
+  // Re-mount overlay and re-render pins after every screen change.
   document.addEventListener('pc:screen-change', ({ detail }) => {
     closeAllPopovers();
-    renderPins();
+    // Small delay so renderScreen()'s innerHTML= runs first
+    setTimeout(() => {
+      mountOverlay();
+      renderPins();
+      injectAllNoteUI();
+    }, 30);
     // Re-subscribe with new screenId (design mode)
     if (getMode() !== 'eng') subscribe();
-    // Re-inject note UI for new screen's info panel (design mode)
-    setTimeout(injectAllNoteUI, 50);
   });
 
   // Also re-inject after any DOM mutation in info panel area (design mode renders async)
   const observer = new MutationObserver(() => {
+    // Re-mount overlay if it was wiped by innerHTML=
+    if (!document.getElementById('pc-overlay')) mountOverlay();
     injectAllNoteUI();
     refreshNoteUI();
   });
