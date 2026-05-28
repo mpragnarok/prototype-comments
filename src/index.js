@@ -5,12 +5,14 @@
  * Usage:
  *   import { initPrototypeComments } from '.../src/index.js';
  *   initPrototypeComments({ firebaseConfig, projectId, getScreenId, getMode,
- *                           designTarget, engNoteSelector });
+ *                           designTarget, engNoteSelector, navigateTo });
  *
  * No secrets are stored here. All Firebase config is passed by the consumer.
  */
 
 import { STYLES } from './styles.js';
+import { createStore } from './store.js';
+import { createNoteModule } from './note-comments.js';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';
@@ -94,23 +96,24 @@ export async function initPrototypeComments(opts = {}) {
   const db   = fb.getFirestore(app);
   const auth = fb.getAuth(app);
 
+  // ── Store (Firebase seam) ──────────────────────────────────────────────────
+  const store = createStore(fb, db, projectId);
+
   // ── State ──────────────────────────────────────────────────────────────────
-  let currentUser     = null;
-  let commentMode     = false;   // is comment overlay active?
-  let unsub           = null;    // Firestore onSnapshot unsubscribe
-  let comments        = [];      // current snapshot (screen-filtered)
-  let pendingPin      = null;    // { x%, y% } waiting for input
-  let openPopoverId   = null;    // which pin's popover is open
+  let currentUser = null;
+  let commentMode = false;
+  let unsub       = null;
 
-  // Panel state
-  let allComments  = [];        // all comments in project (panel subscription)
-  let panelOpen    = false;
-  let allUnsub     = null;
-  let panelFilter  = 'all';     // 'all' | 'open' | 'resolved'
-  let panelEl      = null;
+  // data state
+  let comments    = [];
+  let allComments = [];
 
-  const colPath = () =>
-    fb.collection(db, 'prototype-comments', projectId, 'comments');
+  // interaction state (UI lifecycle)
+  const pin   = { current: null };          // pendingPin
+  const pop   = { id: null, el: null };     // openPopoverId + popoverEl
+
+  // panel state
+  const panel = { open: false, filter: 'all', el: null, unsub: null };
 
   // ── Auth Bar ───────────────────────────────────────────────────────────────
   function buildAuthBar() {
@@ -140,32 +143,27 @@ export async function initPrototypeComments(opts = {}) {
       return;
     }
 
-    // Avatar
     if (user.photoURL) {
       const img = el('img', 'pc-user-avatar', { src: user.photoURL, alt: user.displayName });
       bar.appendChild(img);
     }
-    // Name
     const name = el('span', 'pc-user-name');
     name.textContent = user.displayName || user.email;
     bar.appendChild(name);
 
-    // Comment toggle
     const toggle = el('button', 'pc-comment-toggle');
     toggle.id = 'pc-comment-toggle';
     toggle.innerHTML = '💬 留言模式';
     toggle.onclick = () => setCommentMode(!commentMode);
     bar.appendChild(toggle);
 
-    // Panel button
     const panelBtn = el('button', 'pc-sign-in-btn');
     panelBtn.id = 'pc-panel-btn';
     panelBtn.style.cssText = 'font-size:11px;padding:4px 10px;';
     panelBtn.textContent = '📋 全部留言';
-    panelBtn.onclick = () => panelOpen ? closePanel() : openPanel();
+    panelBtn.onclick = () => panel.open ? closePanel() : openPanel();
     bar.appendChild(panelBtn);
 
-    // Sign out (small link)
     const so = el('button', 'pc-sign-in-btn');
     so.style.cssText = 'font-size:11px;opacity:.6;padding:4px 8px;';
     so.textContent = '登出';
@@ -173,11 +171,9 @@ export async function initPrototypeComments(opts = {}) {
     bar.appendChild(so);
   }
 
-  // Inject auth bar into page header
   function mountAuthBar() {
     const header = document.querySelector('header, .header, nav, .nav, #header');
     if (!header) {
-      // Fallback: floating bar top-right
       const wrap = el('div', 'pc-auth-bar');
       wrap.id = 'pc-auth-bar';
       wrap.style.cssText = 'position:fixed;top:12px;right:16px;z-index:9000;background:#fff;padding:6px 10px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.15);';
@@ -210,9 +206,8 @@ export async function initPrototypeComments(opts = {}) {
       const x = ((e.clientX - rect.left) / rect.width * 100).toFixed(2);
       const y = ((e.clientY - rect.top) / rect.height * 100).toFixed(2);
       closeAllPopovers();
-      // Set AFTER closeAllPopovers (which no longer clears pendingPin)
-      pendingPin = { x: parseFloat(x), y: parseFloat(y) };
-      console.log('[pc] overlay click → pendingPin set to', pendingPin);
+      pin.current = { x: parseFloat(x), y: parseFloat(y) };
+      console.log('[pc] overlay click → pin.current set to', pin.current);
       showInputPopover(e.clientX, e.clientY, null);
     });
   }
@@ -223,28 +218,22 @@ export async function initPrototypeComments(opts = {}) {
     if (overlay) overlay.classList.toggle('active', active);
     const toggle = document.getElementById('pc-comment-toggle');
     if (toggle) toggle.classList.toggle('active', active);
-    if (!active) { pendingPin = null; closeAllPopovers(); }
+    if (!active) { pin.current = null; closeAllPopovers(); }
   }
 
   // ── Popover (input / thread) ───────────────────────────────────────────────
-  let popoverEl = null;
-
   function closeAllPopovers() {
-    if (popoverEl) { popoverEl.remove(); popoverEl = null; }
-    openPopoverId = null;
-    // pendingPin is NOT reset here — the overlay click flow sets it just
-    // before calling showInputPopover, and showInputPopover calls this too.
-    // pendingPin is explicitly cleared only at submit / cancel / outside-click.
+    if (pop.el) { pop.el.remove(); pop.el = null; }
+    pop.id = null;
   }
 
   function showInputPopover(clientX, clientY, commentId) {
     closeAllPopovers();
     if (!currentUser) return;
 
-    const pop = el('div', 'pc-popover');
-    popoverEl = pop;
+    const popEl = el('div', 'pc-popover');
+    pop.el = popEl;
 
-    // Header
     const hdr = el('div', 'pc-popover-header');
     if (currentUser.photoURL) {
       const av = el('img', 'pc-popover-avatar', { src: currentUser.photoURL, alt: '' });
@@ -255,25 +244,23 @@ export async function initPrototypeComments(opts = {}) {
     hdr.appendChild(author);
     const closeBtn = el('button', 'pc-popover-close');
     closeBtn.textContent = '✕';
-    closeBtn.onclick = () => { pendingPin = null; closeAllPopovers(); };
+    closeBtn.onclick = () => { pin.current = null; closeAllPopovers(); };
     hdr.appendChild(closeBtn);
-    pop.appendChild(hdr);
+    popEl.appendChild(hdr);
 
-    // Thread (if existing comment)
     if (commentId) {
       const thread = renderThread(commentId);
-      if (thread) pop.appendChild(thread);
+      if (thread) popEl.appendChild(thread);
     }
 
-    // Input
     const ta = el('textarea', 'pc-textarea', { placeholder: '留下你的意見…' });
-    pop.appendChild(ta);
+    popEl.appendChild(ta);
     ta.focus();
 
     const actions = el('div', 'pc-popover-actions');
     const cancelBtn = el('button', 'pc-btn-cancel');
     cancelBtn.textContent = '取消';
-    cancelBtn.onclick = () => { pendingPin = null; closeAllPopovers(); };
+    cancelBtn.onclick = () => { pin.current = null; closeAllPopovers(); };
     const submitBtn = el('button', 'pc-btn-submit', { disabled: '' });
     submitBtn.textContent = '送出';
 
@@ -289,18 +276,16 @@ export async function initPrototypeComments(opts = {}) {
       const data = {
         type: 'positional',
         screenId: getScreenId(),
-        x: pendingPin ? pendingPin.x : null,
-        y: pendingPin ? pendingPin.y : null,
+        x: pin.current ? pin.current.x : null,
+        y: pin.current ? pin.current.y : null,
         body,
         authorUid: currentUser.uid,
         authorName: currentUser.displayName || currentUser.email,
         authorPhoto: currentUser.photoURL || '',
         resolved: false,
-        createdAt: fb.serverTimestamp(),
       };
 
       if (commentId) {
-        // reply to existing thread — for MVP treat as new top-level comment at same position
         const parent = comments.find(c => c.id === commentId);
         if (parent) {
           data.x = parent.x;
@@ -309,28 +294,27 @@ export async function initPrototypeComments(opts = {}) {
         }
       }
 
-      console.log('[pc] addDoc x=', data.x, 'y=', data.y, 'screenId=', data.screenId, 'pendingPin=', pendingPin);
+      console.log('[pc] save x=', data.x, 'y=', data.y, 'screenId=', data.screenId, 'pin=', pin.current);
       try {
-        await fb.addDoc(colPath(), data);
-        console.log('[pc] addDoc success');
+        await store.save(data);
+        console.log('[pc] save success');
       } catch(e) {
-        console.error('[pc] addDoc FAILED:', e.message, e.code);
+        console.error('[pc] save FAILED:', e.message, e.code);
       }
-      pendingPin = null;
+      pin.current = null;
       closeAllPopovers();
     };
 
     actions.appendChild(cancelBtn);
     actions.appendChild(submitBtn);
-    pop.appendChild(actions);
+    popEl.appendChild(actions);
 
-    // Position
-    document.body.appendChild(pop);
-    positionPopover(pop, clientX, clientY);
+    document.body.appendChild(popEl);
+    positionPopover(popEl, clientX, clientY);
   }
 
   // Build a single comment item element with edit/delete/resolve actions
-  function buildCommentItem(c, isRootComment, onUpdated) {
+  function buildCommentItem(c, isRootComment, { onResolve, onDelete, onEdit, onUpdated } = {}) {
     const item = el('div', 'pc-comment-item');
 
     if (c.authorPhoto) {
@@ -345,7 +329,6 @@ export async function initPrototypeComments(opts = {}) {
     meta.appendChild(an); meta.appendChild(at);
     bodyEl.appendChild(meta);
 
-    // Text or edit form
     const txtEl = el('p', 'pc-ci-text'); txtEl.textContent = c.body;
     bodyEl.appendChild(txtEl);
 
@@ -356,22 +339,17 @@ export async function initPrototypeComments(opts = {}) {
       const resolveBtn = el('button', 'pc-ci-action resolve');
       resolveBtn.textContent = '✓ Resolve';
       resolveBtn.onclick = async () => {
-        await fb.updateDoc(
-          fb.doc(db, 'prototype-comments', projectId, 'comments', c.id),
-          { resolved: true }
-        );
+        if (onResolve) await onResolve(true);
         if (onUpdated) onUpdated();
       };
       acts.appendChild(resolveBtn);
     }
 
-    // Edit (own comments only) + Delete (own replies only — root can only be Resolved)
+    // Edit (own comments only) + Delete (own replies only)
     if (currentUser && c.authorUid === currentUser.uid) {
-      // Edit
       const editBtn = el('button', 'pc-ci-action');
       editBtn.textContent = '編輯';
       editBtn.onclick = () => {
-        // Swap text for inline editor
         txtEl.style.display = 'none';
         acts.style.display = 'none';
         const ta = el('textarea', 'pc-note-textarea');
@@ -398,10 +376,7 @@ export async function initPrototypeComments(opts = {}) {
           const newBody = ta.value.trim();
           if (!newBody) return;
           saveBtn.disabled = true;
-          await fb.updateDoc(
-            fb.doc(db, 'prototype-comments', projectId, 'comments', c.id),
-            { body: newBody, edited: true }
-          );
+          if (onEdit) await onEdit(newBody);
           if (onUpdated) onUpdated();
         };
         ta.focus();
@@ -414,9 +389,7 @@ export async function initPrototypeComments(opts = {}) {
         delBtn.textContent = '刪除';
         delBtn.onclick = async () => {
           if (!confirm('刪除這則留言？')) return;
-          await fb.deleteDoc(
-            fb.doc(db, 'prototype-comments', projectId, 'comments', c.id)
-          );
+          if (onDelete) await onDelete();
           if (onUpdated) onUpdated();
         };
         acts.appendChild(delBtn);
@@ -436,21 +409,26 @@ export async function initPrototypeComments(opts = {}) {
 
     const div = el('div', 'pc-thread');
     threadComments.forEach(c => {
-      div.appendChild(buildCommentItem(c, c.id === commentId, onUpdated));
+      div.appendChild(buildCommentItem(c, c.id === commentId, {
+        onResolve: resolved => store.update(c.id, { resolved }),
+        onDelete:  ()       => store.remove(c.id),
+        onEdit:    body     => store.update(c.id, { body, edited: true }),
+        onUpdated,
+      }));
     });
     return div;
   }
 
-  function positionPopover(pop, cx, cy) {
+  function positionPopover(popEl, cx, cy) {
     const vw = window.innerWidth, vh = window.innerHeight;
-    const pw = pop.offsetWidth || 268, ph = pop.scrollHeight || 200;
+    const pw = popEl.offsetWidth || 268, ph = popEl.scrollHeight || 200;
     let left = cx + 10, top = cy - 10;
     if (left + pw > vw - 10) left = cx - pw - 10;
     if (left < 10) left = 10;
     if (top + ph > vh - 10) top = vh - ph - 10;
     if (top < 10) top = 10;
-    pop.style.left = `${left}px`;
-    pop.style.top  = `${top}px`;
+    popEl.style.left = `${left}px`;
+    popEl.style.top  = `${top}px`;
   }
 
   // ── Render Pins ───────────────────────────────────────────────────────────
@@ -462,34 +440,33 @@ export async function initPrototypeComments(opts = {}) {
     const screenId = getScreenId();
     const positional = comments.filter(
       c => c.type === 'positional' && c.screenId === screenId && !c.parentId
-        && c.x != null && c.y != null   // skip old bad-data docs with null coords
+        && c.x != null && c.y != null
     );
     console.log('[pc] renderPins screenId=', screenId, 'total comments=', comments.length, 'positional this screen=', positional.length);
 
     positional.forEach((c, i) => {
-      const pin = el('div', `pc-pin${c.resolved ? ' resolved' : ''}`);
-      pin.style.left = `${c.x}%`;
-      pin.style.top  = `${c.y}%`;
+      const pinEl = el('div', `pc-pin${c.resolved ? ' resolved' : ''}`);
+      pinEl.style.left = `${c.x}%`;
+      pinEl.style.top  = `${c.y}%`;
       const label = el('span', 'pc-pin-label');
       label.textContent = i + 1;
-      pin.appendChild(label);
+      pinEl.appendChild(label);
 
-      pin.addEventListener('click', e => {
+      pinEl.addEventListener('click', e => {
         e.stopPropagation();
-        if (openPopoverId === c.id) { closeAllPopovers(); return; }
-        openPopoverId = c.id;
+        if (pop.id === c.id) { closeAllPopovers(); return; }
         showThreadPopover(e.clientX, e.clientY, c.id);
       });
-      overlay.appendChild(pin);
+      overlay.appendChild(pinEl);
     });
   }
 
   function showThreadPopover(clientX, clientY, commentId) {
     closeAllPopovers();
-    openPopoverId = commentId;
+    pop.id = commentId;
 
-    const pop = el('div', 'pc-popover');
-    popoverEl = pop;
+    const popEl = el('div', 'pc-popover');
+    pop.el = popEl;
 
     const closeBtn = el('button', 'pc-popover-close');
     closeBtn.style.marginLeft = 'auto';
@@ -497,27 +474,25 @@ export async function initPrototypeComments(opts = {}) {
     closeBtn.onclick = closeAllPopovers;
     const hdr = el('div', 'pc-popover-header');
     hdr.appendChild(closeBtn);
-    pop.appendChild(hdr);
+    popEl.appendChild(hdr);
 
-    // onUpdated: re-render thread in-place after edit/delete/resolve
     function refreshThread() {
-      const existing = pop.querySelector('.pc-thread');
+      const existing = popEl.querySelector('.pc-thread');
       if (existing) existing.remove();
       const t = renderThread(commentId, refreshThread);
       if (t) {
-        // insert before the textarea (if any)
-        const ta = pop.querySelector('.pc-textarea');
-        ta ? pop.insertBefore(t, ta) : pop.appendChild(t);
+        const ta = popEl.querySelector('.pc-textarea');
+        ta ? popEl.insertBefore(t, ta) : popEl.appendChild(t);
       }
     }
 
     const thread = renderThread(commentId, refreshThread);
-    if (thread) pop.appendChild(thread);
+    if (thread) popEl.appendChild(thread);
 
     if (currentUser) {
       const ta = el('textarea', 'pc-textarea', { placeholder: '回覆…', rows: '2' });
       ta.style.minHeight = '52px';
-      pop.appendChild(ta);
+      popEl.appendChild(ta);
       const actions = el('div', 'pc-popover-actions');
       const submitBtn = el('button', 'pc-btn-submit', { disabled: '' });
       submitBtn.textContent = '回覆';
@@ -526,7 +501,7 @@ export async function initPrototypeComments(opts = {}) {
         const body = ta.value.trim();
         if (!body) return;
         const parent = comments.find(c => c.id === commentId);
-        await fb.addDoc(colPath(), {
+        await store.save({
           type: 'positional',
           screenId: getScreenId(),
           x: parent?.x ?? 0,
@@ -537,157 +512,15 @@ export async function initPrototypeComments(opts = {}) {
           authorName: currentUser.displayName || currentUser.email,
           authorPhoto: currentUser.photoURL || '',
           resolved: false,
-          createdAt: fb.serverTimestamp(),
         });
         closeAllPopovers();
       };
       actions.appendChild(submitBtn);
-      pop.appendChild(actions);
+      popEl.appendChild(actions);
     }
 
-    document.body.appendChild(pop);
-    positionPopover(pop, clientX, clientY);
-  }
-
-  // ── Note Comments ─────────────────────────────────────────────────────────
-  // Note comments are identified by noteKey(tag, text) — shared across modes.
-
-  function getNoteComments(tag, text) {
-    const key = noteKey(tag, text);
-    return comments.filter(c => c.type === 'note' && c.noteKey === key);
-  }
-
-  function renderNoteThread(threadEl, tag, text) {
-    threadEl.innerHTML = '';
-    const nc = getNoteComments(tag, text);
-    const refresh = () => renderNoteThread(threadEl, tag, text);
-
-    nc.forEach(c => {
-      threadEl.appendChild(buildCommentItem(c, true, refresh));
-    });
-
-    // Input
-    if (currentUser) {
-      const wrap = el('div', 'pc-note-input-wrap');
-      const ta = el('textarea', 'pc-note-textarea', { placeholder: '留言…' });
-      const btn = el('button', 'pc-note-submit', { disabled: '' });
-      btn.textContent = '送出';
-      ta.addEventListener('input', () => { btn.disabled = !ta.value.trim(); });
-      btn.onclick = async () => {
-        const body = ta.value.trim();
-        if (!body) return;
-        btn.disabled = true;
-        await fb.addDoc(colPath(), {
-          type:        'note',
-          screenId:    getScreenId(),
-          noteKey:     noteKey(tag, text),
-          noteTag:     tag,
-          noteText:    text,
-          body,
-          authorUid:   currentUser.uid,
-          authorName:  currentUser.displayName || currentUser.email,
-          authorPhoto: currentUser.photoURL || '',
-          resolved:    false,
-          createdAt:   fb.serverTimestamp(),
-        });
-        ta.value = '';
-        btn.disabled = true;
-      };
-      wrap.appendChild(ta);
-      wrap.appendChild(btn);
-      threadEl.appendChild(wrap);
-    } else {
-      const hint = el('p', 'pc-ci-time');
-      hint.textContent = '請先登入才能留言';
-      hint.style.padding = '4px 0';
-      threadEl.appendChild(hint);
-    }
-  }
-
-  // Inject badge + thread into a note row element
-  function injectNoteUI(rowEl, tag, text) {
-    if (rowEl.dataset.pcInjected) return;
-    rowEl.dataset.pcInjected = '1';
-
-    // Comment button (hover-visible)
-    const btn = el('button', 'pc-note-comment-btn');
-    btn.innerHTML = '💬 留言';
-    rowEl.appendChild(btn);
-
-    // Badge (shows count when > 0)
-    const badge = el('span', 'pc-note-badge');
-    badge.style.display = 'none';
-    rowEl.appendChild(badge);
-
-    // Thread area
-    const thread = el('div', 'pc-note-thread');
-    rowEl.after(thread);
-
-    function updateBadge() {
-      const nc = getNoteComments(tag, text);
-      if (nc.length > 0) {
-        badge.textContent = `💬 ${nc.length}`;
-        badge.style.display = 'inline-flex';
-      } else {
-        badge.style.display = 'none';
-      }
-    }
-
-    function toggleThread() {
-      const open = thread.classList.toggle('open');
-      if (open) renderNoteThread(thread, tag, text);
-    }
-
-    btn.onclick   = toggleThread;
-    badge.onclick = toggleThread;
-
-    // Keep badge updated when comments change (polling the comments array)
-    rowEl.dataset.pcTag  = tag;
-    rowEl.dataset.pcText = text;
-
-    updateBadge();
-    return { updateBadge };
-  }
-
-  // Scan and inject UI into all note rows
-  function injectAllNoteUI() {
-    // Engineering mode rows
-    document.querySelectorAll(engNoteSelector).forEach(row => {
-      const tag  = row.dataset.tag  || row.querySelector('[data-tag]')?.dataset.tag
-                || row.querySelector('.snc-tag, .tag')?.textContent?.trim() || '';
-      const text = row.dataset.text || row.querySelector('.note-text, p, span:not(.snc-tag):not(.tag)')?.textContent?.trim() || '';
-      if (tag || text) injectNoteUI(row, tag, text);
-    });
-
-    // Design mode info panel notes
-    document.querySelectorAll('.dev-note-v2').forEach(row => {
-      const tag  = row.dataset.tag  || row.querySelector('[data-tag]')?.dataset.tag
-                || row.querySelector('.snc-tag, .tag')?.textContent?.trim() || '';
-      const text = row.dataset.text || row.querySelector('p, .note-body')?.textContent?.trim() || '';
-      if (tag || text) injectNoteUI(row, tag, text);
-    });
-  }
-
-  // Refresh open note threads and badges after snapshot update
-  function refreshNoteUI() {
-    document.querySelectorAll('[data-pc-injected]').forEach(row => {
-      const tag  = row.dataset.pcTag  || '';
-      const text = row.dataset.pcText || '';
-      const nc   = getNoteComments(tag, text);
-      const badge = row.querySelector('.pc-note-badge');
-      if (badge) {
-        if (nc.length > 0) {
-          badge.textContent = `💬 ${nc.length}`;
-          badge.style.display = 'inline-flex';
-        } else {
-          badge.style.display = 'none';
-        }
-      }
-      const thread = row.nextElementSibling;
-      if (thread?.classList.contains('pc-note-thread', 'open')) {
-        renderNoteThread(thread, tag, text);
-      }
-    });
+    document.body.appendChild(popEl);
+    positionPopover(popEl, clientX, clientY);
   }
 
   // ── Firestore Subscription ─────────────────────────────────────────────────
@@ -698,49 +531,39 @@ export async function initPrototypeComments(opts = {}) {
     let q;
 
     if (mode === 'eng') {
-      // Eng mode: subscribe to all note-type comments for this project
-      q = fb.query(colPath(),
-        fb.where('type', '==', 'note')
-      );
+      q = store.query(fb.where('type', '==', 'note'));
     } else {
-      // Design mode: subscribe to current screen (positional + note)
       const screenId = getScreenId();
-      q = fb.query(colPath(),
-        fb.where('screenId', '==', screenId)
-      );
+      q = store.query(fb.where('screenId', '==', screenId));
     }
 
     console.log('[pc] subscribe() screenId=', getScreenId(), 'mode=', mode);
-    unsub = fb.onSnapshot(q, snapshot => {
-      console.log('[pc] snapshot fired:', snapshot.docs.length, 'docs');
-      // Merge: keep comments from other screens, replace for current screen/mode
-      // Sort client-side by createdAt to avoid needing composite Firestore indexes
-      const incoming = snapshot.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0));
+    unsub = store.subscribe(q, incoming => {
+      console.log('[pc] snapshot fired:', incoming.length, 'docs');
+      const sorted = [...incoming].sort(
+        (a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0)
+      );
 
       if (mode === 'eng') {
-        // Replace note comments entirely
         comments = [
           ...comments.filter(c => c.type !== 'note'),
-          ...incoming,
+          ...sorted,
         ];
       } else {
         const screenId = getScreenId();
         comments = [
           ...comments.filter(c => c.screenId !== screenId),
-          ...incoming,
+          ...sorted,
         ];
       }
 
       renderPins();
-      refreshNoteUI();
+      noteModule.refresh();
 
-      // Re-render open popover thread if still open
-      if (openPopoverId && popoverEl) {
-        const thread = popoverEl.querySelector('.pc-thread');
+      if (pop.id && pop.el) {
+        const thread = pop.el.querySelector('.pc-thread');
         if (thread) {
-          const newThread = renderThread(openPopoverId);
+          const newThread = renderThread(pop.id);
           if (newThread) thread.replaceWith(newThread);
         }
       }
@@ -751,12 +574,12 @@ export async function initPrototypeComments(opts = {}) {
 
   // ── Global Panel Subscription ─────────────────────────────────────────────
   function subscribeAll() {
-    if (allUnsub) { allUnsub(); allUnsub = null; }
-    allUnsub = fb.onSnapshot(colPath(), snapshot => {
-      allComments = snapshot.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
-      if (panelOpen) renderPanel();
+    if (panel.unsub) { panel.unsub(); panel.unsub = null; }
+    panel.unsub = store.subscribe(store.query(), incoming => {
+      allComments = [...incoming].sort(
+        (a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0)
+      );
+      if (panel.open) renderPanel();
       updatePanelBadge();
     }, err => console.warn('[pc] subscribeAll error:', err));
   }
@@ -774,44 +597,41 @@ export async function initPrototypeComments(opts = {}) {
     const p = el('div', 'pc-panel');
     p.id = 'pc-panel';
     document.body.appendChild(p);
-    panelEl = p;
+    panel.el = p;
   }
 
   function openPanel() {
     buildPanel();
-    panelOpen = true;
-    panelEl.classList.add('open');
+    panel.open = true;
+    panel.el.classList.add('open');
     renderPanel();
   }
 
   function closePanel() {
-    panelOpen = false;
-    if (panelEl) panelEl.classList.remove('open');
+    panel.open = false;
+    if (panel.el) panel.el.classList.remove('open');
   }
 
   function renderPanel() {
-    if (!panelEl) return;
-    panelEl.innerHTML = '';
+    if (!panel.el) return;
+    panel.el.innerHTML = '';
 
-    // Header
     const hdr = el('div', 'pc-panel-header');
     const title = el('span', 'pc-panel-title'); title.textContent = '💬 全部留言';
     const closeBtn = el('button', 'pc-popover-close');
     closeBtn.textContent = '✕'; closeBtn.onclick = closePanel;
     hdr.appendChild(title); hdr.appendChild(closeBtn);
-    panelEl.appendChild(hdr);
+    panel.el.appendChild(hdr);
 
-    // Filter tabs
     const tabs = el('div', 'pc-panel-tabs');
     [['all', '全部'], ['open', '未解決'], ['resolved', '已解決']].forEach(([f, label]) => {
-      const tab = el('button', `pc-panel-tab${panelFilter === f ? ' active' : ''}`);
+      const tab = el('button', `pc-panel-tab${panel.filter === f ? ' active' : ''}`);
       tab.textContent = label;
-      tab.onclick = () => { panelFilter = f; renderPanel(); };
+      tab.onclick = () => { panel.filter = f; renderPanel(); };
       tabs.appendChild(tab);
     });
-    panelEl.appendChild(tabs);
+    panel.el.appendChild(tabs);
 
-    // Build pin-number index (per screen, chronological order)
     const pinNums = {};
     [...allComments]
       .filter(c => !c.parentId && c.type === 'positional')
@@ -821,11 +641,10 @@ export async function initPrototypeComments(opts = {}) {
         pinNums[c.screenId][c.id] = Object.keys(pinNums[c.screenId]).length + 1;
       });
 
-    // Root comments filtered
     const roots = allComments.filter(c => !c.parentId && (
-      panelFilter === 'all'      ? true :
-      panelFilter === 'open'     ? !c.resolved :
-      /* resolved */               c.resolved
+      panel.filter === 'all'      ? true :
+      panel.filter === 'open'     ? !c.resolved :
+      /* resolved */                 c.resolved
     ));
 
     const list = el('div', 'pc-panel-list');
@@ -833,15 +652,14 @@ export async function initPrototypeComments(opts = {}) {
     if (!roots.length) {
       const empty = el('div', 'pc-panel-empty');
       empty.textContent =
-        panelFilter === 'open' ? '沒有未解決的留言 🎉' :
-        panelFilter === 'resolved' ? '還沒有已解決的留言' : '還沒有留言';
+        panel.filter === 'open'     ? '沒有未解決的留言 🎉' :
+        panel.filter === 'resolved' ? '還沒有已解決的留言' : '還沒有留言';
       list.appendChild(empty);
     } else {
       roots.forEach(c => {
         const item = el('div', `pc-panel-item${c.resolved ? ' resolved' : ''}`);
         item.onclick = () => navigateToComment(c);
 
-        // Top row: screen chip + pin num + resolved badge + time
         const topRow = el('div', 'pc-panel-top-row');
         if (c.screenId) {
           const chip = el('span', 'pc-panel-chip'); chip.textContent = c.screenId;
@@ -862,7 +680,6 @@ export async function initPrototypeComments(opts = {}) {
         topRow.appendChild(at);
         item.appendChild(topRow);
 
-        // Author row
         const authorRow = el('div', 'pc-panel-meta');
         if (c.authorPhoto) {
           const av = el('img', 'pc-ci-avatar', { src: c.authorPhoto, alt: '' });
@@ -872,12 +689,10 @@ export async function initPrototypeComments(opts = {}) {
         authorRow.appendChild(an);
         item.appendChild(authorRow);
 
-        // Excerpt
         const txt = el('p', 'pc-panel-excerpt');
         txt.textContent = (c.body || '').slice(0, 60) + ((c.body || '').length > 60 ? '…' : '');
         item.appendChild(txt);
 
-        // Reply count
         const replies = allComments.filter(r => r.parentId === c.id).length;
         if (replies > 0) {
           const rc = el('span', 'pc-panel-reply-count');
@@ -889,14 +704,14 @@ export async function initPrototypeComments(opts = {}) {
       });
     }
 
-    panelEl.appendChild(list);
+    panel.el.appendChild(list);
   }
 
   async function navigateToComment(comment) {
     closePanel();
     if (navigateTo && comment.screenId && comment.screenId !== getScreenId()) {
       navigateTo(comment.screenId);
-      await new Promise(r => setTimeout(r, 150)); // wait for screen render
+      await new Promise(r => setTimeout(r, 150));
     }
     const overlay = document.getElementById('pc-overlay');
     if (overlay && comment.x != null) {
@@ -907,27 +722,34 @@ export async function initPrototypeComments(opts = {}) {
     }
   }
 
+  // ── Note Module (lazy init after store is ready) ───────────────────────────
+  const noteModule = createNoteModule({
+    store,
+    getCurrentUser: () => currentUser,
+    getScreenId,
+    engNoteSelector,
+    getComments:    () => comments,
+    noteKey,
+    el,
+    timeAgo,
+    buildCommentItem,
+  });
+
   // ── Screen-change listener ─────────────────────────────────────────────────
-  // renderScreen() uses innerHTML= which destroys the overlay and pins.
-  // Re-mount overlay and re-render pins after every screen change.
   document.addEventListener('pc:screen-change', ({ detail }) => {
     closeAllPopovers();
-    // Small delay so renderScreen()'s innerHTML= runs first
     setTimeout(() => {
       mountOverlay();
       renderPins();
-      injectAllNoteUI();
+      noteModule.injectAll();
     }, 30);
-    // Re-subscribe with new screenId (design mode)
     if (getMode() !== 'eng') subscribe();
   });
 
-  // Also re-inject after any DOM mutation in info panel area (design mode renders async)
   const observer = new MutationObserver(() => {
-    // Re-mount overlay if it was wiped by innerHTML=
     if (!document.getElementById('pc-overlay')) mountOverlay();
-    injectAllNoteUI();
-    refreshNoteUI();
+    noteModule.injectAll();
+    noteModule.refresh();
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
@@ -938,11 +760,11 @@ export async function initPrototypeComments(opts = {}) {
     renderAuthBar(user);
     if (user) {
       subscribe();
-      subscribeAll();   // panel subscription — all comments in project
+      subscribeAll();
       buildPanel();
     } else {
-      if (unsub)    { unsub();    unsub    = null; }
-      if (allUnsub) { allUnsub(); allUnsub = null; }
+      if (unsub)       { unsub();         unsub       = null; }
+      if (panel.unsub) { panel.unsub();   panel.unsub = null; }
       comments    = [];
       allComments = [];
       closePanel();
@@ -954,17 +776,14 @@ export async function initPrototypeComments(opts = {}) {
   mountAuthBar();
   mountOverlay();
 
-  // Initial subscription (even unauthenticated, allow read)
   subscribe();
 
-  // Initial note UI injection (design/eng notes already in DOM)
-  setTimeout(injectAllNoteUI, 200);
+  setTimeout(() => noteModule.injectAll(), 200);
 
-  // Close popover on outside click
   document.addEventListener('click', e => {
-    if (popoverEl && !popoverEl.contains(e.target)) {
+    if (pop.el && !pop.el.contains(e.target)) {
       const isPin = e.target.closest('.pc-pin');
-      if (!isPin) { pendingPin = null; closeAllPopovers(); }
+      if (!isPin) { pin.current = null; closeAllPopovers(); }
     }
   });
 
