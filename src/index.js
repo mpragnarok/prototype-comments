@@ -439,9 +439,10 @@ export async function initPrototypeComments(opts = {}) {
 
     overlay.querySelectorAll('.pc-pin').forEach(p => p.remove());
     const screenId = getScreenId();
-    const all = comments.filter(c => c.type === 'positional' && !c.parentId);
-    const positional = screen;
-    console.log('[pc] renderPins screenId=', screenId, 'total positional=', all.length, 'this screen=', positional.length);
+    const positional = comments.filter(
+      c => c.type === 'positional' && c.screenId === screenId && !c.parentId
+    );
+    console.log('[pc] renderPins screenId=', screenId, 'total comments=', comments.length, 'positional this screen=', positional.length);
 
     positional.forEach((c, i) => {
       const pin = el('div', `pc-pin${c.resolved ? ' resolved' : ''}`);
