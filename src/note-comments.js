@@ -78,7 +78,8 @@ export function createNoteModule({
     function updateBadge() {
       const nc = getNoteComments(tag, text);
       if (nc.length > 0) {
-        badge.textContent = `💬 ${nc.length}`;
+        const t = `💬 ${nc.length}`;
+        if (badge.textContent !== t) badge.textContent = t;
         badge.style.display = 'inline-flex';
       } else {
         badge.style.display = 'none';
@@ -124,7 +125,8 @@ export function createNoteModule({
       const badge = row.querySelector('.pc-note-badge');
       if (badge) {
         if (nc.length > 0) {
-          badge.textContent = `💬 ${nc.length}`;
+          const t = `💬 ${nc.length}`;
+          if (badge.textContent !== t) badge.textContent = t;
           badge.style.display = 'inline-flex';
         } else {
           badge.style.display = 'none';
