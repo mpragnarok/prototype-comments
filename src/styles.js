@@ -88,7 +88,6 @@ export const STYLES = `
 /* Comment Pin */
 .pc-pin {
   position: absolute;
-  transform: translate(-50%, -50%);
   width: 24px;
   height: 24px;
   border-radius: 50%;
@@ -102,11 +101,13 @@ export const STYLES = `
   cursor: pointer;
   z-index: 210;
   box-shadow: 0 2px 8px rgba(15,160,160,.5), 0 0 0 2px #fff;
+  transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1));
+  transform-origin: center;
   transition: transform .15s, opacity .15s;
   pointer-events: all;
   font-family: monospace;
 }
-.pc-pin:hover { transform: translate(-50%, -50%) scale(1.2); }
+.pc-pin:hover { transform: translate(-50%, -50%) scale(calc(var(--pc-pin-scale, 1) * 1.2)); }
 .pc-pin.resolved {
   background: #d1d5db;
   box-shadow: 0 0 0 2px #fff;

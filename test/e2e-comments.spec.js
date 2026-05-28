@@ -316,6 +316,53 @@ await test('Eng mode: opening note thread does not freeze event loop (MO regress
     `Event loop starved: 100ms setTimeout took ${elapsed}ms — MutationObserver infinite loop?`);
 });
 
+// ── Test 15: injectAll noteKey deduplication — source check ──────────────────
+await test('note-comments.js: injectAll() deduplicates by noteKey (no duplicate threads)', async () => {
+  const src = readFileSync(join(__dirname, '../src/note-comments.js'), 'utf8');
+  assert.ok(src.includes('injectedKeys'),
+    'Missing injectedKeys Set — duplicate thread prevention not implemented');
+  assert.ok(src.includes('injectedKeys.has('),
+    'injectedKeys.has() check not found — deduplication logic missing');
+  assert.ok(src.includes('injectedKeys.add('),
+    'injectedKeys.add() not found — noteKey not being tracked after injection');
+});
+
+// ── Test 16: navigateToComment handles note type — source check ───────────────
+await test('index.js: navigateToComment() scrolls to note thread (not only overlay)', async () => {
+  const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
+  assert.ok(src.includes("comment.type === 'note'"),
+    "navigateToComment missing note-type branch — note comments won't scroll to thread");
+  assert.ok(src.includes('scrollIntoView'),
+    'scrollIntoView not called — note thread row not scrolled into view');
+  assert.ok(src.includes('comment.noteKey'),
+    'comment.noteKey not used — cannot find matching thread row');
+});
+
+// ── Test 17: pc:screen-change resets commentMode — source check ───────────────
+await test('index.js: pc:screen-change resets commentMode to false', async () => {
+  const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
+  // Check setCommentMode(false) appears inside pc:screen-change handler block
+  const screenChangeIdx = src.indexOf("'pc:screen-change'");
+  assert.ok(screenChangeIdx !== -1, "pc:screen-change listener not found");
+  const snippet = src.slice(screenChangeIdx, screenChangeIdx + 200);
+  assert.ok(snippet.includes('setCommentMode(false)'),
+    'setCommentMode(false) not called in pc:screen-change handler — commentMode persists across mode switches');
+});
+
+// ── Test 18: Pin label uses threadCount + CSS scale — source check ────────────
+await test('index.js + styles.js: pin label shows thread count, scales by Math.log2', async () => {
+  const indexSrc  = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
+  const stylesSrc = readFileSync(join(__dirname, '../src/styles.js'), 'utf8');
+  assert.ok(indexSrc.includes('threadCount'),
+    'threadCount variable not found — pin still shows sequential number');
+  assert.ok(indexSrc.includes('Math.log2(threadCount)'),
+    'Math.log2(threadCount) not found — pin does not scale by comment count');
+  assert.ok(indexSrc.includes('--pc-pin-scale'),
+    '--pc-pin-scale custom property not set — CSS scale not applied');
+  assert.ok(stylesSrc.includes('var(--pc-pin-scale'),
+    'styles.js missing var(--pc-pin-scale) — CSS custom property not consumed');
+});
+
 // ── Summary ───────────────────────────────────────────────────────────────────
 await browser.close();
 

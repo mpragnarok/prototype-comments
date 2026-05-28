@@ -102,18 +102,26 @@ export function createNoteModule({
   }
 
   function injectAll() {
+    const injectedKeys = new Set();
+
     document.querySelectorAll(engNoteSelector).forEach(row => {
       const tag  = row.dataset.tag  || row.querySelector('[data-tag]')?.dataset.tag
                 || row.querySelector('.snc-tag, .tag')?.textContent?.trim() || '';
       const text = row.dataset.text || row.querySelector('.note-text, p, span:not(.snc-tag):not(.tag)')?.textContent?.trim() || '';
-      if (tag || text) injectNoteUI(row, tag, text);
+      if (tag || text) {
+        const k = noteKey(tag, text);
+        if (!injectedKeys.has(k)) { injectNoteUI(row, tag, text); injectedKeys.add(k); }
+      }
     });
 
     document.querySelectorAll('.dev-note-v2').forEach(row => {
       const tag  = row.dataset.tag  || row.querySelector('[data-tag]')?.dataset.tag
                 || row.querySelector('.snc-tag, .tag')?.textContent?.trim() || '';
       const text = row.dataset.text || row.querySelector('p, .note-body')?.textContent?.trim() || '';
-      if (tag || text) injectNoteUI(row, tag, text);
+      if (tag || text) {
+        const k = noteKey(tag, text);
+        if (!injectedKeys.has(k)) { injectNoteUI(row, tag, text); injectedKeys.add(k); }
+      }
     });
   }
 

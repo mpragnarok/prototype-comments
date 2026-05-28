@@ -172,16 +172,11 @@ export async function initPrototypeComments(opts = {}) {
   }
 
   function mountAuthBar() {
-    const header = document.querySelector('header, .header, nav, .nav, #header');
-    if (!header) {
-      const wrap = el('div', 'pc-auth-bar');
-      wrap.id = 'pc-auth-bar';
-      wrap.style.cssText = 'position:fixed;top:12px;right:16px;z-index:9000;background:#fff;padding:6px 10px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.15);';
-      document.body.appendChild(wrap);
-    } else {
-      const { bar } = buildAuthBar();
-      header.appendChild(bar);
-    }
+    const wrap = el('div');
+    wrap.style.cssText = 'position:fixed;top:12px;right:16px;z-index:9000;';
+    const { bar } = buildAuthBar();
+    wrap.appendChild(bar);
+    document.body.appendChild(wrap);
   }
 
   // ── Overlay & Positional Pins ──────────────────────────────────────────────
@@ -444,12 +439,16 @@ export async function initPrototypeComments(opts = {}) {
     );
     console.log('[pc] renderPins screenId=', screenId, 'total comments=', comments.length, 'positional this screen=', positional.length);
 
-    positional.forEach((c, i) => {
+    positional.forEach((c) => {
+      const threadCount = 1 + comments.filter(r => r.parentId === c.id).length;
+      const scale = Math.min(1 + Math.log2(threadCount) * 0.3, 2.2).toFixed(2);
+
       const pinEl = el('div', `pc-pin${c.resolved ? ' resolved' : ''}`);
       pinEl.style.left = `${c.x}%`;
       pinEl.style.top  = `${c.y}%`;
+      pinEl.style.setProperty('--pc-pin-scale', scale);
       const label = el('span', 'pc-pin-label');
-      label.textContent = i + 1;
+      label.textContent = threadCount;
       pinEl.appendChild(label);
 
       pinEl.addEventListener('click', e => {
@@ -713,6 +712,21 @@ export async function initPrototypeComments(opts = {}) {
       navigateTo(comment.screenId);
       await new Promise(r => setTimeout(r, 150));
     }
+
+    if (comment.type === 'note' && comment.noteKey) {
+      for (const row of document.querySelectorAll('[data-pc-injected]')) {
+        if (noteKey(row.dataset.pcTag || '', row.dataset.pcText || '') === comment.noteKey) {
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          const thread = row.nextElementSibling;
+          if (thread?.classList.contains('pc-note-thread') && !thread.classList.contains('open')) {
+            row.querySelector('.pc-note-comment-btn')?.click();
+          }
+          return;
+        }
+      }
+      return;
+    }
+
     const overlay = document.getElementById('pc-overlay');
     if (overlay && comment.x != null) {
       const rect = overlay.getBoundingClientRect();
@@ -737,6 +751,7 @@ export async function initPrototypeComments(opts = {}) {
 
   // ── Screen-change listener ─────────────────────────────────────────────────
   document.addEventListener('pc:screen-change', ({ detail }) => {
+    setCommentMode(false);
     closeAllPopovers();
     setTimeout(() => {
       mountOverlay();
