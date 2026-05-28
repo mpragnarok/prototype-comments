@@ -291,7 +291,13 @@ export async function initPrototypeComments(opts = {}) {
         }
       }
 
-      await fb.addDoc(colPath(), data);
+      console.log('[pc] addDoc x=', data.x, 'y=', data.y, 'screenId=', data.screenId, 'pendingPin=', pendingPin);
+      try {
+        await fb.addDoc(colPath(), data);
+        console.log('[pc] addDoc success');
+      } catch(e) {
+        console.error('[pc] addDoc FAILED:', e.message, e.code);
+      }
       pendingPin = null;
       closeAllPopovers();
     };
@@ -428,18 +434,14 @@ export async function initPrototypeComments(opts = {}) {
 
   // ── Render Pins ───────────────────────────────────────────────────────────
   function renderPins() {
-    // Pins are appended INTO the overlay so their left/top percentages
-    // use the exact same coordinate system as the click calculation.
     const overlay = document.getElementById('pc-overlay');
-    if (!overlay) return;
+    if (!overlay) { console.warn('[pc] renderPins: overlay not found'); return; }
 
-    // Remove existing pins from overlay
     overlay.querySelectorAll('.pc-pin').forEach(p => p.remove());
-
     const screenId = getScreenId();
-    const positional = comments.filter(
-      c => c.type === 'positional' && c.screenId === screenId && !c.parentId
-    );
+    const all = comments.filter(c => c.type === 'positional' && !c.parentId);
+    const positional = screen;
+    console.log('[pc] renderPins screenId=', screenId, 'total positional=', all.length, 'this screen=', positional.length);
 
     positional.forEach((c, i) => {
       const pin = el('div', `pc-pin${c.resolved ? ' resolved' : ''}`);
@@ -685,7 +687,9 @@ export async function initPrototypeComments(opts = {}) {
       );
     }
 
+    console.log('[pc] subscribe() screenId=', getScreenId(), 'mode=', mode);
     unsub = fb.onSnapshot(q, snapshot => {
+      console.log('[pc] snapshot fired:', snapshot.docs.length, 'docs');
       // Merge: keep comments from other screens, replace for current screen/mode
       // Sort client-side by createdAt to avoid needing composite Firestore indexes
       const incoming = snapshot.docs
@@ -749,6 +753,7 @@ export async function initPrototypeComments(opts = {}) {
   // ── Auth State ─────────────────────────────────────────────────────────────
   fb.onAuthStateChanged(auth, user => {
     currentUser = user;
+    console.log('[pc] auth state:', user ? `logged in as ${user.email}` : 'not logged in');
     renderAuthBar(user);
     if (user) {
       subscribe();
