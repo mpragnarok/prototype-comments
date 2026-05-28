@@ -68,11 +68,12 @@ function el(tag, cls, attrs = {}) {
 export async function initPrototypeComments(opts = {}) {
   const {
     firebaseConfig,
-    projectId   = 'default',
-    getScreenId = () => 'unknown',
-    getMode     = () => 'design',
-    designTarget = '#phone',
+    projectId       = 'default',
+    getScreenId     = () => 'unknown',
+    getMode         = () => 'design',
+    designTarget    = '#phone',
     engNoteSelector = '.eng-note-row',
+    navigateTo      = null,   // (screenId: string) => void  — consumer provides
   } = opts;
 
   if (!firebaseConfig) {
@@ -97,9 +98,16 @@ export async function initPrototypeComments(opts = {}) {
   let currentUser     = null;
   let commentMode     = false;   // is comment overlay active?
   let unsub           = null;    // Firestore onSnapshot unsubscribe
-  let comments        = [];      // current snapshot
+  let comments        = [];      // current snapshot (screen-filtered)
   let pendingPin      = null;    // { x%, y% } waiting for input
   let openPopoverId   = null;    // which pin's popover is open
+
+  // Panel state
+  let allComments  = [];        // all comments in project (panel subscription)
+  let panelOpen    = false;
+  let allUnsub     = null;
+  let panelFilter  = 'all';     // 'all' | 'open' | 'resolved'
+  let panelEl      = null;
 
   const colPath = () =>
     fb.collection(db, 'prototype-comments', projectId, 'comments');
@@ -148,6 +156,14 @@ export async function initPrototypeComments(opts = {}) {
     toggle.innerHTML = '💬 留言模式';
     toggle.onclick = () => setCommentMode(!commentMode);
     bar.appendChild(toggle);
+
+    // Panel button
+    const panelBtn = el('button', 'pc-sign-in-btn');
+    panelBtn.id = 'pc-panel-btn';
+    panelBtn.style.cssText = 'font-size:11px;padding:4px 10px;';
+    panelBtn.textContent = '📋 全部留言';
+    panelBtn.onclick = () => panelOpen ? closePanel() : openPanel();
+    bar.appendChild(panelBtn);
 
     // Sign out (small link)
     const so = el('button', 'pc-sign-in-btn');
@@ -349,7 +365,7 @@ export async function initPrototypeComments(opts = {}) {
       acts.appendChild(resolveBtn);
     }
 
-    // Edit + Delete (own comments only)
+    // Edit (own comments only) + Delete (own replies only — root can only be Resolved)
     if (currentUser && c.authorUid === currentUser.uid) {
       // Edit
       const editBtn = el('button', 'pc-ci-action');
@@ -392,17 +408,19 @@ export async function initPrototypeComments(opts = {}) {
       };
       acts.appendChild(editBtn);
 
-      // Delete
-      const delBtn = el('button', 'pc-ci-action');
-      delBtn.textContent = '刪除';
-      delBtn.onclick = async () => {
-        if (!confirm('刪除這則留言？')) return;
-        await fb.deleteDoc(
-          fb.doc(db, 'prototype-comments', projectId, 'comments', c.id)
-        );
-        if (onUpdated) onUpdated();
-      };
-      acts.appendChild(delBtn);
+      // Delete — replies only; root comments can only be Resolved, never deleted
+      if (!isRootComment) {
+        const delBtn = el('button', 'pc-ci-action');
+        delBtn.textContent = '刪除';
+        delBtn.onclick = async () => {
+          if (!confirm('刪除這則留言？')) return;
+          await fb.deleteDoc(
+            fb.doc(db, 'prototype-comments', projectId, 'comments', c.id)
+          );
+          if (onUpdated) onUpdated();
+        };
+        acts.appendChild(delBtn);
+      }
     }
 
     bodyEl.appendChild(acts);
@@ -730,6 +748,164 @@ export async function initPrototypeComments(opts = {}) {
     });
   }
 
+  // ── Global Panel Subscription ─────────────────────────────────────────────
+  function subscribeAll() {
+    if (allUnsub) { allUnsub(); allUnsub = null; }
+    allUnsub = fb.onSnapshot(colPath(), snapshot => {
+      allComments = snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+      if (panelOpen) renderPanel();
+      updatePanelBadge();
+    }, err => console.warn('[pc] subscribeAll error:', err));
+  }
+
+  function updatePanelBadge() {
+    const btn = document.getElementById('pc-panel-btn');
+    if (!btn) return;
+    const n = allComments.filter(c => !c.parentId && !c.resolved).length;
+    btn.textContent = n > 0 ? `📋 全部留言 (${n})` : '📋 全部留言';
+  }
+
+  // ── Global Comment Panel ───────────────────────────────────────────────────
+  function buildPanel() {
+    if (document.getElementById('pc-panel')) return;
+    const p = el('div', 'pc-panel');
+    p.id = 'pc-panel';
+    document.body.appendChild(p);
+    panelEl = p;
+  }
+
+  function openPanel() {
+    buildPanel();
+    panelOpen = true;
+    panelEl.classList.add('open');
+    renderPanel();
+  }
+
+  function closePanel() {
+    panelOpen = false;
+    if (panelEl) panelEl.classList.remove('open');
+  }
+
+  function renderPanel() {
+    if (!panelEl) return;
+    panelEl.innerHTML = '';
+
+    // Header
+    const hdr = el('div', 'pc-panel-header');
+    const title = el('span', 'pc-panel-title'); title.textContent = '💬 全部留言';
+    const closeBtn = el('button', 'pc-popover-close');
+    closeBtn.textContent = '✕'; closeBtn.onclick = closePanel;
+    hdr.appendChild(title); hdr.appendChild(closeBtn);
+    panelEl.appendChild(hdr);
+
+    // Filter tabs
+    const tabs = el('div', 'pc-panel-tabs');
+    [['all', '全部'], ['open', '未解決'], ['resolved', '已解決']].forEach(([f, label]) => {
+      const tab = el('button', `pc-panel-tab${panelFilter === f ? ' active' : ''}`);
+      tab.textContent = label;
+      tab.onclick = () => { panelFilter = f; renderPanel(); };
+      tabs.appendChild(tab);
+    });
+    panelEl.appendChild(tabs);
+
+    // Build pin-number index (per screen, chronological order)
+    const pinNums = {};
+    [...allComments]
+      .filter(c => !c.parentId && c.type === 'positional')
+      .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0))
+      .forEach(c => {
+        if (!pinNums[c.screenId]) pinNums[c.screenId] = {};
+        pinNums[c.screenId][c.id] = Object.keys(pinNums[c.screenId]).length + 1;
+      });
+
+    // Root comments filtered
+    const roots = allComments.filter(c => !c.parentId && (
+      panelFilter === 'all'      ? true :
+      panelFilter === 'open'     ? !c.resolved :
+      /* resolved */               c.resolved
+    ));
+
+    const list = el('div', 'pc-panel-list');
+
+    if (!roots.length) {
+      const empty = el('div', 'pc-panel-empty');
+      empty.textContent =
+        panelFilter === 'open' ? '沒有未解決的留言 🎉' :
+        panelFilter === 'resolved' ? '還沒有已解決的留言' : '還沒有留言';
+      list.appendChild(empty);
+    } else {
+      roots.forEach(c => {
+        const item = el('div', `pc-panel-item${c.resolved ? ' resolved' : ''}`);
+        item.onclick = () => navigateToComment(c);
+
+        // Top row: screen chip + pin num + resolved badge + time
+        const topRow = el('div', 'pc-panel-top-row');
+        if (c.screenId) {
+          const chip = el('span', 'pc-panel-chip'); chip.textContent = c.screenId;
+          topRow.appendChild(chip);
+        }
+        if (c.type === 'positional' && pinNums[c.screenId]?.[c.id]) {
+          const num = el('span', 'pc-panel-num');
+          num.textContent = `#${pinNums[c.screenId][c.id]}`;
+          topRow.appendChild(num);
+        }
+        if (c.resolved) {
+          const rb = el('span', 'pc-panel-resolved-badge'); rb.textContent = '✓ 已解決';
+          topRow.appendChild(rb);
+        }
+        const at = el('span', 'pc-ci-time'); at.textContent = timeAgo(c.createdAt);
+        topRow.style.flex = '1';
+        at.style.marginLeft = 'auto';
+        topRow.appendChild(at);
+        item.appendChild(topRow);
+
+        // Author row
+        const authorRow = el('div', 'pc-panel-meta');
+        if (c.authorPhoto) {
+          const av = el('img', 'pc-ci-avatar', { src: c.authorPhoto, alt: '' });
+          authorRow.appendChild(av);
+        }
+        const an = el('span', 'pc-ci-author'); an.textContent = c.authorName || '匿名';
+        authorRow.appendChild(an);
+        item.appendChild(authorRow);
+
+        // Excerpt
+        const txt = el('p', 'pc-panel-excerpt');
+        txt.textContent = (c.body || '').slice(0, 60) + ((c.body || '').length > 60 ? '…' : '');
+        item.appendChild(txt);
+
+        // Reply count
+        const replies = allComments.filter(r => r.parentId === c.id).length;
+        if (replies > 0) {
+          const rc = el('span', 'pc-panel-reply-count');
+          rc.textContent = `↩ ${replies} 則回覆`;
+          item.appendChild(rc);
+        }
+
+        list.appendChild(item);
+      });
+    }
+
+    panelEl.appendChild(list);
+  }
+
+  async function navigateToComment(comment) {
+    closePanel();
+    if (navigateTo && comment.screenId && comment.screenId !== getScreenId()) {
+      navigateTo(comment.screenId);
+      await new Promise(r => setTimeout(r, 150)); // wait for screen render
+    }
+    const overlay = document.getElementById('pc-overlay');
+    if (overlay && comment.x != null) {
+      const rect = overlay.getBoundingClientRect();
+      const cx = rect.left + (comment.x / 100) * rect.width;
+      const cy = rect.top  + (comment.y / 100) * rect.height;
+      showThreadPopover(cx, cy, comment.id);
+    }
+  }
+
   // ── Screen-change listener ─────────────────────────────────────────────────
   // renderScreen() uses innerHTML= which destroys the overlay and pins.
   // Re-mount overlay and re-render pins after every screen change.
@@ -761,9 +937,14 @@ export async function initPrototypeComments(opts = {}) {
     renderAuthBar(user);
     if (user) {
       subscribe();
+      subscribeAll();   // panel subscription — all comments in project
+      buildPanel();
     } else {
-      if (unsub) { unsub(); unsub = null; }
-      comments = [];
+      if (unsub)    { unsub();    unsub    = null; }
+      if (allUnsub) { allUnsub(); allUnsub = null; }
+      comments    = [];
+      allComments = [];
+      closePanel();
       renderPins();
     }
   });
