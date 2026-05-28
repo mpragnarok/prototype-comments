@@ -117,7 +117,7 @@ export function createNoteModule({
     });
   }
 
-  function refresh() {
+  function refresh({ updateThreads = false } = {}) {
     document.querySelectorAll('[data-pc-injected]').forEach(row => {
       const tag  = row.dataset.pcTag  || '';
       const text = row.dataset.pcText || '';
@@ -132,9 +132,11 @@ export function createNoteModule({
           badge.style.display = 'none';
         }
       }
-      const thread = row.nextElementSibling;
-      if (thread?.classList.contains('open')) {
-        renderNoteThread(thread, tag, text);
+      if (updateThreads) {
+        const thread = row.nextElementSibling;
+        if (thread?.classList.contains('open')) {
+          renderNoteThread(thread, tag, text);
+        }
       }
     });
   }

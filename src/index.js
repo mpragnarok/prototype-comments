@@ -558,7 +558,7 @@ export async function initPrototypeComments(opts = {}) {
       }
 
       renderPins();
-      noteModule.refresh();
+      noteModule.refresh({ updateThreads: true });
 
       if (pop.id && pop.el) {
         const thread = pop.el.querySelector('.pc-thread');
