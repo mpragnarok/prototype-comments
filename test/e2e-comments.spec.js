@@ -261,6 +261,61 @@ await test('styles.js source: global comment panel CSS is defined (.pc-panel, .p
   assert.ok(stylesSource.includes('.pc-panel-header'),'.pc-panel-header CSS not found in styles.js');
 });
 
+// ── Test 12: MutationObserver safeguards — source check ──────────────────────
+await test('note-comments.js: MutationObserver safeguards are in place', async () => {
+  const src = readFileSync(join(__dirname, '../src/note-comments.js'), 'utf8');
+  assert.ok(src.includes('badge.textContent !== t'),
+    'Missing badge.textContent equality check (prevents MO loop on badge update)');
+  assert.ok(src.includes('updateThreads = false'),
+    'refresh() missing updateThreads param (prevents renderNoteThread MO loop)');
+  assert.ok(src.includes('if (updateThreads)'),
+    'renderNoteThread not gated by updateThreads flag');
+});
+
+// ── Test 13: snapshot callback uses updateThreads: true — source check ────────
+await test('index.js: Firestore snapshot calls refresh({ updateThreads: true })', async () => {
+  const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
+  assert.ok(src.includes("noteModule.refresh({ updateThreads: true })"),
+    'snapshot callback should pass { updateThreads: true } — otherwise open threads never update');
+});
+
+// ── Test 14: eng mode — opening note thread does not freeze event loop ────────
+await test('Eng mode: opening note thread does not freeze event loop (MO regression)', async () => {
+  // Switch to eng mode and wait for eng panel + injected buttons to appear
+  await page.evaluate(() => { if (typeof switchMode === 'function') switchMode('eng'); });
+
+  // Wait until eng-panel is visible AND has injected 💬 buttons
+  await page.waitForFunction(() => {
+    const panel = document.getElementById('eng-panel');
+    const panelVisible = panel && getComputedStyle(panel).display !== 'none';
+    const hasBtn = document.querySelectorAll('#eng-body .pc-note-comment-btn').length > 0;
+    return panelVisible && hasBtn;
+  }, { timeout: 6000 });
+
+  // Click via JS to bypass Playwright visibility heuristics
+  await page.evaluate(() => {
+    const btn = document.querySelector('#eng-body .pc-note-comment-btn');
+    if (btn) btn.click();
+  });
+
+  // Verify thread opened
+  const threadOpen = await page.evaluate(() =>
+    document.querySelector('#eng-body .pc-note-thread.open') !== null
+  );
+  assert.ok(threadOpen, 'Note thread should be open after clicking 💬 button');
+
+  // Critical regression check: if MutationObserver loop exists, the event loop
+  // is starved and this 100ms setTimeout will take seconds to resolve.
+  const start = Date.now();
+  const resolved = await page.evaluate(() =>
+    new Promise(resolve => setTimeout(() => resolve(true), 100))
+  );
+  const elapsed = Date.now() - start;
+  assert.ok(resolved, 'setTimeout did not resolve — event loop may be frozen');
+  assert.ok(elapsed < 3000,
+    `Event loop starved: 100ms setTimeout took ${elapsed}ms — MutationObserver infinite loop?`);
+});
+
 // ── Summary ───────────────────────────────────────────────────────────────────
 await browser.close();
 
