@@ -1,0 +1,14 @@
+{
+  "name": "prototype-comments",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Drop-in Firebase comment overlay for HTML prototypes",
+  "scripts": {
+    "test:render": "open test/render-test.html",
+    "test:e2e": "node test/e2e-comments.spec.js",
+    "test:e2e:local": "USE_LOCAL=1 node test/e2e-comments.spec.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.52.0"
+  }
+}
