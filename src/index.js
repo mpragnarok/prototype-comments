@@ -13,7 +13,7 @@
 import { STYLES } from './styles.js';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
-const FB_VER = '11.8.1';
+const FB_VER = '12.13.0';
 const FB_BASE = `https://www.gstatic.com/firebasejs/${FB_VER}`;
 
 async function loadFirebase() {
