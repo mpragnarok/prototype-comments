@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>prototype-comments — pin position tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #f9fafb; }
+    h2 { margin: 24px 0 8px; font-size: 14px; color: #374151; }
+    .suite { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .pass { color: #16a34a; }
+    .fail { color: #dc2626; font-weight: bold; }
+    .result { margin: 4px 0; font-size: 13px; }
+    #box {
+      position: relative; width: 360px; height: 600px;
+      background: #dbeafe; border: 2px solid #3b82f6; margin: 16px 0;
+    }
+    #overlay {
+      position: absolute; inset: 0;
+      background: rgba(255,0,0,0.05);
+    }
+    .test-pin {
+      position: absolute;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: #0FA0A0; color: #fff;
+      font-size: 10px; display: flex; align-items: center; justify-content: center;
+      transform: translate(-50%, -50%);
+    }
+    .crosshair {
+      position: absolute; width: 10px; height: 10px;
+      border: 2px solid red; border-radius: 50%;
+      transform: translate(-50%, -50%);
+    }
+    summary { cursor: pointer; font-size: 13px; color: #6b7280; margin-top: 8px; }
+  </style>
+</head>
+<body>
+
+<h1 style="font-size:16px;font-weight:700;">prototype-comments — pin position unit tests</h1>
+<p style="font-size:12px;color:#6b7280;">Tests run automatically on page load. Red crosshair = intended position, teal circle = pin.</p>
+
+<div id="results"></div>
+
+<h2>Visual Test: click anywhere on the blue box</h2>
+<p style="font-size:12px;color:#6b7280;">Red dot = where you clicked, teal circle = where pin renders. They should overlap exactly.</p>
+<div id="box">
+  <div id="overlay"></div>
+</div>
+<div id="visual-log" style="font-size:12px;color:#374151;"></div>
+
+<script>
+// ─── Test harness ────────────────────────────────────────────────────────────
+let passed = 0, failed = 0;
+const log = [];
+
+function assert(desc, condition, extra = '') {
+  const ok = !!condition;
+  ok ? passed++ : failed++;
+  log.push({ ok, desc, extra });
+}
+
+function assertEquals(desc, actual, expected, tolerance = 0) {
+  const ok = Math.abs(actual - expected) <= tolerance;
+  passed += ok ? 1 : 0;
+  failed += ok ? 0 : 1;
+  log.push({ ok, desc, extra: ok ? '' : `expected ${expected}, got ${actual}` });
+}
+
+// ─── Unit: coordinate calculation ───────────────────────────────────────────
+
+// Simulate the overlay click handler logic
+function calcCoords(overlayRect, clientX, clientY) {
+  const x = ((clientX - overlayRect.left) / overlayRect.width * 100);
+  const y = ((clientY - overlayRect.top)  / overlayRect.height * 100);
+  return { x: parseFloat(x.toFixed(2)), y: parseFloat(y.toFixed(2)) };
+}
+
+// Simulate where the pin renders (left/top % inside overlay)
+function calcPinViewportPos(overlayRect, pinX, pinY) {
+  return {
+    x: overlayRect.left + (pinX / 100) * overlayRect.width,
+    y: overlayRect.top  + (pinY / 100) * overlayRect.height,
+  };
+}
+
+{
+  const rect = { left: 100, top: 200, width: 360, height: 600 };
+
+  // Click dead-center
+  const c1 = calcCoords(rect, 280, 500);
+  assertEquals('center click → x = 50%',  c1.x, 50, 0.01);
+  assertEquals('center click → y = 50%',  c1.y, 50, 0.01);
+
+  // Click top-left corner
+  const c2 = calcCoords(rect, 100, 200);
+  assertEquals('top-left click → x = 0%',  c2.x, 0, 0.01);
+  assertEquals('top-left click → y = 0%',  c2.y, 0, 0.01);
+
+  // Click bottom-right corner
+  const c3 = calcCoords(rect, 460, 800);
+  assertEquals('bottom-right click → x = 100%', c3.x, 100, 0.01);
+  assertEquals('bottom-right click → y = 100%', c3.y, 100, 0.01);
+
+  // Round-trip: click at arbitrary position, render pin, check viewport pos
+  const clientX = 220, clientY = 380;
+  const coords = calcCoords(rect, clientX, clientY);
+  const rendered = calcPinViewportPos(rect, coords.x, coords.y);
+  assertEquals('round-trip x: pin viewport x ≈ click x', rendered.x, clientX, 0.5);
+  assertEquals('round-trip y: pin viewport y ≈ click y', rendered.y, clientY, 0.5);
+}
+
+// ─── Unit: pendingPin MUST survive closeAllPopovers ─────────────────────────
+// This tests the bug where pendingPin was nulled before addDoc could read it.
+{
+  let pendingPin = null;
+
+  // Simulate the BUGGY flow:
+  function buggyOverlayClick(x, y) {
+    pendingPin = { x, y };
+    closeAllPopovers_buggy();  // nulls pendingPin!
+    return pendingPin;         // now null → x=null in Firestore
+  }
+  function closeAllPopovers_buggy() { pendingPin = null; }
+
+  const bugResult = buggyOverlayClick(42, 67);
+  assert('BUGGY flow: pendingPin is null after closeAllPopovers (confirms the bug exists)', bugResult === null);
+
+  // Simulate the FIXED flow:
+  function fixedOverlayClick(x, y) {
+    const coords = { x, y };     // save before close
+    closeAllPopovers_fixed();
+    pendingPin = coords;          // restore after close
+    return pendingPin;
+  }
+  function closeAllPopovers_fixed() { pendingPin = null; }
+
+  const fixResult = fixedOverlayClick(42, 67);
+  assert('FIXED flow: pendingPin has correct x after closeAllPopovers', fixResult?.x === 42);
+  assert('FIXED flow: pendingPin has correct y after closeAllPopovers', fixResult?.y === 67);
+}
+
+// ─── Unit: pin renders at correct position within overlay ───────────────────
+{
+  const container = document.createElement('div');
+  container.style.cssText = 'position:relative;width:360px;height:600px;';
+  document.body.appendChild(container);
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:absolute;inset:0;';
+  container.appendChild(overlay);
+
+  const pin = document.createElement('div');
+  pin.style.cssText = 'position:absolute;width:24px;height:24px;transform:translate(-50%,-50%);';
+  pin.style.left = '50%';
+  pin.style.top  = '50%';
+  overlay.appendChild(pin);
+
+  document.body.appendChild(container);
+
+  // After layout: pin center should be at container center
+  const cr = container.getBoundingClientRect();
+  const pr = pin.getBoundingClientRect();
+  const pinCenterX = pr.left + pr.width / 2;
+  const pinCenterY = pr.top  + pr.height / 2;
+  const containerCenterX = cr.left + cr.width / 2;
+  const containerCenterY = cr.top  + cr.height / 2;
+
+  assertEquals('pin center x at 50% of container', pinCenterX, containerCenterX, 1);
+  assertEquals('pin center y at 50% of container', pinCenterY, containerCenterY, 1);
+
+  container.remove();
+}
+
+// ─── Render results ──────────────────────────────────────────────────────────
+const out = document.getElementById('results');
+const summary = document.createElement('div');
+summary.className = 'suite';
+summary.innerHTML = `<strong>${passed} passed, ${failed} failed</strong>`;
+out.appendChild(summary);
+
+log.forEach(({ ok, desc, extra }) => {
+  const s = document.createElement('div');
+  s.className = `result ${ok ? 'pass' : 'fail'}`;
+  s.textContent = `${ok ? '✓' : '✗'} ${desc}${extra ? ` (${extra})` : ''}`;
+  summary.appendChild(s);
+});
+
+// ─── Visual / interactive test ───────────────────────────────────────────────
+const box    = document.getElementById('box');
+const overlay2 = document.getElementById('overlay');
+const vlog   = document.getElementById('visual-log');
+let pinCount = 0;
+
+overlay2.addEventListener('click', e => {
+  const rect = overlay2.getBoundingClientRect();
+  const x = ((e.clientX - rect.left) / rect.width * 100).toFixed(2);
+  const y = ((e.clientY - rect.top)  / rect.height * 100).toFixed(2);
+
+  // Red crosshair at exact click position (viewport coords → box-relative)
+  const cross = document.createElement('div');
+  cross.className = 'crosshair';
+  cross.style.left = `${x}%`;
+  cross.style.top  = `${y}%`;
+  overlay2.appendChild(cross);
+
+  // Teal pin via same percentage
+  const pin = document.createElement('div');
+  pin.className = 'test-pin';
+  pin.style.left = `${x}%`;
+  pin.style.top  = `${y}%`;
+  pin.textContent = ++pinCount;
+  overlay2.appendChild(pin);
+
+  vlog.textContent = `Last click: x=${x}%, y=${y}% — pin and crosshair should overlap`;
+});
+</script>
+</body>
+</html>

@@ -193,8 +193,10 @@ export async function initPrototypeComments(opts = {}) {
       const rect = overlay.getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width * 100).toFixed(2);
       const y = ((e.clientY - rect.top) / rect.height * 100).toFixed(2);
-      pendingPin = { x: parseFloat(x), y: parseFloat(y) };
+      // Save coords BEFORE closeAllPopovers() — it resets pendingPin to null
+      const coords = { x: parseFloat(x), y: parseFloat(y) };
       closeAllPopovers();
+      pendingPin = coords;  // restore after close
       showInputPopover(e.clientX, e.clientY, null);
     });
   }
@@ -303,7 +305,104 @@ export async function initPrototypeComments(opts = {}) {
     positionPopover(pop, clientX, clientY);
   }
 
-  function renderThread(commentId) {
+  // Build a single comment item element with edit/delete/resolve actions
+  function buildCommentItem(c, isRootComment, onUpdated) {
+    const item = el('div', 'pc-comment-item');
+
+    if (c.authorPhoto) {
+      const av = el('img', 'pc-ci-avatar', { src: c.authorPhoto, alt: '' });
+      item.appendChild(av);
+    }
+    const bodyEl = el('div', 'pc-ci-body');
+    const meta = el('div', 'pc-ci-meta');
+    const an = el('span', 'pc-ci-author'); an.textContent = c.authorName;
+    const at = el('span', 'pc-ci-time');
+    at.textContent = timeAgo(c.createdAt) + (c.edited ? ' · 已編輯' : '');
+    meta.appendChild(an); meta.appendChild(at);
+    bodyEl.appendChild(meta);
+
+    // Text or edit form
+    const txtEl = el('p', 'pc-ci-text'); txtEl.textContent = c.body;
+    bodyEl.appendChild(txtEl);
+
+    const acts = el('div', 'pc-ci-actions');
+
+    // Resolve (root comments only)
+    if (!c.resolved && isRootComment) {
+      const resolveBtn = el('button', 'pc-ci-action resolve');
+      resolveBtn.textContent = '✓ Resolve';
+      resolveBtn.onclick = async () => {
+        await fb.updateDoc(
+          fb.doc(db, 'prototype-comments', projectId, 'comments', c.id),
+          { resolved: true }
+        );
+        if (onUpdated) onUpdated();
+      };
+      acts.appendChild(resolveBtn);
+    }
+
+    // Edit + Delete (own comments only)
+    if (currentUser && c.authorUid === currentUser.uid) {
+      // Edit
+      const editBtn = el('button', 'pc-ci-action');
+      editBtn.textContent = '編輯';
+      editBtn.onclick = () => {
+        // Swap text for inline editor
+        txtEl.style.display = 'none';
+        acts.style.display = 'none';
+        const ta = el('textarea', 'pc-note-textarea');
+        ta.value = c.body;
+        ta.style.cssText = 'margin-top:6px;';
+        const saveBtn = el('button', 'pc-note-submit');
+        saveBtn.textContent = '儲存';
+        const cancelEdit = el('button', 'pc-btn-cancel');
+        cancelEdit.style.cssText = 'margin-left:4px;font-size:11px;padding:4px 8px;';
+        cancelEdit.textContent = '取消';
+        const row = el('div', '');
+        row.style.cssText = 'display:flex;gap:6px;margin-top:6px;';
+        row.appendChild(saveBtn);
+        row.appendChild(cancelEdit);
+        bodyEl.appendChild(ta);
+        bodyEl.appendChild(row);
+
+        cancelEdit.onclick = () => {
+          ta.remove(); row.remove();
+          txtEl.style.display = '';
+          acts.style.display = '';
+        };
+        saveBtn.onclick = async () => {
+          const newBody = ta.value.trim();
+          if (!newBody) return;
+          saveBtn.disabled = true;
+          await fb.updateDoc(
+            fb.doc(db, 'prototype-comments', projectId, 'comments', c.id),
+            { body: newBody, edited: true }
+          );
+          if (onUpdated) onUpdated();
+        };
+        ta.focus();
+      };
+      acts.appendChild(editBtn);
+
+      // Delete
+      const delBtn = el('button', 'pc-ci-action');
+      delBtn.textContent = '刪除';
+      delBtn.onclick = async () => {
+        if (!confirm('刪除這則留言？')) return;
+        await fb.deleteDoc(
+          fb.doc(db, 'prototype-comments', projectId, 'comments', c.id)
+        );
+        if (onUpdated) onUpdated();
+      };
+      acts.appendChild(delBtn);
+    }
+
+    bodyEl.appendChild(acts);
+    item.appendChild(bodyEl);
+    return item;
+  }
+
+  function renderThread(commentId, onUpdated) {
     const threadComments = comments.filter(
       c => c.id === commentId || c.parentId === commentId
     );
@@ -311,44 +410,7 @@ export async function initPrototypeComments(opts = {}) {
 
     const div = el('div', 'pc-thread');
     threadComments.forEach(c => {
-      const item = el('div', 'pc-comment-item');
-
-      if (c.authorPhoto) {
-        const av = el('img', 'pc-ci-avatar', { src: c.authorPhoto, alt: '' });
-        item.appendChild(av);
-      }
-      const body = el('div', 'pc-ci-body');
-      const meta = el('div', 'pc-ci-meta');
-      const an = el('span', 'pc-ci-author'); an.textContent = c.authorName;
-      const at = el('span', 'pc-ci-time'); at.textContent = timeAgo(c.createdAt);
-      meta.appendChild(an); meta.appendChild(at);
-      body.appendChild(meta);
-      const txt = el('p', 'pc-ci-text'); txt.textContent = c.body;
-      body.appendChild(txt);
-
-      const acts = el('div', 'pc-ci-actions');
-      if (!c.resolved && c.id === commentId) {
-        const resolveBtn = el('button', 'pc-ci-action resolve');
-        resolveBtn.textContent = '✓ Resolve';
-        resolveBtn.onclick = async () => {
-          await fb.updateDoc(fb.doc(db, 'prototype-comments', projectId, 'comments', c.id),
-            { resolved: true });
-          closeAllPopovers();
-        };
-        acts.appendChild(resolveBtn);
-      }
-      if (currentUser && c.authorUid === currentUser.uid) {
-        const delBtn = el('button', 'pc-ci-action');
-        delBtn.textContent = '刪除';
-        delBtn.onclick = async () => {
-          await fb.deleteDoc(fb.doc(db, 'prototype-comments', projectId, 'comments', c.id));
-          closeAllPopovers();
-        };
-        acts.appendChild(delBtn);
-      }
-      body.appendChild(acts);
-      item.appendChild(body);
-      div.appendChild(item);
+      div.appendChild(buildCommentItem(c, c.id === commentId, onUpdated));
     });
     return div;
   }
@@ -412,7 +474,19 @@ export async function initPrototypeComments(opts = {}) {
     hdr.appendChild(closeBtn);
     pop.appendChild(hdr);
 
-    const thread = renderThread(commentId);
+    // onUpdated: re-render thread in-place after edit/delete/resolve
+    function refreshThread() {
+      const existing = pop.querySelector('.pc-thread');
+      if (existing) existing.remove();
+      const t = renderThread(commentId, refreshThread);
+      if (t) {
+        // insert before the textarea (if any)
+        const ta = pop.querySelector('.pc-textarea');
+        ta ? pop.insertBefore(t, ta) : pop.appendChild(t);
+      }
+    }
+
+    const thread = renderThread(commentId, refreshThread);
     if (thread) pop.appendChild(thread);
 
     if (currentUser) {
@@ -461,34 +535,10 @@ export async function initPrototypeComments(opts = {}) {
   function renderNoteThread(threadEl, tag, text) {
     threadEl.innerHTML = '';
     const nc = getNoteComments(tag, text);
+    const refresh = () => renderNoteThread(threadEl, tag, text);
 
     nc.forEach(c => {
-      const item = el('div', 'pc-comment-item');
-      if (c.authorPhoto) {
-        const av = el('img', 'pc-ci-avatar', { src: c.authorPhoto, alt: '' });
-        item.appendChild(av);
-      }
-      const body = el('div', 'pc-ci-body');
-      const meta = el('div', 'pc-ci-meta');
-      const an = el('span', 'pc-ci-author'); an.textContent = c.authorName;
-      const at = el('span', 'pc-ci-time'); at.textContent = timeAgo(c.createdAt);
-      meta.appendChild(an); meta.appendChild(at);
-      body.appendChild(meta);
-      const txt = el('p', 'pc-ci-text'); txt.textContent = c.body;
-      body.appendChild(txt);
-
-      if (currentUser && c.authorUid === currentUser.uid) {
-        const acts = el('div', 'pc-ci-actions');
-        const delBtn = el('button', 'pc-ci-action');
-        delBtn.textContent = '刪除';
-        delBtn.onclick = async () => {
-          await fb.deleteDoc(fb.doc(db, 'prototype-comments', projectId, 'comments', c.id));
-        };
-        acts.appendChild(delBtn);
-        body.appendChild(acts);
-      }
-      item.appendChild(body);
-      threadEl.appendChild(item);
+      threadEl.appendChild(buildCommentItem(c, true, refresh));
     });
 
     // Input
