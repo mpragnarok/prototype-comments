@@ -64,14 +64,19 @@ function goto(id) {
 }
 ```
 
-**② `switchMode()` 暴露 mode 到 window**
+**② `switchMode()` 暴露 mode 到 window 並 dispatch screen-change**
 
 ```js
 function switchMode(mode) {
   window.currentMode = mode;   // ← 必須暴露到 window
   // ... 你的原有邏輯 ...
+  // ← 必須 dispatch，讓 prototype-comments 重新訂閱正確的 Firestore query
+  // （設計模式 → 依 screenId 訂閱；工程模式 → 訂閱所有 note）
+  document.dispatchEvent(new CustomEvent('pc:screen-change', { detail: { screenId: window.currentScreen } }));
 }
 ```
+
+> ⚠️ **若省略這行**，切換到工程模式後留言不會出現——因為 Firestore 訂閱仍在使用設計模式的 screenId 過濾器。
 
 **③ dev note 元素加 data attributes（供 note comment key 使用）**
 
@@ -172,6 +177,46 @@ npx serve .
 ```
 
 本 package 不依賴任何 build tool。全為 ES Modules，可直接在 modern browser 使用。
+
+---
+
+## 部署到 jubo-line-badminton（本地 bundle 模式）
+
+> **不要部署到 `taupe-shortbread-d24e04.netlify.app`！**  
+> 正確站點是 `jubo-line-badminton.netlify.app`（site ID: `4e4723bf-2c3d-4e35-a5c6-7dadcd67f4aa`）。
+
+### 1. 修改 src/ 原始碼後，重新 build
+
+```bash
+# 從 prototype-comments repo 根目錄執行
+python3 build.py
+# → 輸出到 ../jubo-line-badminton-check-in-system/docs/design/pc.js
+
+# 驗證語法
+node --input-type=module < ../jubo-line-badminton-check-in-system/docs/design/pc.js
+# 沒有輸出 = 語法正確
+```
+
+### 2. 部署到正確的 Netlify 站
+
+```bash
+cd ../jubo-line-badminton-check-in-system
+netlify deploy \
+  --site=4e4723bf-2c3d-4e35-a5c6-7dadcd67f4aa \
+  --dir=docs/design \
+  --prod \
+  --no-build
+```
+
+### 3. Commit & push
+
+```bash
+git add docs/design/pc.js
+git commit -m "fix: rebuild pc.js — <描述改了什麼>"
+git push origin feat/tournament-and-scheduling
+```
+
+> **常見錯誤：** `netlify deploy` 若在專案根目錄執行，會因 `netlify.toml` 內 Next.js plugin 觸發 build error。加 `--no-build` 跳過。
 
 ---
 
