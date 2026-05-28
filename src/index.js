@@ -102,8 +102,17 @@ export async function initPrototypeComments(opts = {}) {
 
   // ── State ──────────────────────────────────────────────────────────────────
   let currentUser = null;
-  let commentMode = false;
-  let unsub       = null;
+  let commentMode  = false;
+  let pinsVisible  = true;
+  let unsub        = null;
+
+  function togglePinsVisible() {
+    pinsVisible = !pinsVisible;
+    const overlay = document.getElementById('pc-overlay');
+    if (overlay) overlay.classList.toggle('pc-pins-hidden', !pinsVisible);
+    const btn = document.getElementById('pc-toggle-pins');
+    if (btn) btn.style.opacity = pinsVisible ? '1' : '0.4';
+  }
 
   // data state
   let comments    = [];
@@ -158,6 +167,14 @@ export async function initPrototypeComments(opts = {}) {
     toggle.onclick = () => setCommentMode(!commentMode);
     bar.appendChild(toggle);
 
+    const togglePinBtn = el('button', 'pc-comment-toggle');
+    togglePinBtn.id = 'pc-toggle-pins';
+    togglePinBtn.title = '隱藏留言 pin';
+    togglePinBtn.style.padding = '6px 8px';
+    togglePinBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+    togglePinBtn.onclick = togglePinsVisible;
+    bar.appendChild(togglePinBtn);
+
     const panelBtn = el('button', 'pc-sign-in-btn');
     panelBtn.id = 'pc-panel-btn';
     panelBtn.style.cssText = 'font-size:11px;padding:4px 10px;';
@@ -197,6 +214,7 @@ export async function initPrototypeComments(opts = {}) {
     if (getComputedStyle(target).position === 'static') {
       target.style.position = 'relative';
     }
+    target.style.overflow = 'hidden';
     const overlay = el('div', 'pc-overlay');
     overlay.id = 'pc-overlay';
     target.appendChild(overlay);

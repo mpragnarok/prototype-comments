@@ -451,4 +451,14 @@ export const STYLES = `
   font-size: 10px;
   color: #9ca3af;
 }
+
+/* Pin visibility toggle */
+.pc-pins-hidden .pc-pin { display: none !important; }
+
+/* Auth bar responsive — mobile: hide name + comment-toggle buttons */
+@media (max-width: 768px) {
+  .pc-auth-bar .pc-user-name { display: none; }
+  .pc-auth-bar .pc-comment-toggle { display: none; }
+  .pc-auth-bar { gap: 4px; margin-left: 4px; padding-left: 8px; }
+}
 `;
