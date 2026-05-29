@@ -395,47 +395,63 @@ await test('tournament-ui-flow.html passes scrollContainer: ".body" to initProto
     'scrollContainer not set to .body selector');
 });
 
-// ── Test 21: Pin relocation — source check ────────────────────────────────────
-await test('index.js: pin relocation feature implemented (startMovingPin, finishMovingPin, movingPinId)', async () => {
+// ── Test 21: Pin relocation — drag source check ───────────────────────────────
+await test('index.js: long-press drag relocation implemented (isDragging, addDragListeners, finishMovingPin)', async () => {
   const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
-  assert.ok(src.includes('movingPinId'),
-    'movingPinId state not found — pin relocation not implemented');
-  assert.ok(src.includes('startMovingPin'),
-    'startMovingPin function not found');
+  assert.ok(src.includes('isDragging'),
+    'isDragging state not found — drag relocation not implemented');
+  assert.ok(src.includes('dragPinEl'),
+    'dragPinEl state not found — dragged pin element not tracked');
+  assert.ok(src.includes('justDragged'),
+    'justDragged flag not found — post-drag click suppression missing');
+  assert.ok(src.includes('addDragListeners'),
+    'addDragListeners function not found');
+  assert.ok(src.includes('removeDragListeners'),
+    'removeDragListeners function not found');
   assert.ok(src.includes('finishMovingPin'),
     'finishMovingPin function not found');
   assert.ok(src.includes('cancelMovingPin'),
-    'cancelMovingPin function not found — ESC/outside-click cancel not implemented');
-  assert.ok(src.includes('pc-moving-mode'),
-    '.pc-moving-mode class not applied — visual move cursor missing');
-  assert.ok(src.includes("data-comment-id"),
-    'data-comment-id not set on pin elements — move mode cannot find target pin');
+    'cancelMovingPin function not found — ESC cancel not implemented');
+  assert.ok(src.includes('movePinVisually'),
+    'movePinVisually function not found — live drag preview not implemented');
+  assert.ok(src.includes('onDragEnd'),
+    'onDragEnd handler not found');
+  assert.ok(src.includes('onDragMove'),
+    'onDragMove handler not found');
 });
 
-// ── Test 22: Pin relocation — Move button gating — source check ───────────────
-await test('index.js: Move button shown only for own root positional comments', async () => {
+// ── Test 22: Pin relocation — long-press gating on own pins ───────────────────
+await test('index.js: long-press drag available only on own non-resolved pins', async () => {
   const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
-  // Must gate on isRootComment to avoid showing Move on replies
-  assert.ok(src.includes('isRootComment') && src.includes("pc-move-pin-btn"),
-    'Move button not gated by isRootComment');
-  // Must check authorUid to avoid showing Move on others' pins
-  const moveSection = src.slice(src.indexOf('pc-move-pin-btn') - 200, src.indexOf('pc-move-pin-btn') + 200);
-  assert.ok(moveSection.includes('authorUid') && moveSection.includes('currentUser.uid'),
-    'Move button missing authorUid === currentUser.uid guard — anyone could move any pin');
-  // Must check type === 'positional' to avoid showing on note-type comments
-  assert.ok(moveSection.includes("'positional'"),
-    "Move button missing type === 'positional' guard");
+  // Long-press logic must check currentUser.uid against c.authorUid
+  const pressIdx = src.indexOf('startPress');
+  assert.ok(pressIdx !== -1, 'startPress inner function not found in renderPins');
+  const pressSection = src.slice(pressIdx - 300, pressIdx + 100);
+  assert.ok(pressSection.includes('authorUid') && pressSection.includes('currentUser.uid'),
+    'Long-press missing authorUid === currentUser.uid guard — anyone could drag any pin');
+  assert.ok(pressSection.includes('c.resolved'),
+    'Long-press missing !c.resolved guard — resolved pins should not be draggable');
+  // No "移動" button (old mechanism removed)
+  assert.ok(!src.includes('pc-move-pin-btn'),
+    'Old "移動" button (pc-move-pin-btn) still present — should be removed in favour of long-press drag');
+  assert.ok(!src.includes('startMovingPin'),
+    'startMovingPin still present — should be removed in favour of drag');
+  // Body dragging cursor class
+  assert.ok(src.includes('pc-dragging'),
+    'pc-dragging class not applied — global grabbing cursor during drag missing');
 });
 
-// ── Test 23: styles.js — pin relocation CSS ───────────────────────────────────
-await test('styles.js: .pc-pin.moving animation and .pc-overlay.pc-moving-mode cursor defined', async () => {
+// ── Test 23: styles.js — drag CSS ─────────────────────────────────────────────
+await test('styles.js: .pc-pin.moving animation and body.pc-dragging cursor defined', async () => {
   const stylesSrc = readFileSync(join(__dirname, '../src/styles.js'), 'utf8');
   assert.ok(stylesSrc.includes('.pc-pin.moving'),
     '.pc-pin.moving CSS rule not found');
   assert.ok(stylesSrc.includes('pc-pin-pulse'),
     'pc-pin-pulse keyframe animation not found');
-  assert.ok(stylesSrc.includes('.pc-overlay.pc-moving-mode'),
-    '.pc-overlay.pc-moving-mode cursor CSS not found');
+  assert.ok(stylesSrc.includes('pc-dragging'),
+    'body.pc-dragging cursor CSS not found');
+  assert.ok(stylesSrc.includes('grabbing'),
+    'cursor: grabbing not defined for drag state');
 });
 
 // ── Test 24: renderPins sets data-comment-id on live page ────────────────────

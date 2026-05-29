@@ -135,6 +135,9 @@ export async function initPrototypeComments(opts = {}) {
   const pin   = { current: null };          // pendingPin
   const pop   = { id: null, el: null };     // openPopoverId + popoverEl
   let movingPinId = null;                   // id of pin currently being relocated
+  let isDragging  = false;                  // true while drag is in progress
+  let dragPinEl   = null;                   // DOM element being dragged
+  let justDragged = false;                  // suppress post-drag click event
 
   // panel state
   const panel = { open: false, filter: 'all', el: null, unsub: null };
@@ -241,16 +244,11 @@ export async function initPrototypeComments(opts = {}) {
     overlay.addEventListener('click', e => {
       if (!currentUser) return;
       e.stopPropagation();
+      if (!commentMode) return;
       const rect = overlay.getBoundingClientRect();
       const scrollTop = getScrollTop();
       const x = parseFloat(((e.clientX - rect.left) / rect.width * 100).toFixed(2));
       const y = parseFloat(((e.clientY - rect.top + scrollTop) / rect.height * 100).toFixed(2));
-
-      if (movingPinId) {
-        finishMovingPin(x, y);
-        return;
-      }
-      if (!commentMode) return;
       closeAllPopovers();
       pin.current = { x, y };
       console.log('[pc] overlay click → pin.current set to', pin.current);
@@ -267,37 +265,90 @@ export async function initPrototypeComments(opts = {}) {
     if (!active) { pin.current = null; closeAllPopovers(); }
   }
 
-  // ── Pin Relocation ────────────────────────────────────────────────────────
-  function startMovingPin(commentId) {
-    movingPinId = commentId;
-    closeAllPopovers();
-    const overlay = document.getElementById('pc-overlay');
-    if (overlay) overlay.classList.add('active', 'pc-moving-mode');
-    const pinEl = overlay?.querySelector(`[data-comment-id="${commentId}"]`);
-    if (pinEl) pinEl.classList.add('moving');
-  }
-
+  // ── Pin Relocation (long-press + drag) ───────────────────────────────────
   async function finishMovingPin(x, y) {
     if (!movingPinId) return;
     const id = movingPinId;
     movingPinId = null;
+    dragPinEl = null;
+    justDragged = true;
+    setTimeout(() => { justDragged = false; }, 0);
+    document.body.classList.remove('pc-dragging');
     await store.update(id, { x, y });
-    const overlay = document.getElementById('pc-overlay');
-    if (overlay) {
-      overlay.classList.remove('pc-moving-mode');
-      if (!commentMode) overlay.classList.remove('active');
-    }
   }
 
   function cancelMovingPin() {
-    if (!movingPinId) return;
+    if (!movingPinId && !isDragging) return;
     movingPinId = null;
-    const overlay = document.getElementById('pc-overlay');
-    if (overlay) {
-      overlay.classList.remove('pc-moving-mode');
-      if (!commentMode) overlay.classList.remove('active');
-    }
+    isDragging = false;
+    dragPinEl = null;
+    document.body.classList.remove('pc-dragging');
+    removeDragListeners();
     renderPins();
+  }
+
+  function addDragListeners() {
+    document.addEventListener('mousemove', onDragMove);
+    document.addEventListener('mouseup', onDragEnd);
+    document.addEventListener('touchmove', onDragMoveTouch, { passive: false });
+    document.addEventListener('touchend', onDragEndTouch);
+  }
+
+  function removeDragListeners() {
+    document.removeEventListener('mousemove', onDragMove);
+    document.removeEventListener('mouseup', onDragEnd);
+    document.removeEventListener('touchmove', onDragMoveTouch);
+    document.removeEventListener('touchend', onDragEndTouch);
+  }
+
+  function movePinVisually(clientX, clientY) {
+    if (!dragPinEl) return;
+    const overlay = document.getElementById('pc-overlay');
+    if (!overlay) return;
+    const rect = overlay.getBoundingClientRect();
+    const scrollTop = getScrollTop();
+    const overlayH = overlay.offsetHeight || 1;
+    const x = (clientX - rect.left) / rect.width * 100;
+    const y = (clientY - rect.top + scrollTop) / overlayH * 100;
+    const visualY = y - (scrollTop / overlayH * 100);
+    dragPinEl.style.left = `${x}%`;
+    dragPinEl.style.top  = `${visualY}%`;
+  }
+
+  function onDragMove(e) { if (isDragging) movePinVisually(e.clientX, e.clientY); }
+  function onDragMoveTouch(e) {
+    if (!isDragging) return;
+    e.preventDefault();
+    movePinVisually(e.touches[0].clientX, e.touches[0].clientY);
+  }
+
+  function onDragEnd(e) {
+    if (!isDragging) return;
+    isDragging = false;
+    removeDragListeners();
+    const overlay = document.getElementById('pc-overlay');
+    if (!overlay || !movingPinId) { movingPinId = null; dragPinEl = null; document.body.classList.remove('pc-dragging'); return; }
+    const rect = overlay.getBoundingClientRect();
+    const scrollTop = getScrollTop();
+    const overlayH = overlay.offsetHeight || 1;
+    const x = parseFloat((Math.max(0, Math.min(100, (e.clientX - rect.left) / rect.width * 100))).toFixed(2));
+    const y = parseFloat((Math.max(0, Math.min(100, (e.clientY - rect.top + scrollTop) / overlayH * 100))).toFixed(2));
+    finishMovingPin(x, y);
+  }
+
+  function onDragEndTouch(e) {
+    if (!isDragging) return;
+    isDragging = false;
+    removeDragListeners();
+    const t = e.changedTouches[0];
+    const overlay = document.getElementById('pc-overlay');
+    if (!overlay || !movingPinId) { movingPinId = null; dragPinEl = null; document.body.classList.remove('pc-dragging'); return; }
+    const rect = overlay.getBoundingClientRect();
+    const scrollTop = getScrollTop();
+    const overlayH = overlay.offsetHeight || 1;
+    const x = parseFloat((Math.max(0, Math.min(100, (t.clientX - rect.left) / rect.width * 100))).toFixed(2));
+    const y = parseFloat((Math.max(0, Math.min(100, (t.clientY - rect.top + scrollTop) / overlayH * 100))).toFixed(2));
+    finishMovingPin(x, y);
   }
 
   // ── Popover (input / thread) ───────────────────────────────────────────────
@@ -424,14 +475,7 @@ export async function initPrototypeComments(opts = {}) {
       acts.appendChild(resolveBtn);
     }
 
-    // Move pin position (root own comments only)
-    if (isRootComment && currentUser && c.authorUid === currentUser.uid && c.type === 'positional') {
-      const moveBtn = el('button', 'pc-ci-action pc-move-pin-btn');
-      moveBtn.textContent = '移動';
-      moveBtn.title = '點選後在畫面上重新選取 pin 位置，按 ESC 取消';
-      moveBtn.onclick = () => startMovingPin(c.id);
-      acts.appendChild(moveBtn);
-    }
+
 
     // Edit (own comments only) + Delete (own replies only)
     if (currentUser && c.authorUid === currentUser.uid) {
@@ -551,9 +595,41 @@ export async function initPrototypeComments(opts = {}) {
 
       pinEl.addEventListener('click', e => {
         e.stopPropagation();
+        if (justDragged) return;
         if (pop.id === c.id) { closeAllPopovers(); return; }
         showThreadPopover(e.clientX, e.clientY, c.id);
       });
+
+      // Long-press (500 ms) to enter drag mode — own pins only
+      if (currentUser && c.authorUid === currentUser.uid && !c.resolved) {
+        let pressTimer = null;
+        const startPress = () => {
+          pressTimer = setTimeout(() => {
+            pressTimer = null;
+            movingPinId = c.id;
+            isDragging = true;
+            dragPinEl = pinEl;
+            closeAllPopovers();
+            pinEl.classList.add('moving');
+            document.body.classList.add('pc-dragging');
+            addDragListeners();
+          }, 500);
+        };
+        const cancelPress = () => {
+          if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        };
+        pinEl.addEventListener('mousedown', e => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          startPress();
+        });
+        pinEl.addEventListener('mouseup',    cancelPress);
+        pinEl.addEventListener('mouseleave', cancelPress);
+        pinEl.addEventListener('touchstart', () => startPress(), { passive: true });
+        pinEl.addEventListener('touchend',    cancelPress);
+        pinEl.addEventListener('touchcancel', cancelPress);
+      }
+
       overlay.appendChild(pinEl);
     });
   }
@@ -911,15 +987,10 @@ export async function initPrototypeComments(opts = {}) {
       const isPin = e.target.closest('.pc-pin');
       if (!isPin) { pin.current = null; closeAllPopovers(); }
     }
-    // Cancel move mode when clicking outside overlay
-    if (movingPinId) {
-      const overlay = document.getElementById('pc-overlay');
-      if (overlay && !overlay.contains(e.target)) cancelMovingPin();
-    }
   });
 
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && movingPinId) cancelMovingPin();
+    if (e.key === 'Escape' && (movingPinId || isDragging)) cancelMovingPin();
   });
 
   return {
