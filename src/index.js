@@ -193,7 +193,8 @@ export async function initPrototypeComments(opts = {}) {
     const wrap = el('div');
     const { bar } = buildAuthBar();
     wrap.appendChild(bar);
-    const targetEl = authBarTarget ? document.querySelector(authBarTarget) : null;
+    const isMobile = window.innerWidth < 769;
+    const targetEl = (authBarTarget && !isMobile) ? document.querySelector(authBarTarget) : null;
     if (targetEl) {
       wrap.style.flexShrink = '0';
       targetEl.appendChild(wrap);

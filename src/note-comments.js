@@ -116,8 +116,9 @@ export function createNoteModule({
 
     document.querySelectorAll('.dev-note-v2').forEach(row => {
       const tag  = row.dataset.tag  || row.querySelector('[data-tag]')?.dataset.tag
-                || row.querySelector('.snc-tag, .tag')?.textContent?.trim() || '';
-      const text = row.dataset.text || row.querySelector('p, .note-body')?.textContent?.trim() || '';
+                || row.querySelector('.dn-tag-v2, .snc-tag, .tag')?.textContent?.trim() || '';
+      const text = row.dataset.text || row.querySelector('p, .note-body')?.textContent?.trim()
+                || Array.from(row.children).find(s => !s.classList.contains('dn-tag-v2'))?.textContent?.trim() || '';
       if (tag || text) {
         const k = noteKey(tag, text);
         if (!injectedKeys.has(k)) { injectNoteUI(row, tag, text); injectedKeys.add(k); }
