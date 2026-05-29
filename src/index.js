@@ -138,6 +138,10 @@ export async function initPrototypeComments(opts = {}) {
   let isDragging  = false;                  // true while drag is in progress
   let dragPinEl   = null;                   // DOM element being dragged
   let justDragged = false;                  // suppress post-drag click event
+  let lastDragX   = 0;                      // last cursor x during drag
+  let lastDragY   = 0;                      // last cursor y during drag
+  let autoScrollTimer = null;               // interval id for edge autoscroll
+  let autoScrollDir   = 0;                  // 1 = down, -1 = up, 0 = none
 
   // panel state
   const panel = { open: false, filter: 'all', el: null, unsub: null };
@@ -354,6 +358,7 @@ export async function initPrototypeComments(opts = {}) {
     document.removeEventListener('mouseup', onDragEnd);
     document.removeEventListener('touchmove', onDragMoveTouch);
     document.removeEventListener('touchend', onDragEndTouch);
+    clearAutoScroll();
   }
 
   function movePinVisually(clientX, clientY) {
@@ -370,11 +375,50 @@ export async function initPrototypeComments(opts = {}) {
     dragPinEl.style.top  = `${visualY}%`;
   }
 
-  function onDragMove(e) { if (isDragging) movePinVisually(e.clientX, e.clientY); }
+  function checkAutoScroll(clientY) {
+    const overlay = document.getElementById('pc-overlay');
+    if (!overlay || !_scrollEl) { clearAutoScroll(); return; }
+    const rect = overlay.getBoundingClientRect();
+    const edgePx = 48;
+    const distBottom = rect.bottom - clientY;
+    const distTop    = clientY - rect.top;
+    if (distBottom >= 0 && distBottom < edgePx) {
+      setAutoScroll(1);
+    } else if (distTop >= 0 && distTop < edgePx) {
+      setAutoScroll(-1);
+    } else {
+      clearAutoScroll();
+    }
+  }
+
+  function setAutoScroll(dir) {
+    if (autoScrollTimer && autoScrollDir === dir) return;
+    clearAutoScroll();
+    autoScrollDir = dir;
+    autoScrollTimer = setInterval(() => {
+      if (!_scrollEl) { clearAutoScroll(); return; }
+      _scrollEl.scrollTop += dir * 8;
+      movePinVisually(lastDragX, lastDragY);
+    }, 16);
+  }
+
+  function clearAutoScroll() {
+    if (autoScrollTimer) { clearInterval(autoScrollTimer); autoScrollTimer = null; }
+    autoScrollDir = 0;
+  }
+
+  function onDragMove(e) {
+    if (!isDragging) return;
+    lastDragX = e.clientX; lastDragY = e.clientY;
+    movePinVisually(e.clientX, e.clientY);
+    checkAutoScroll(e.clientY);
+  }
   function onDragMoveTouch(e) {
     if (!isDragging) return;
     e.preventDefault();
+    lastDragX = e.touches[0].clientX; lastDragY = e.touches[0].clientY;
     movePinVisually(e.touches[0].clientX, e.touches[0].clientY);
+    checkAutoScroll(e.touches[0].clientY);
   }
 
   function onDragEnd(e) {
