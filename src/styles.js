@@ -565,7 +565,6 @@ body.pc-dragging, body.pc-dragging * { cursor: grabbing !important; }
 @media (max-width: 767px) {
   #pc-auth-mobile-wrap .pc-auth-bar { gap: 4px; border-left: none; margin-left: 0; padding-left: 0; }
   #pc-auth-mobile-wrap .pc-user-name { display: none; }
-  #pc-auth-mobile-wrap #pc-panel-btn { display: none; }
   .pc-signin-text { display: none; }
   #pc-auth-mobile-wrap .pc-sign-in-btn { padding: 6px 8px; }
 }
