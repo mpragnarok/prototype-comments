@@ -333,6 +333,10 @@ export async function initPrototypeComments(opts = {}) {
     justDragged = true;
     setTimeout(() => { justDragged = false; }, 0);
     document.body.classList.remove('pc-dragging');
+    // Optimistic update: apply x/y locally so any renderPins() calls while
+    // awaiting the Firestore round-trip show the pin at the new position.
+    const idx = comments.findIndex(c => c.id === id);
+    if (idx !== -1) { comments[idx] = { ...comments[idx], x, y }; renderPins(); }
     await store.update(id, { x, y });
   }
 
