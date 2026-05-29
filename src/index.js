@@ -75,8 +75,9 @@ export async function initPrototypeComments(opts = {}) {
     getMode         = () => 'design',
     designTarget    = '#phone',
     engNoteSelector = '.eng-note-row',
-    navigateTo      = null,   // (screenId: string) => void  — consumer provides
-    authBarTarget   = null,   // CSS selector for a flex header to inject auth bar into
+    navigateTo        = null,   // (screenId: string) => void  — consumer provides
+    authBarTarget     = null,   // CSS selector for a flex header to inject auth bar into
+    scrollContainer   = null,   // CSS selector for scrollable body inside the phone frame
   } = opts;
 
   if (!firebaseConfig) {
@@ -118,6 +119,18 @@ export async function initPrototypeComments(opts = {}) {
   let comments    = [];
   let allComments = [];
 
+  // scroll sync — re-attaches on every screen change because goto() replaces .body
+  let _scrollEl = null;
+  function refreshScrollEl() {
+    if (!scrollContainer) return;
+    const el = document.querySelector(scrollContainer);
+    if (el === _scrollEl) return;
+    if (_scrollEl) _scrollEl.removeEventListener('scroll', renderPins);
+    _scrollEl = el;
+    if (_scrollEl) _scrollEl.addEventListener('scroll', renderPins, { passive: true });
+  }
+  const getScrollTop = () => _scrollEl?.scrollTop ?? 0;
+
   // interaction state (UI lifecycle)
   const pin   = { current: null };          // pendingPin
   const pop   = { id: null, el: null };     // openPopoverId + popoverEl
@@ -131,7 +144,7 @@ export async function initPrototypeComments(opts = {}) {
     bar.id = 'pc-auth-bar';
 
     const signInBtn = el('button', 'pc-sign-in-btn');
-    signInBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 48 48" fill="none"><path d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z" fill="#4285F4"/><path d="M6.3 14.7l7 5.1C15.1 16.6 19.2 14 24 14c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 16.3 2 9.7 7.4 6.3 14.7z" fill="#EA4335"/><path d="M24 46c5.9 0 10.9-2 14.5-5.3l-6.7-5.5C29.7 36.9 27 38 24 38c-6.1 0-10.7-3.1-11.8-7.5l-7 5.4C9.2 43.1 16.1 46 24 46z" fill="#34A853"/><path d="M44.5 20H24v8.5h11.8c-.6 2.3-2 4.3-3.8 5.7l6.7 5.5C42.6 36.2 46 30.5 46 24c0-1.3-.2-2.7-.5-4h-1z" fill="#FBBC05"/></svg> Sign in with Google`;
+    signInBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 48 48" fill="none"><path d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z" fill="#4285F4"/><path d="M6.3 14.7l7 5.1C15.1 16.6 19.2 14 24 14c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 16.3 2 9.7 7.4 6.3 14.7z" fill="#EA4335"/><path d="M24 46c5.9 0 10.9-2 14.5-5.3l-6.7-5.5C29.7 36.9 27 38 24 38c-6.1 0-10.7-3.1-11.8-7.5l-7 5.4C9.2 43.1 16.1 46 24 46z" fill="#34A853"/><path d="M44.5 20H24v8.5h11.8c-.6 2.3-2 4.3-3.8 5.7l6.7 5.5C42.6 36.2 46 30.5 46 24c0-1.3-.2-2.7-.5-4h-1z" fill="#FBBC05"/></svg> <span class="pc-signin-text">Sign in with Google</span>`;
     signInBtn.onclick = () =>
       fb.signInWithPopup(auth, new fb.GoogleAuthProvider());
 
@@ -146,7 +159,7 @@ export async function initPrototypeComments(opts = {}) {
 
     if (!user) {
       const btn = el('button', 'pc-sign-in-btn');
-      btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 48 48" fill="none"><path d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z" fill="#4285F4"/></svg> Sign in with Google`;
+      btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 48 48" fill="none"><path d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z" fill="#4285F4"/></svg> <span class="pc-signin-text">Sign in with Google</span>`;
       btn.onclick = () =>
         fb.signInWithPopup(auth, new fb.GoogleAuthProvider());
       bar.appendChild(btn);
@@ -182,7 +195,7 @@ export async function initPrototypeComments(opts = {}) {
     panelBtn.onclick = () => panel.open ? closePanel() : openPanel();
     bar.appendChild(panelBtn);
 
-    const so = el('button', 'pc-sign-in-btn');
+    const so = el('button', 'pc-sign-in-btn pc-signout-btn');
     so.style.cssText = 'font-size:11px;opacity:.6;padding:4px 8px;';
     so.textContent = '登出';
     so.onclick = () => fb.signOut(auth);
@@ -193,10 +206,15 @@ export async function initPrototypeComments(opts = {}) {
     const wrap = el('div');
     const { bar } = buildAuthBar();
     wrap.appendChild(bar);
-    const targetEl = authBarTarget ? document.querySelector(authBarTarget) : null;
+    const isMobile = window.innerWidth < 768;
+    const targetEl = (authBarTarget && !isMobile) ? document.querySelector(authBarTarget) : null;
     if (targetEl) {
       wrap.style.flexShrink = '0';
       targetEl.appendChild(wrap);
+    } else if (isMobile) {
+      wrap.id = 'pc-auth-mobile-wrap';
+      wrap.style.cssText = 'position:fixed;bottom:64px;right:12px;z-index:9000;background:#fff;border-radius:20px;box-shadow:0 2px 12px rgba(0,0,0,.15);padding:6px 10px;';
+      document.body.appendChild(wrap);
     } else {
       wrap.style.cssText = 'position:fixed;top:12px;right:16px;z-index:9000;';
       document.body.appendChild(wrap);
@@ -223,8 +241,9 @@ export async function initPrototypeComments(opts = {}) {
       if (!commentMode || !currentUser) return;
       e.stopPropagation();
       const rect = overlay.getBoundingClientRect();
+      const scrollTop = getScrollTop();
       const x = ((e.clientX - rect.left) / rect.width * 100).toFixed(2);
-      const y = ((e.clientY - rect.top) / rect.height * 100).toFixed(2);
+      const y = ((e.clientY - rect.top + scrollTop) / rect.height * 100).toFixed(2);
       closeAllPopovers();
       pin.current = { x: parseFloat(x), y: parseFloat(y) };
       console.log('[pc] overlay click → pin.current set to', pin.current);
@@ -455,6 +474,7 @@ export async function initPrototypeComments(opts = {}) {
   function renderPins() {
     const overlay = document.getElementById('pc-overlay');
     if (!overlay) { console.warn('[pc] renderPins: overlay not found'); return; }
+    refreshScrollEl();
 
     overlay.querySelectorAll('.pc-pin').forEach(p => p.remove());
     const screenId = getScreenId();
@@ -469,8 +489,11 @@ export async function initPrototypeComments(opts = {}) {
       const scale = Math.min(1 + Math.log2(threadCount) * 0.3, 2.2).toFixed(2);
 
       const pinEl = el('div', `pc-pin${c.resolved ? ' resolved' : ''}`);
+      const scrollTop = getScrollTop();
+      const overlayH  = overlay.offsetHeight || 1;
+      const visualY   = c.y - (scrollTop / overlayH * 100);
       pinEl.style.left = `${c.x}%`;
-      pinEl.style.top  = `${c.y}%`;
+      pinEl.style.top  = `${visualY}%`;
       pinEl.style.setProperty('--pc-pin-scale', scale);
       const label = el('span', 'pc-pin-label');
       label.textContent = threadCount;
@@ -769,7 +792,7 @@ export async function initPrototypeComments(opts = {}) {
     if (overlay && comment.x != null) {
       const rect = overlay.getBoundingClientRect();
       const cx = rect.left + (comment.x / 100) * rect.width;
-      const cy = rect.top  + (comment.y / 100) * rect.height;
+      const cy = rect.top  + (comment.y / 100) * rect.height - getScrollTop();
       showThreadPopover(cx, cy, comment.id);
     }
   }
