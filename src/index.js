@@ -414,7 +414,7 @@ export async function initPrototypeComments(opts = {}) {
     checkAutoScroll(e.clientY);
   }
   function onDragMoveTouch(e) {
-    if (!isDragging) return;
+    if (!isDragging || !e.touches.length) return;
     e.preventDefault();
     lastDragX = e.touches[0].clientX; lastDragY = e.touches[0].clientY;
     movePinVisually(e.touches[0].clientX, e.touches[0].clientY);
