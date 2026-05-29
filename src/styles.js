@@ -455,9 +455,25 @@ export const STYLES = `
 /* Pin visibility toggle */
 .pc-pins-hidden .pc-pin { display: none !important; }
 
-/* Auth bar responsive — mobile: compact spacing only, keep all buttons */
-@media (max-width: 768px) {
-  .pc-auth-bar { gap: 4px; margin-left: 4px; padding-left: 8px; }
-  .pc-auth-bar .pc-user-name { display: none; }
+/* Pin relocation — moving state */
+@keyframes pc-pin-pulse {
+  from { box-shadow: 0 2px 8px rgba(15,160,160,.5), 0 0 0 3px #0FA0A0; }
+  to   { box-shadow: 0 2px 8px rgba(15,160,160,.8), 0 0 0 6px rgba(15,160,160,.3); }
+}
+.pc-pin.moving {
+  animation: pc-pin-pulse .6s ease-in-out infinite alternate;
+  z-index: 220;
+}
+.pc-overlay.pc-moving-mode {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='11' fill='%230FA0A0' opacity='.85'/%3E%3Cpath d='M8 12h8M12 8v8' stroke='%23fff' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E") 12 12, move;
+}
+
+/* Auth bar responsive — mobile: floating pill above bottom nav */
+@media (max-width: 767px) {
+  #pc-auth-mobile-wrap .pc-auth-bar { gap: 4px; border-left: none; margin-left: 0; padding-left: 0; }
+  #pc-auth-mobile-wrap .pc-user-name { display: none; }
+  #pc-auth-mobile-wrap #pc-panel-btn { display: none; }
+  .pc-signin-text { display: none; }
+  #pc-auth-mobile-wrap .pc-sign-in-btn { padding: 6px 8px; }
 }
 `;

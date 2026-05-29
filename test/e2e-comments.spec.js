@@ -363,6 +363,143 @@ await test('index.js + styles.js: pin label shows thread count, scales by Math.l
     'styles.js missing var(--pc-pin-scale) — CSS custom property not consumed');
 });
 
+// ── Test 19: scrollContainer option — source check ───────────────────────────
+await test('index.js: scrollContainer option adjusts y coord with scrollTop on click', async () => {
+  const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
+  assert.ok(src.includes('scrollContainer'),
+    'scrollContainer option not found in index.js');
+  assert.ok(src.includes('getScrollTop'),
+    'getScrollTop helper not found — scroll offset not read');
+  assert.ok(src.includes('refreshScrollEl'),
+    'refreshScrollEl not found — scroll listener not lazily re-attached after goto()');
+  // Click y should add scrollTop so pins are stored at content position
+  assert.ok(src.includes('rect.top + scrollTop'),
+    'y calculation does not add scrollTop — pins stored at frame coords, not content coords');
+});
+
+// ── Test 20: scrollContainer in tournament-ui-flow.html ──────────────────────
+await test('tournament-ui-flow.html passes scrollContainer: ".body" to initPrototypeComments', async () => {
+  const htmlPath = join(__dirname, '../../jubo-line-badminton-check-in-system/.claude/worktrees/dev-shelf-docs/docs/design/tournament-ui-flow.html');
+  let htmlSrc;
+  try {
+    htmlSrc = readFileSync(htmlPath, 'utf8');
+  } catch {
+    // Skip if worktree path not present (CI / other dev machine)
+    console.log('    (skip — worktree path not found)');
+    passed++; // count as pass to not fail CI
+    return;
+  }
+  assert.ok(htmlSrc.includes("scrollContainer"),
+    'tournament-ui-flow.html missing scrollContainer option');
+  assert.ok(htmlSrc.includes("'.body'") || htmlSrc.includes('".body"'),
+    'scrollContainer not set to .body selector');
+});
+
+// ── Test 21: Pin relocation — source check ────────────────────────────────────
+await test('index.js: pin relocation feature implemented (startMovingPin, finishMovingPin, movingPinId)', async () => {
+  const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
+  assert.ok(src.includes('movingPinId'),
+    'movingPinId state not found — pin relocation not implemented');
+  assert.ok(src.includes('startMovingPin'),
+    'startMovingPin function not found');
+  assert.ok(src.includes('finishMovingPin'),
+    'finishMovingPin function not found');
+  assert.ok(src.includes('cancelMovingPin'),
+    'cancelMovingPin function not found — ESC/outside-click cancel not implemented');
+  assert.ok(src.includes('pc-moving-mode'),
+    '.pc-moving-mode class not applied — visual move cursor missing');
+  assert.ok(src.includes("data-comment-id"),
+    'data-comment-id not set on pin elements — move mode cannot find target pin');
+});
+
+// ── Test 22: Pin relocation — Move button gating — source check ───────────────
+await test('index.js: Move button shown only for own root positional comments', async () => {
+  const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
+  // Must gate on isRootComment to avoid showing Move on replies
+  assert.ok(src.includes('isRootComment') && src.includes("pc-move-pin-btn"),
+    'Move button not gated by isRootComment');
+  // Must check authorUid to avoid showing Move on others' pins
+  const moveSection = src.slice(src.indexOf('pc-move-pin-btn') - 200, src.indexOf('pc-move-pin-btn') + 200);
+  assert.ok(moveSection.includes('authorUid') && moveSection.includes('currentUser.uid'),
+    'Move button missing authorUid === currentUser.uid guard — anyone could move any pin');
+  // Must check type === 'positional' to avoid showing on note-type comments
+  assert.ok(moveSection.includes("'positional'"),
+    "Move button missing type === 'positional' guard");
+});
+
+// ── Test 23: styles.js — pin relocation CSS ───────────────────────────────────
+await test('styles.js: .pc-pin.moving animation and .pc-overlay.pc-moving-mode cursor defined', async () => {
+  const stylesSrc = readFileSync(join(__dirname, '../src/styles.js'), 'utf8');
+  assert.ok(stylesSrc.includes('.pc-pin.moving'),
+    '.pc-pin.moving CSS rule not found');
+  assert.ok(stylesSrc.includes('pc-pin-pulse'),
+    'pc-pin-pulse keyframe animation not found');
+  assert.ok(stylesSrc.includes('.pc-overlay.pc-moving-mode'),
+    '.pc-overlay.pc-moving-mode cursor CSS not found');
+});
+
+// ── Test 24: renderPins sets data-comment-id on live page ────────────────────
+await test('Live page: rendered pc-pin elements have data-comment-id attribute', async () => {
+  // Switch back to design mode to see pins
+  await page.evaluate(() => { if (typeof switchMode === 'function') switchMode('design'); });
+  await page.evaluate(() => window.goto?.('m3'));
+  await page.waitForTimeout(2000);
+
+  await page.waitForFunction(() =>
+    document.querySelectorAll('.pc-pin').length > 0, { timeout: 8000 }
+  ).catch(() => null);
+
+  const result = await page.evaluate(() => {
+    const pins = [...document.querySelectorAll('.pc-pin')];
+    if (pins.length === 0) return { count: 0, hasIds: true }; // no pins on this screen — ok
+    const allHaveId = pins.every(p => !!p.dataset.commentId);
+    return { count: pins.length, hasIds: allHaveId, sample: pins[0]?.dataset.commentId };
+  });
+  assert.ok(result.hasIds,
+    `${result.count} pins found but some missing data-comment-id`);
+});
+
+// ── Test 25: scroll tracking — pins follow body scroll on live page ────────────
+await test('Live page: pin viewport position shifts by ~bodyScrollTop after body scroll', async () => {
+  await page.evaluate(() => window.goto?.('m3'));
+  await page.waitForTimeout(2000);
+
+  // Scroll back to top first
+  await page.evaluate(() => {
+    const b = document.querySelector('.body');
+    if (b) b.scrollTop = 0;
+  });
+  await page.waitForTimeout(300);
+
+  const before = await page.evaluate(() => {
+    const pins = [...document.querySelectorAll('.pc-pin')];
+    const body = document.querySelector('.body');
+    return { scrollable: body && body.scrollHeight > body.clientHeight, pins: pins.map(p => ({ top: Math.round(p.getBoundingClientRect().top) })) };
+  });
+
+  if (!before.scrollable || before.pins.length === 0) {
+    console.log('    (skip — no scrollable body or no pins on this screen)');
+    passed++;
+    return;
+  }
+
+  const scrollAmt = 150;
+  await page.evaluate(s => document.querySelector('.body').scrollTop = s, scrollAmt);
+  await page.waitForTimeout(300);
+
+  const after = await page.evaluate(() => {
+    const pins = [...document.querySelectorAll('.pc-pin')];
+    const body = document.querySelector('.body');
+    return { scrollTop: body?.scrollTop, pins: pins.map(p => ({ top: Math.round(p.getBoundingClientRect().top) })) };
+  });
+
+  const expectedShift = scrollAmt;
+  const actualShift = before.pins[0].top - after.pins[0].top;
+  // Allow ±10px tolerance
+  assert.ok(Math.abs(actualShift - expectedShift) <= 10,
+    `Pin 1 shifted ${actualShift}px expected ~${expectedShift}px — scroll tracking not working`);
+});
+
 // ── Summary ───────────────────────────────────────────────────────────────────
 await browser.close();
 

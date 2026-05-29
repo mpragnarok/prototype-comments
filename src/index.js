@@ -134,6 +134,7 @@ export async function initPrototypeComments(opts = {}) {
   // interaction state (UI lifecycle)
   const pin   = { current: null };          // pendingPin
   const pop   = { id: null, el: null };     // openPopoverId + popoverEl
+  let movingPinId = null;                   // id of pin currently being relocated
 
   // panel state
   const panel = { open: false, filter: 'all', el: null, unsub: null };
@@ -238,14 +239,20 @@ export async function initPrototypeComments(opts = {}) {
     target.appendChild(overlay);
 
     overlay.addEventListener('click', e => {
-      if (!commentMode || !currentUser) return;
+      if (!currentUser) return;
       e.stopPropagation();
       const rect = overlay.getBoundingClientRect();
       const scrollTop = getScrollTop();
-      const x = ((e.clientX - rect.left) / rect.width * 100).toFixed(2);
-      const y = ((e.clientY - rect.top + scrollTop) / rect.height * 100).toFixed(2);
+      const x = parseFloat(((e.clientX - rect.left) / rect.width * 100).toFixed(2));
+      const y = parseFloat(((e.clientY - rect.top + scrollTop) / rect.height * 100).toFixed(2));
+
+      if (movingPinId) {
+        finishMovingPin(x, y);
+        return;
+      }
+      if (!commentMode) return;
       closeAllPopovers();
-      pin.current = { x: parseFloat(x), y: parseFloat(y) };
+      pin.current = { x, y };
       console.log('[pc] overlay click → pin.current set to', pin.current);
       showInputPopover(e.clientX, e.clientY, null);
     });
@@ -258,6 +265,39 @@ export async function initPrototypeComments(opts = {}) {
     const toggle = document.getElementById('pc-comment-toggle');
     if (toggle) toggle.classList.toggle('active', active);
     if (!active) { pin.current = null; closeAllPopovers(); }
+  }
+
+  // ── Pin Relocation ────────────────────────────────────────────────────────
+  function startMovingPin(commentId) {
+    movingPinId = commentId;
+    closeAllPopovers();
+    const overlay = document.getElementById('pc-overlay');
+    if (overlay) overlay.classList.add('active', 'pc-moving-mode');
+    const pinEl = overlay?.querySelector(`[data-comment-id="${commentId}"]`);
+    if (pinEl) pinEl.classList.add('moving');
+  }
+
+  async function finishMovingPin(x, y) {
+    if (!movingPinId) return;
+    const id = movingPinId;
+    movingPinId = null;
+    await store.update(id, { x, y });
+    const overlay = document.getElementById('pc-overlay');
+    if (overlay) {
+      overlay.classList.remove('pc-moving-mode');
+      if (!commentMode) overlay.classList.remove('active');
+    }
+  }
+
+  function cancelMovingPin() {
+    if (!movingPinId) return;
+    movingPinId = null;
+    const overlay = document.getElementById('pc-overlay');
+    if (overlay) {
+      overlay.classList.remove('pc-moving-mode');
+      if (!commentMode) overlay.classList.remove('active');
+    }
+    renderPins();
   }
 
   // ── Popover (input / thread) ───────────────────────────────────────────────
@@ -384,6 +424,15 @@ export async function initPrototypeComments(opts = {}) {
       acts.appendChild(resolveBtn);
     }
 
+    // Move pin position (root own comments only)
+    if (isRootComment && currentUser && c.authorUid === currentUser.uid && c.type === 'positional') {
+      const moveBtn = el('button', 'pc-ci-action pc-move-pin-btn');
+      moveBtn.textContent = '移動';
+      moveBtn.title = '點選後在畫面上重新選取 pin 位置，按 ESC 取消';
+      moveBtn.onclick = () => startMovingPin(c.id);
+      acts.appendChild(moveBtn);
+    }
+
     // Edit (own comments only) + Delete (own replies only)
     if (currentUser && c.authorUid === currentUser.uid) {
       const editBtn = el('button', 'pc-ci-action');
@@ -489,6 +538,7 @@ export async function initPrototypeComments(opts = {}) {
       const scale = Math.min(1 + Math.log2(threadCount) * 0.3, 2.2).toFixed(2);
 
       const pinEl = el('div', `pc-pin${c.resolved ? ' resolved' : ''}`);
+      pinEl.dataset.commentId = c.id;
       const scrollTop = getScrollTop();
       const overlayH  = overlay.offsetHeight || 1;
       const visualY   = c.y - (scrollTop / overlayH * 100);
@@ -861,6 +911,15 @@ export async function initPrototypeComments(opts = {}) {
       const isPin = e.target.closest('.pc-pin');
       if (!isPin) { pin.current = null; closeAllPopovers(); }
     }
+    // Cancel move mode when clicking outside overlay
+    if (movingPinId) {
+      const overlay = document.getElementById('pc-overlay');
+      if (overlay && !overlay.contains(e.target)) cancelMovingPin();
+    }
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && movingPinId) cancelMovingPin();
   });
 
   return {
