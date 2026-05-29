@@ -153,6 +153,7 @@ export async function initPrototypeComments(opts = {}) {
       fb.signInWithPopup(auth, new fb.GoogleAuthProvider());
 
     bar.appendChild(signInBtn);
+    bar.appendChild(buildHelpBtn());
     return { bar, signInBtn };
   }
 
@@ -204,6 +205,60 @@ export async function initPrototypeComments(opts = {}) {
     so.textContent = '登出';
     so.onclick = () => fb.signOut(auth);
     bar.appendChild(so);
+    bar.appendChild(buildHelpBtn());
+  }
+
+  function buildHelpBtn() {
+    const btn = el('button', 'pc-help-btn');
+    btn.title = '使用說明';
+    btn.textContent = '?';
+    btn.onclick = showHelpModal;
+    return btn;
+  }
+
+  function showHelpModal() {
+    if (document.getElementById('pc-help-modal')) return;
+    const modal = el('div', 'pc-help-modal');
+    modal.id = 'pc-help-modal';
+    modal.innerHTML = `
+      <div class="pc-help-box">
+        <div class="pc-help-header">
+          <span>💬 留言系統使用說明</span>
+          <button class="pc-popover-close pc-help-close" onclick="this.closest('#pc-help-modal').remove()">✕</button>
+        </div>
+        <div class="pc-help-body">
+          <div class="pc-help-section">
+            <div class="pc-help-title">🔑 登入</div>
+            <div class="pc-help-desc">點選「Sign in with Google」登入後，即可使用所有留言功能。</div>
+          </div>
+          <div class="pc-help-section">
+            <div class="pc-help-title">📌 新增 Pin 留言</div>
+            <div class="pc-help-desc">點選「💬 留言模式」後，在畫面任意位置點一下放置 Pin，輸入留言後送出。</div>
+          </div>
+          <div class="pc-help-section">
+            <div class="pc-help-title">↕️ 移動 Pin</div>
+            <div class="pc-help-desc"><strong>長按 Pin 約 0.5 秒</strong>進入拖曳模式，拖曳至新位置後放開即儲存。按 <kbd>ESC</kbd> 取消。超出畫面的 Pin 會停靠在邊緣，同樣可長按拖曳。</div>
+          </div>
+          <div class="pc-help-section">
+            <div class="pc-help-title">💬 查看與回覆</div>
+            <div class="pc-help-desc">點選 Pin 開啟留言串，可在留言串底部直接回覆。</div>
+          </div>
+          <div class="pc-help-section">
+            <div class="pc-help-title">✓ 標記完成</div>
+            <div class="pc-help-desc">留言處理完後點「✓ Resolve」，Pin 變灰色表示已解決。</div>
+          </div>
+          <div class="pc-help-section">
+            <div class="pc-help-title">👁 隱藏 Pin</div>
+            <div class="pc-help-desc">點選眼睛圖示切換所有 Pin 的顯示狀態。</div>
+          </div>
+          <div class="pc-help-section">
+            <div class="pc-help-title">📋 全部留言</div>
+            <div class="pc-help-desc">點選「📋 全部留言」查看並跳轉到任意畫面的留言。</div>
+          </div>
+        </div>
+      </div>`;
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+    document.body.appendChild(modal);
   }
 
   function mountAuthBar() {
@@ -586,8 +641,13 @@ export async function initPrototypeComments(opts = {}) {
       const scrollTop = getScrollTop();
       const overlayH  = overlay.offsetHeight || 1;
       const visualY   = c.y - (scrollTop / overlayH * 100);
+      const safeMin   = 14 / overlayH * 100;
+      const safeMax   = 100 - safeMin;
+      const isEdge    = visualY < 0 || visualY > 100;
+      const pinVisualY = isEdge ? Math.max(safeMin, Math.min(safeMax, visualY)) : visualY;
+      if (isEdge) pinEl.classList.add('pc-pin-edge', visualY < 0 ? 'pc-pin-edge-top' : 'pc-pin-edge-bottom');
       pinEl.style.left = `${c.x}%`;
-      pinEl.style.top  = `${visualY}%`;
+      pinEl.style.top  = `${pinVisualY}%`;
       pinEl.style.setProperty('--pc-pin-scale', scale);
       const label = el('span', 'pc-pin-label');
       label.textContent = threadCount;

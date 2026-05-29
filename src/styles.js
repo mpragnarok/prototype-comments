@@ -455,6 +455,100 @@ export const STYLES = `
 /* Pin visibility toggle */
 .pc-pins-hidden .pc-pin { display: none !important; }
 
+/* Edge-docked pins (off-screen content) */
+.pc-pin.pc-pin-edge { opacity: .75; }
+.pc-pin.pc-pin-edge-top::after,
+.pc-pin.pc-pin-edge-bottom::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+}
+.pc-pin.pc-pin-edge-top::after {
+  bottom: calc(100% + 2px);
+  border-bottom: 5px solid #0FA0A0;
+}
+.pc-pin.pc-pin-edge-bottom::after {
+  top: calc(100% + 2px);
+  border-top: 5px solid #0FA0A0;
+}
+
+/* Help button */
+.pc-help-btn {
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  border: 1.5px solid #e5e7eb;
+  background: #fff;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all .15s;
+}
+.pc-help-btn:hover { border-color: #0FA0A0; color: #0FA0A0; }
+
+/* Help modal */
+.pc-help-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.45);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.pc-help-box {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.2);
+  width: 100%;
+  max-width: 360px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pc-help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 12px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+  border-bottom: 1px solid #f3f4f6;
+  flex-shrink: 0;
+}
+.pc-help-close { flex-shrink: 0; }
+.pc-help-body {
+  overflow-y: auto;
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pc-help-section { display: flex; flex-direction: column; gap: 3px; }
+.pc-help-title { font-size: 12px; font-weight: 700; color: #1f2937; }
+.pc-help-desc { font-size: 12px; color: #4b5563; line-height: 1.6; }
+.pc-help-desc kbd {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  font-size: 10px;
+  font-family: monospace;
+}
+
 /* Pin relocation — drag state */
 @keyframes pc-pin-pulse {
   from { box-shadow: 0 2px 8px rgba(15,160,160,.5), 0 0 0 3px #0FA0A0; }
