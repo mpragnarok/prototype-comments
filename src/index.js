@@ -269,17 +269,13 @@ export async function initPrototypeComments(opts = {}) {
     const wrap = el('div');
     const { bar } = buildAuthBar();
     wrap.appendChild(bar);
-    const isMobile = window.innerWidth < 768;
-    const targetEl = (authBarTarget && !isMobile) ? document.querySelector(authBarTarget) : null;
+    const targetEl = authBarTarget ? document.querySelector(authBarTarget) : null;
     if (targetEl) {
       wrap.style.flexShrink = '0';
       targetEl.appendChild(wrap);
-    } else if (isMobile) {
+    } else {
       wrap.id = 'pc-auth-mobile-wrap';
       wrap.style.cssText = 'position:fixed;bottom:64px;right:12px;z-index:9000;background:#fff;border-radius:20px;box-shadow:0 2px 12px rgba(0,0,0,.15);padding:6px 10px;';
-      document.body.appendChild(wrap);
-    } else {
-      wrap.style.cssText = 'position:fixed;top:12px;right:16px;z-index:9000;';
       document.body.appendChild(wrap);
     }
   }
