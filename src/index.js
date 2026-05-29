@@ -435,7 +435,9 @@ export async function initPrototypeComments(opts = {}) {
     const scrollTop = getScrollTop();
     const overlayH = overlay.offsetHeight || 1;
     const x = parseFloat((Math.max(0, Math.min(100, (e.clientX - rect.left) / rect.width * 100))).toFixed(2));
-    const y = parseFloat((Math.max(0, Math.min(100, (e.clientY - rect.top + scrollTop) / overlayH * 100))).toFixed(2));
+    // y is not capped at 100 — when the phone body is scrolled, the stored y can
+    // legitimately exceed 100% to represent content positions below the initial fold.
+    const y = parseFloat((Math.max(0, (e.clientY - rect.top + scrollTop) / overlayH * 100)).toFixed(2));
     finishMovingPin(x, y);
   }
 
@@ -450,7 +452,7 @@ export async function initPrototypeComments(opts = {}) {
     const scrollTop = getScrollTop();
     const overlayH = overlay.offsetHeight || 1;
     const x = parseFloat((Math.max(0, Math.min(100, (t.clientX - rect.left) / rect.width * 100))).toFixed(2));
-    const y = parseFloat((Math.max(0, Math.min(100, (t.clientY - rect.top + scrollTop) / overlayH * 100))).toFixed(2));
+    const y = parseFloat((Math.max(0, (t.clientY - rect.top + scrollTop) / overlayH * 100)).toFixed(2));
     finishMovingPin(x, y);
   }
 
