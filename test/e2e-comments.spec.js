@@ -516,6 +516,72 @@ await test('Live page: pin viewport position shifts by ~bodyScrollTop after body
     `Pin 1 shifted ${actualShift}px expected ~${expectedShift}px — scroll tracking not working`);
 });
 
+// ── Test 26: edge-dock pins — source check ────────────────────────────────────
+await test('index.js: off-screen pins clamped to overlay edge (pc-pin-edge-top / bottom)', async () => {
+  const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
+  assert.ok(src.includes('pc-pin-edge-top') && src.includes('pc-pin-edge-bottom'),
+    'Edge-dock classes (pc-pin-edge-top / pc-pin-edge-bottom) not found');
+  assert.ok(src.includes('safeMin') && src.includes('safeMax'),
+    'safeMin/safeMax clamping logic not found — off-screen pins may be unclickable');
+  assert.ok(src.includes('isEdge'),
+    'isEdge detection not found');
+});
+
+// ── Test 27: edge-dock CSS — styles check ─────────────────────────────────────
+await test('styles.js: edge-dock pin CSS defined (arrow indicators)', async () => {
+  const stylesSrc = readFileSync(join(__dirname, '../src/styles.js'), 'utf8');
+  assert.ok(stylesSrc.includes('pc-pin-edge-top') && stylesSrc.includes('pc-pin-edge-bottom'),
+    'Edge-dock CSS not found in styles.js');
+  assert.ok(stylesSrc.includes('border-bottom') || stylesSrc.includes('border-top'),
+    'Arrow triangle CSS not found for edge-dock indicators');
+});
+
+// ── Test 28: autoscroll during drag — source check ────────────────────────────
+await test('index.js: autoscroll during drag implemented (checkAutoScroll, setAutoScroll, clearAutoScroll)', async () => {
+  const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
+  assert.ok(src.includes('checkAutoScroll'),
+    'checkAutoScroll function not found — drag-to-scroll not implemented');
+  assert.ok(src.includes('setAutoScroll'),
+    'setAutoScroll function not found');
+  assert.ok(src.includes('clearAutoScroll'),
+    'clearAutoScroll function not found — autoscroll may not stop after drag ends');
+  assert.ok(src.includes('autoScrollTimer'),
+    'autoScrollTimer state not found');
+  assert.ok(src.includes('lastDragX') && src.includes('lastDragY'),
+    'lastDragX/Y not tracked — pin position during autoscroll will not update');
+  // clearAutoScroll must be called in removeDragListeners
+  const removeIdx = src.indexOf('function removeDragListeners');
+  const removeBody = src.slice(removeIdx, removeIdx + 300);
+  assert.ok(removeBody.includes('clearAutoScroll'),
+    'clearAutoScroll not called in removeDragListeners — autoscroll may persist after drag ends');
+});
+
+// ── Test 29: help modal — source check ────────────────────────────────────────
+await test('index.js: help button and modal implemented', async () => {
+  const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
+  assert.ok(src.includes('buildHelpBtn'),
+    'buildHelpBtn function not found');
+  assert.ok(src.includes('showHelpModal'),
+    'showHelpModal function not found');
+  assert.ok(src.includes('pc-help-modal'),
+    'pc-help-modal id not found in modal HTML');
+  // Help button must be added to both signed-in and signed-out auth bar states
+  const helpBtnCount = (src.match(/buildHelpBtn/g) || []).length;
+  assert.ok(helpBtnCount >= 3, // definition + 2 usages (signed-out bar + signed-in bar)
+    `buildHelpBtn called only ${helpBtnCount} times — may not appear in both signed-in and signed-out states`);
+});
+
+// ── Test 30: help modal CSS — styles check ────────────────────────────────────
+await test('styles.js: help modal and button CSS defined', async () => {
+  const stylesSrc = readFileSync(join(__dirname, '../src/styles.js'), 'utf8');
+  assert.ok(stylesSrc.includes('pc-help-modal'),
+    'pc-help-modal CSS not found');
+  assert.ok(stylesSrc.includes('pc-help-btn'),
+    'pc-help-btn CSS not found');
+  assert.ok(stylesSrc.includes('pc-help-box'),
+    'pc-help-box CSS not found');
+});
+
 // ── Summary ───────────────────────────────────────────────────────────────────
 await browser.close();
 
