@@ -130,7 +130,8 @@ const STYLES = `
 }
 .pc-pin.resolved::before { border-top-color: #d1d5db; }
 .pc-pin.pc-pin-edge::before { display: none; }   /* edge pin 用 ::after 箭頭，不顯示泡泡尾巴 */
-.pc-pin-label { line-height: 1; }
+.pc-pin-label { line-height: 1; display: inline-flex; align-items: center; gap: 1px; }
+.pc-pin-ic { flex: 0 0 16px; display: inline-flex; justify-content: center; overflow: hidden; }   /* icon 固定寬框(不縮不漲) → 💬/✓ 同寬，resolved 與未解決 pin 對齊 */
 
 /* B6: 「全部留言」導向同頁時，pin 閃爍高亮讓留言「跳出來」 */
 .pc-pin.pc-pin-flash { animation: pc-pin-flash .55s ease 2; z-index: 211; }
@@ -1752,8 +1753,8 @@ export async function initPrototypeComments(opts = {}) {
       pinEl.style.top  = `${pinVisualY}%`;
       pinEl.style.setProperty('--pc-pin-scale', scale);
       const label = el('span', 'pc-pin-label');
-      // 方案 C 對話泡：未解決顯示 💬N、已解決顯示 ✓N（與當初核准的 mockup 一致）
-      label.textContent = (c.resolved ? '✓' : '💬') + threadCount;
+      // 方案 C 對話泡：icon 放固定寬度框 → 💬(未解決)/✓(已解決) 同寬，兩種 pin 尺寸一致
+      label.innerHTML = '<span class="pc-pin-ic">' + (c.resolved ? '✓' : '💬') + '</span>' + threadCount;
       pinEl.appendChild(label);
 
       pinEl.addEventListener('click', e => {

@@ -98,6 +98,19 @@ const seedComment = (over = {}) => ({ type: 'positional', screenId: 's1', x: 50,
     assert(c.x !== 50 || c.y !== 50, `pin 應已移動（原 x:50,y:50），實際 ${JSON.stringify({ x: c.x, y: c.y })}`);
   });
 
+  await test('resolved pin 與未解決 pin 同寬（對齊，icon 固定寬）', async () => {
+    await page.mouse.move(2, 2);          // 移開游標，避免 :hover scale(1.2) 干擾寬度量測
+    await page.waitForTimeout(120);
+    const w = await page.evaluate(() => {
+      const un = document.querySelector('.pc-pin:not(.resolved)');
+      const re = document.querySelector('.pc-pin.resolved');
+      return { un: un && un.getBoundingClientRect().width, re: re && re.getBoundingClientRect().width };
+    });
+    console.log('     pin widths 💬/✓:', JSON.stringify(w));
+    assert(w.un && w.re, 'both pins required');
+    assert(Math.abs(w.un - w.re) < 2, `resolved 應與未解決同寬，💬=${w.un} ✓=${w.re}`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

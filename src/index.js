@@ -868,8 +868,8 @@ export async function initPrototypeComments(opts = {}) {
       pinEl.style.top  = `${pinVisualY}%`;
       pinEl.style.setProperty('--pc-pin-scale', scale);
       const label = el('span', 'pc-pin-label');
-      // 方案 C 對話泡：未解決顯示 💬N、已解決顯示 ✓N（與當初核准的 mockup 一致）
-      label.textContent = (c.resolved ? '✓' : '💬') + threadCount;
+      // 方案 C 對話泡：icon 放固定寬度框 → 💬(未解決)/✓(已解決) 同寬，兩種 pin 尺寸一致
+      label.innerHTML = '<span class="pc-pin-ic">' + (c.resolved ? '✓' : '💬') + '</span>' + threadCount;
       pinEl.appendChild(label);
 
       pinEl.addEventListener('click', e => {
