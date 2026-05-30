@@ -93,6 +93,14 @@
   - **截圖（2026-05-31 補）**：`--flow <html|url>` 用 playwright 載入 flow、逐畫面 `goto` + 截 `#phone`（addInitScript 設 onboarding dismissed、route abort pc.js → 無 auth bar/無重複 pin），base64 嵌進 report；frame 改依圖比例（has-shot 解除固定 aspect）。`--shots <dir>` 仍可用現成 png。**已對 live `tournament-ui-flow` 跑通：26 留言/10 畫面/19 未解決，截圖 10/10 嵌入**。
   - **測試（2026-05-31 補）**：純函式抽出可測（`group`/`pinMap`/`commentCard`/`buildJson`/`buildHtml`/`decode` 全參數化、export）；`05-comment-report.test.js`（`node:test`，零依賴）17 cases green，涵蓋 Standard/Boundary/Branching(includeResolved・positional vs note・resolved pin)/Error(decode 未知型別)/escape。
   - SKILL.md 已記錄用法。
+  - **v2 改良（2026-05-31）**：
+    - **亂碼修正**：fetch 改 `Buffer.concat` 一次解碼（原 `b+=d` 把中文字切在 chunk 邊界 → U+FFFD）；加 `countGarble` 自檢，產出時印「亂碼檢查 ✓/⚠️」。
+    - **截圖對位**：viewport 1280→**1680**（ui-flow 桌面版不溢出，element 截圖才不位移；原本截到側邊欄/吃進右面板、左邊被切）。
+    - **網頁設計稿放大**：截圖讀 PNG IHDR 判長寬比，橫式(網頁)→ `wide` class 整列放大、上下排版；直式(手機) 維持側欄小框。
+    - **工程留言改 spec 討論串**：note 型不放截圖，改「依附的 dev note 規格文字卡(noteTag+noteText, 按 noteKey 分組) + 樓中樓」；buildJson 補 noteTag/noteText 給 AI。已對 live vitallink(s1/s2) 驗證。
+    - 測試 19 green（加 countGarble、isWide、note 維度）。
+  - **skill 重構（2026-05-31）**：SKILL.md 定義 `gen`/`report` 兩 action（像 /dev），共用 Firebase/路徑 config；description 補 report 觸發詞。
+- **⏳ R2 下一步（採用/不採用 + 頁面決議，使用者 2026-05-31 選「報告可寫回 Firestore」）**：report.html 升級互動式——每則留言加 採用/不採用/待議 + 註記，寫回 Firestore；pc.js 留言加 `decision`/`decisionNote` 欄位。**動 pc.js = 走 GATE 流程（html plan → 核准 → 改 code+test → 更新 design-spec）**，尚未開始，需先出 plan。
 
 ### R3. UI component 畫面綁定 Storybook id
 - **公司流程**：react/flutter prototype → Netlify → ui-flow kit 產畫面流程交付。希望把 ui-flow 畫面區塊對應到 Storybook component ID，建立 設計↔component↔code 追溯。
