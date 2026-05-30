@@ -95,7 +95,7 @@ export const STYLES = `
   min-width: 30px;
   height: 22px;
   padding: 0 8px 1px;
-  border-radius: 10px 10px 10px 3px;   /* 三角左下，配尾巴 */
+  border-radius: 11px;                 /* 四角統一圓角；尾巴從底邊直線段長出 */
   background: #BA1A1A;
   color: #fff;
   font-size: 12px;
@@ -112,12 +112,12 @@ export const STYLES = `
 .pc-pin::before {                        /* 對話泡尾巴，左下角指向錨點 */
   content: '';
   position: absolute;
-  bottom: -6px;
-  left: 7px;
+  bottom: -5px;
+  left: 10px;
   width: 0; height: 0;
-  border-left: 6px solid transparent;
+  border-left: 5px solid transparent;
   border-right: 6px solid transparent;
-  border-top: 9px solid #BA1A1A;
+  border-top: 8px solid #BA1A1A;
 }
 .pc-pin:hover { transform: translate(-50%, -50%) scale(calc(var(--pc-pin-scale, 1) * 1.2)); }
 .pc-pin.resolved {
@@ -164,6 +164,21 @@ export const STYLES = `
   width: 30px; height: 30px; border-radius: 7px; line-height: 1;
 }
 .pc-emoji-opt:hover { background: #f1f5f9; }
+/* B5: 手機 tap reaction chip → 顯示誰按了 + toggle */
+.pc-reaction-users {
+  position: fixed; z-index: 2147483647;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.16);
+  min-width: 140px; max-width: 230px;
+}
+.pc-reaction-users-row { display: flex; align-items: center; padding: 4px 5px; font-size: 13px; color: #334155; }
+.pc-reaction-users-toggle {
+  margin-top: 6px; width: 100%; box-sizing: border-box;
+  border: 1px solid #e5e7eb; background: #f8fafc; color: #475569;
+  border-radius: 7px; padding: 7px; cursor: pointer; font-family: inherit; font-size: 12px;
+}
+.pc-reaction-users-toggle:hover { border-color: #0FA0A0; color: #0FA0A0; }
+.pc-reaction-users-toggle.mine { background: #FFDAD6; border-color: #BA1A1A; color: #BA1A1A; }
 
 /* All-comments panel search */
 .pc-panel-search { padding: 8px 12px 4px; }

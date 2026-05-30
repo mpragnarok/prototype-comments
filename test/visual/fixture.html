@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<!--
+  test/visual/fixture.html — pc.js 元件視覺 regression fixture (no Firebase)
+
+  純 sample DOM。真實 pin/元件 CSS 由 runner (visual-shot.js) 從 src/styles.js
+  讀出 STYLES 後 addStyleTag 注入 —— 永不複製 CSS，pin 樣式改了截圖自動跟著變。
+  本檔只負責 layout 與各狀態的 markup。
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>pc.js visual fixture</title>
+<style>
+  /* layout-only — 不碰任何 .pc-* class，避免污染待測樣式 */
+  body { margin: 0; font: 13px/1.5 -apple-system, system-ui, sans-serif; color: #111827; background: #fff; }
+  .vf-head { padding: 14px 20px; border-bottom: 1px solid #e5e7eb; }
+  .vf-head h1 { margin: 0; font-size: 15px; }
+  .vf-head p { margin: 2px 0 0; font-size: 11px; color: #9ca3af; }
+  .vf-sec { padding: 16px 20px; border-bottom: 1px solid #f1f5f9; }
+  .vf-sec h2 { margin: 0 0 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280; }
+  .vf-grid { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+  /* 每個 pin 放在置中的 cell，pin 用 left/top 50% 錨定 */
+  .vf-cell {
+    position: relative; width: 72px; height: 64px;
+    background: #f8fafc; border: 1px solid #eef2f7; border-radius: 8px;
+    display: flex; align-items: flex-end; justify-content: center;
+  }
+  .vf-cell .pc-pin { left: 50%; top: 50%; }
+  .vf-cell .vf-lbl { position: absolute; bottom: 3px; left: 0; right: 0; text-align: center; font-size: 9px; color: #94a3b8; }
+  /* 放大 cell：看圓角/尾巴細節（A3 檢視重點）*/
+  .vf-zoom { width: 150px; height: 150px; }
+  .vf-zoom .pc-pin { --pc-pin-scale: 4; }
+  /* sticky header 對照（驗 A6 pin 不蓋 header）*/
+  .vf-fakebar { position: relative; height: 40px; background: #0FA0A0; color: #fff; display: flex; align-items: center; padding: 0 12px; font-weight: 600; border-radius: 6px; z-index: 100; }
+  .vf-comp { max-width: 320px; }
+  .vf-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+  .vf-ci-name { font-weight: 600; font-size: 13px; }
+  .vf-ci-body { margin: 4px 0 2px; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div class="vf-head">
+  <h1>pc.js — visual regression fixture</h1>
+  <p>真實 STYLES 由 runner 注入。改 src/styles.js → 重跑 → 截圖自動反映。</p>
+</div>
+
+<!-- ── PIN 各態 ───────────────────────────── -->
+<div class="vf-sec">
+  <h2>Pin — 狀態</h2>
+  <div class="vf-grid">
+    <div class="vf-cell">
+      <div class="pc-pin"><span class="pc-pin-label">💬1</span></div>
+      <span class="vf-lbl">未解決·單位數</span>
+    </div>
+    <div class="vf-cell">
+      <div class="pc-pin"><span class="pc-pin-label">💬12</span></div>
+      <span class="vf-lbl">未解決·多位數</span>
+    </div>
+    <div class="vf-cell">
+      <div class="pc-pin resolved"><span class="pc-pin-label">✓3</span></div>
+      <span class="vf-lbl">已解決</span>
+    </div>
+    <div class="vf-cell">
+      <div class="pc-pin pc-pin-edge"><span class="pc-pin-label">💬2</span></div>
+      <span class="vf-lbl">edge pin</span>
+    </div>
+    <div class="vf-cell">
+      <div class="pc-pin pc-pin-flash"><span class="pc-pin-label">💬1</span></div>
+      <span class="vf-lbl">flash 高亮</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── PIN 放大（A3 圓角/尾巴檢視）──────────── -->
+<div class="vf-sec">
+  <h2>Pin — 放大 ×4（檢視左下圓角與尾巴銜接）</h2>
+  <div class="vf-grid">
+    <div class="vf-cell vf-zoom">
+      <div class="pc-pin"><span class="pc-pin-label">💬1</span></div>
+      <span class="vf-lbl">未解決</span>
+    </div>
+    <div class="vf-cell vf-zoom">
+      <div class="pc-pin resolved"><span class="pc-pin-label">✓1</span></div>
+      <span class="vf-lbl">已解決</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── A6: pin vs sticky header 疊層 ────────── -->
+<div class="vf-sec">
+  <h2>Pin — z-index 對照（A6：pin 不應蓋過 header）</h2>
+  <div class="vf-fakebar">sticky header (z-index:100)</div>
+</div>
+
+<!-- ── REACTIONS ──────────────────────────── -->
+<div class="vf-sec">
+  <h2>Emoji reactions</h2>
+  <div class="pc-ci-reactions">
+    <button class="pc-reaction-chip">👍 <span>2</span></button>
+    <button class="pc-reaction-chip mine">❤️ <span>1</span></button>
+    <button class="pc-reaction-chip">🎉 <span>3</span></button>
+    <button class="pc-reaction-add">＋</button>
+  </div>
+</div>
+
+<!-- ── B5 reaction 名單 popover ─────────────── -->
+<div class="vf-sec">
+  <h2>B5 — reaction「誰按了」popover（手機 tap；position 攤平展示）</h2>
+  <div class="vf-grid">
+    <div class="pc-reaction-users" style="position:static;">
+      <div class="pc-reaction-users-row">👍  設計師 A</div>
+      <div class="pc-reaction-users-row">👍  工程師 B</div>
+      <button class="pc-reaction-users-toggle mine">✓ 已按，點此取消</button>
+    </div>
+    <div class="pc-reaction-users" style="position:static;">
+      <div class="pc-reaction-users-row">🎉  PM C</div>
+      <button class="pc-reaction-users-toggle">我也按一個</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── PANEL TOOLBAR ──────────────────────── -->
+<div class="vf-sec">
+  <h2>全部留言面板 — toolbar</h2>
+  <div class="vf-comp">
+    <div class="pc-panel-search">
+      <input class="pc-panel-search-input" placeholder="搜尋留言…" />
+    </div>
+    <div class="pc-panel-toolbar">
+      <div class="pc-panel-tagchips">
+        <button class="pc-panel-tagchip active">全部項目</button>
+        <button class="pc-panel-tagchip">🎨 設計</button>
+        <button class="pc-panel-tagchip">🔧 工程</button>
+      </div>
+      <button class="pc-panel-sort">新→舊</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── REPLY THREAD（D1 單層）─────────────── -->
+<div class="vf-sec">
+  <h2>回覆階層（D1：root 可回覆+resolve，reply 不可）</h2>
+  <div class="vf-comp vf-card">
+    <div class="vf-ci-name">設計師 A <span class="pc-mention">@工程師 B</span></div>
+    <div class="vf-ci-body">這個按鈕的 padding 要再大一點</div>
+    <div class="pc-note-replies">
+      <div>
+        <div class="vf-ci-name">工程師 B</div>
+        <div class="vf-ci-body">收到，改成 12px（reply 無回覆/resolve 鈕）</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

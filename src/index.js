@@ -629,6 +629,30 @@ export async function initPrototypeComments(opts = {}) {
     document.body.appendChild(pop);
     setTimeout(() => document.addEventListener('click', function h() { pop.remove(); document.removeEventListener('click', h); }), 0);
   }
+  // B5: 手機無 hover → tap chip 顯示「誰按了」popover（含 toggle 自己反應的按鈕）
+  function showReactionUsers(anchor, emoji, users, c, onReact) {
+    const existing = document.querySelector('.pc-reaction-users');
+    if (existing) { existing.remove(); return; }
+    const pop = el('div', 'pc-reaction-users');
+    users.forEach(u => {
+      const row = el('div', 'pc-reaction-users-row');
+      row.textContent = emoji + '  ' + u.name;
+      pop.appendChild(row);
+    });
+    const myUid = currentUser && currentUser.uid;
+    if (onReact && myUid) {
+      const mine = users.some(u => u.uid === myUid);
+      const tg = el('button', 'pc-reaction-users-toggle' + (mine ? ' mine' : ''));
+      tg.textContent = mine ? '✓ 已按，點此取消' : '我也按一個';
+      tg.onclick = (e) => { e.stopPropagation(); toggleReaction(c, emoji, onReact); pop.remove(); };
+      pop.appendChild(tg);
+    }
+    const r = anchor.getBoundingClientRect();
+    pop.style.left = Math.min(r.left, window.innerWidth - 230) + 'px';
+    pop.style.top = (r.bottom + 4) + 'px';
+    document.body.appendChild(pop);
+    setTimeout(() => document.addEventListener('click', function h() { pop.remove(); document.removeEventListener('click', h); }), 0);
+  }
   function buildReactions(c, onReact) {
     const wrap = el('div', 'pc-ci-reactions');
     const reactions = c.reactions || {};
@@ -640,7 +664,14 @@ export async function initPrototypeComments(opts = {}) {
       if (myUid && users.some(u => u.uid === myUid)) chip.classList.add('mine');
       chip.innerHTML = emoji + ' <span>' + users.length + '</span>';
       chip.title = users.map(u => u.name).join(', ');   // who reacted
-      if (onReact && myUid) chip.onclick = () => toggleReaction(c, emoji, onReact);
+      if (onReact && myUid) chip.onclick = (e) => {
+        // 無 hover（手機）：tap 顯示名單 popover（含 toggle）；桌機：維持 hover 看名單 + click 直接 toggle
+        if (window.matchMedia && window.matchMedia('(hover: none)').matches) {
+          e.stopPropagation(); showReactionUsers(chip, emoji, users, c, onReact);
+        } else {
+          toggleReaction(c, emoji, onReact);
+        }
+      };
       wrap.appendChild(chip);
     });
     if (onReact && myUid) {

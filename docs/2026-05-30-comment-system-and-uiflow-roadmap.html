@@ -1,0 +1,1065 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pc.js 留言系統 + ui-flow roadmap</title>
+<style>
+  :root {
+    --ivory: #FAF9F5;
+    --slate: #141413;
+    --clay: #D97757;
+    --oat: #E3DACC;
+    --olive: #788C5D;
+    --rust: #B04A3F;
+    --teal: #0FA0A0;
+    --gray-100: #F0EEE6;
+    --gray-300: #D1CFC5;
+    --gray-500: #87867F;
+    --gray-700: #3D3D3A;
+    --white: #FFFFFF;
+
+    --serif: ui-serif, Georgia, serif;
+    --sans: system-ui, -apple-system, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+    --radius-panel: 12px;
+    --radius-row: 8px;
+    --border: 1.5px solid var(--gray-300);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 56px 24px 120px;
+    background: var(--ivory);
+    color: var(--slate);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  /* ---------- Header ---------- */
+  header {
+    margin-bottom: 40px;
+  }
+  .header-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 34px;
+    letter-spacing: -0.01em;
+    margin: 0;
+    line-height: 1.2;
+  }
+  .mono-pill {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--gray-500);
+    background: var(--gray-100);
+    border: var(--border);
+    border-radius: 999px;
+    padding: 5px 11px;
+    white-space: nowrap;
+  }
+  .date-meta {
+    color: var(--gray-500);
+    font-size: 14px;
+    margin-top: 6px;
+  }
+  .date-meta code {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--gray-700);
+  }
+
+  /* ---------- Summary grid ---------- */
+  .summary-band {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin-bottom: 48px;
+  }
+  @media (max-width: 600px) {
+    .summary-band { grid-template-columns: 1fr; }
+  }
+  .stat-card {
+    background: var(--white);
+    border: var(--border);
+    border-radius: var(--radius-panel);
+    padding: 20px 22px 18px;
+  }
+  .stat-card.accent-olive { border-left: 4px solid var(--olive); padding-left: 19px; }
+  .stat-card.accent-clay  { border-left: 4px solid var(--clay);  padding-left: 19px; }
+  .stat-card.accent-teal  { border-left: 4px solid var(--teal);  padding-left: 19px; }
+  .stat-num {
+    font-family: var(--serif);
+    font-size: 42px;
+    font-weight: 500;
+    line-height: 1;
+    color: var(--slate);
+    margin-bottom: 8px;
+  }
+  .stat-num.olive { color: var(--olive); }
+  .stat-num.clay  { color: var(--clay);  }
+  .stat-num.teal  { color: var(--teal);  }
+  .stat-label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--gray-500);
+  }
+  .stat-sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--gray-500);
+    margin-top: 6px;
+  }
+
+  /* ---------- Sections ---------- */
+  section {
+    margin-bottom: 56px;
+  }
+  h2 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 24px;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+  }
+  h3 {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 15px;
+    margin: 24px 0 10px;
+    color: var(--slate);
+  }
+  hr.rule {
+    border: none;
+    border-top: 1px solid var(--gray-300);
+    margin: 0 0 22px;
+  }
+
+  /* ---------- Decision table ---------- */
+  table.decisions {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--white);
+    border: var(--border);
+    border-radius: var(--radius-panel);
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+  table.decisions thead th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--gray-500);
+    background: var(--gray-100);
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--gray-300);
+  }
+  table.decisions tbody td {
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--gray-100);
+    font-size: 14px;
+    vertical-align: top;
+    line-height: 1.55;
+  }
+  table.decisions tbody tr:last-child td {
+    border-bottom: none;
+  }
+  table.decisions tbody tr:hover {
+    background: var(--ivory);
+  }
+  .d-id {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--teal);
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  .d-label {
+    font-weight: 600;
+    color: var(--slate);
+  }
+
+  /* ---------- Constraint cards ---------- */
+  .constraint-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  @media (max-width: 600px) {
+    .constraint-grid { grid-template-columns: 1fr; }
+  }
+  .constraint-card {
+    background: var(--white);
+    border: var(--border);
+    border-radius: var(--radius-row);
+    padding: 14px 16px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .constraint-card .c-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--gray-500);
+    margin-bottom: 6px;
+  }
+  .constraint-card code {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--gray-100);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .constraint-card.pin-red {
+    border-left: 3px solid #BA1A1A;
+    padding-left: 14px;
+  }
+  .constraint-card.teal-accent {
+    border-left: 3px solid var(--teal);
+    padding-left: 14px;
+  }
+  .constraint-card.exception {
+    border-left: 3px solid var(--gray-300);
+    padding-left: 14px;
+    background: var(--ivory);
+  }
+
+  /* ---------- Completed list ---------- */
+  table.completed {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--white);
+    border: var(--border);
+    border-radius: var(--radius-panel);
+    overflow: hidden;
+  }
+  table.completed thead th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--gray-500);
+    background: var(--gray-100);
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--gray-300);
+  }
+  table.completed tbody td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--gray-100);
+    font-size: 14px;
+    vertical-align: top;
+    line-height: 1.55;
+  }
+  table.completed tbody tr:last-child td {
+    border-bottom: none;
+  }
+  table.completed tbody tr:hover { background: var(--ivory); }
+  .badge-done {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--olive);
+    background: #EBF2E2;
+    border-radius: 999px;
+    padding: 2px 8px;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  .file-mono {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--gray-700);
+  }
+
+  /* ---------- Timeline ---------- */
+  .timeline {
+    position: relative;
+    padding-left: 28px;
+  }
+  .timeline::before {
+    content: "";
+    position: absolute;
+    left: 8px;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    background: var(--gray-300);
+    border-radius: 2px;
+  }
+  .tl-item {
+    position: relative;
+    margin-bottom: 18px;
+  }
+  .tl-item::before {
+    content: "";
+    position: absolute;
+    left: -22px;
+    top: 6px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 2px solid var(--white);
+  }
+  .tl-item.done::before   { background: var(--olive); }
+  .tl-item.todo::before   { background: var(--clay);  }
+  .tl-item.bug::before    { background: var(--rust);  }
+  .tl-done-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--olive);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-right: 6px;
+  }
+  .tl-todo-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--clay);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-right: 6px;
+  }
+  .tl-bug-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--rust);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-right: 6px;
+  }
+  .tl-id {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--gray-500);
+    margin-right: 6px;
+  }
+  .tl-title {
+    font-weight: 600;
+    color: var(--slate);
+    font-size: 14px;
+  }
+  .tl-desc {
+    font-size: 13px;
+    color: var(--gray-700);
+    margin-top: 4px;
+    line-height: 1.55;
+  }
+  .tl-desc code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--gray-100);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  .highlight-note {
+    background: #EBF2E2;
+    border-left: 3px solid var(--olive);
+    border-radius: 0 6px 6px 0;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--gray-700);
+    margin: 14px 0 10px;
+  }
+  .highlight-note strong { color: var(--slate); }
+
+  /* ---------- Roadmap cards ---------- */
+  .roadmap-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 640px) {
+    .roadmap-grid { grid-template-columns: 1fr; }
+  }
+  .roadmap-card {
+    background: var(--white);
+    border: var(--border);
+    border-radius: var(--radius-panel);
+    padding: 18px 20px;
+  }
+  .r-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .r-id {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--white);
+    background: var(--gray-500);
+    border-radius: 4px;
+    padding: 2px 7px;
+  }
+  .r-id.p1 { background: var(--clay); }
+  .r-id.p2 { background: var(--teal); }
+  .r-id.p3 { background: var(--olive); }
+  .r-id.p4 { background: var(--gray-500); }
+  .r-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--slate);
+  }
+  .r-body {
+    font-size: 13px;
+    color: var(--gray-700);
+    line-height: 1.55;
+  }
+  .r-body ul {
+    margin: 6px 0 0;
+    padding-left: 18px;
+  }
+  .r-body li { margin-bottom: 4px; }
+  .r-meta {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--gray-500);
+    font-family: var(--mono);
+  }
+  .badge-feasibility {
+    display: inline-block;
+    font-size: 11px;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-family: var(--mono);
+    letter-spacing: 0.04em;
+  }
+  .f-high   { background: #EBF2E2; color: var(--olive); }
+  .f-medium { background: #FFF0E8; color: #B05A2F; }
+  .f-low    { background: var(--gray-100); color: var(--gray-500); }
+
+  /* Priority order list */
+  .priority-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .priority-list li {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--gray-100);
+    font-size: 14px;
+    color: var(--gray-700);
+  }
+  .priority-list li:last-child { border-bottom: none; }
+  .p-rank {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 500;
+    color: var(--oat);
+    min-width: 28px;
+    flex-shrink: 0;
+  }
+  .p-rank.active { color: var(--clay); }
+
+  /* ---------- Steps list ---------- */
+  .steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    counter-reset: step-counter;
+  }
+  .steps li {
+    counter-increment: step-counter;
+    position: relative;
+    padding: 10px 0 10px 44px;
+    font-size: 14px;
+    color: var(--gray-700);
+    border-bottom: 1px solid var(--gray-100);
+    line-height: 1.55;
+  }
+  .steps li:last-child { border-bottom: none; }
+  .steps li::before {
+    content: counter(step-counter);
+    position: absolute;
+    left: 0;
+    top: 10px;
+    width: 26px;
+    height: 26px;
+    background: var(--oat);
+    border-radius: 50%;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--gray-700);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    line-height: 26px;
+  }
+  .steps li code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--gray-100);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  .steps li strong { color: var(--slate); }
+
+  /* ---------- Publish strategy highlight ---------- */
+  .publish-block {
+    background: var(--white);
+    border: var(--border);
+    border-radius: var(--radius-panel);
+    padding: 20px 22px;
+    margin-bottom: 20px;
+  }
+  .publish-block .pb-seq {
+    font-size: 14px;
+    color: var(--gray-700);
+    margin-bottom: 14px;
+    line-height: 1.6;
+  }
+  .publish-block .pb-seq ol {
+    margin: 8px 0 0;
+    padding-left: 22px;
+  }
+  .publish-block .pb-seq li { margin-bottom: 5px; }
+  .option-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  @media (max-width: 640px) {
+    .option-grid { grid-template-columns: 1fr; }
+  }
+  .option-card {
+    border: var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--gray-700);
+  }
+  .option-card.favored {
+    border-color: var(--teal);
+    background: #F0FAFA;
+  }
+  .option-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin-bottom: 5px;
+  }
+  .option-label.fav { color: var(--teal); }
+  .option-label.neutral { color: var(--gray-500); }
+  .option-card code {
+    font-family: var(--mono);
+    font-size: 11px;
+    background: var(--gray-100);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  /* ---------- Deploy memo ---------- */
+  .memo-panel {
+    background: var(--oat);
+    border-radius: var(--radius-panel);
+    padding: 20px 22px;
+  }
+  .memo-row {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 8px 0;
+    font-size: 14px;
+    color: var(--gray-700);
+    border-bottom: 1px solid rgba(20,20,19,0.07);
+  }
+  .memo-row:last-child { border-bottom: none; }
+  .memo-tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--gray-700);
+    background: var(--ivory);
+    border-radius: 4px;
+    padding: 3px 7px;
+    flex-shrink: 0;
+  }
+  .memo-row code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: rgba(255,255,255,0.7);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  /* ---------- Footer ---------- */
+  footer {
+    margin-top: 64px;
+    padding-top: 20px;
+    border-top: 1px solid var(--gray-300);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--gray-500);
+  }
+
+  /* ---------- Callout ---------- */
+  .callout {
+    background: var(--gray-100);
+    border-left: 4px solid var(--gray-300);
+    border-radius: 0 8px 8px 0;
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--gray-700);
+    margin-bottom: 20px;
+    line-height: 1.55;
+  }
+  .callout.warn {
+    background: #FFF5F0;
+    border-left-color: var(--clay);
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="header-top">
+      <h1>pc.js 留言系統 + ui-flow roadmap</h1>
+      <span class="mono-pill">SSOT</span>
+    </div>
+    <div class="date-meta">
+      最後更新：2026-05-30 &nbsp;&middot;&nbsp;
+      <code>prototype-comments</code> &amp; 消費端 <code>docs/design/</code>
+    </div>
+  </header>
+
+  <!-- Summary grid -->
+  <div class="summary-band">
+    <div class="stat-card accent-olive">
+      <div class="stat-num olive">11</div>
+      <div class="stat-label">本輪完成項</div>
+      <div class="stat-sub">A1 A2 A3 A4 A6 B3 B5 B6 C2 F1-F5</div>
+    </div>
+    <div class="stat-card accent-clay">
+      <div class="stat-num clay">5</div>
+      <div class="stat-label">仍待辦</div>
+      <div class="stat-sub">B1 B2 B4 C1 C3</div>
+    </div>
+    <div class="stat-card accent-teal">
+      <div class="stat-num teal">2026-05-30</div>
+      <div class="stat-label">最後更新</div>
+      <div class="stat-sub">本輪 session</div>
+    </div>
+  </div>
+
+  <!-- Section 0: Design decisions -->
+  <section>
+    <h2>§0 已鎖定的設計決策</h2>
+    <hr class="rule">
+    <div class="callout">使用者 2026-05-30 核准，不再反覆。以下四項決策為本系統設計的基石。</div>
+
+    <table class="decisions">
+      <thead>
+        <tr>
+          <th style="width:50px">#</th>
+          <th style="width:160px">決策</th>
+          <th>內容</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="d-id">D1</span></td>
+          <td><span class="d-label">回覆階層 = 單層</span></td>
+          <td>採 Figma/Linear/Notion 模式：root 留言可「回覆 + resolve/unresolve」；replies（第二層）<strong>不可再回覆、不可 resolve</strong>。不做巢狀第三層。</td>
+        </tr>
+        <tr>
+          <td><span class="d-id">D2</span></td>
+          <td><span class="d-label">Emoji = 精選 6&ndash;8 顆</span></td>
+          <td>不掛整套 iPhone emoji（依賴大、CP 值低）。reactions 定位為快速情緒，非完整表情輸入。</td>
+        </tr>
+        <tr>
+          <td><span class="d-id">D3</span></td>
+          <td><span class="d-label">留言 bar 浮動底部</span></td>
+          <td>bar 固定浮在畫面底部（非塞進 header）。連同主色 teal <code>#0FA0A0</code>、只有 pin 用系統紅 <code>#BA1A1A</code> 寫成 design 規格 + 消費端專案規範不可變條款，每次開發都遵守。</td>
+        </tr>
+        <tr>
+          <td><span class="d-id">D4</span></td>
+          <td><span class="d-label">Pin 重設計</span></td>
+          <td>提 3 案（pill+編號 / teardrop 水滴 / 對話泡）給使用者選後實作。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>色彩 / 行為不可變條款</h3>
+    <div class="constraint-grid">
+      <div class="constraint-card teal-accent">
+        <div class="c-label">主色 primary</div>
+        teal <code>#0FA0A0</code> — 所有互動 accent（focus、active chip、hover、mention）一律用此色。
+      </div>
+      <div class="constraint-card pin-red">
+        <div class="c-label">系統紅 — 只給 pin</div>
+        <code>#BA1A1A</code> 不得用於一般按鈕 / chip / 連結。
+      </div>
+      <div class="constraint-card teal-accent">
+        <div class="c-label">留言 bar 位置</div>
+        永遠浮動在視窗底部，不注入頁面 header。
+      </div>
+      <div class="constraint-card exception">
+        <div class="c-label">例外：reaction mine 狀態</div>
+        <code>#FFDAD6</code> / <code>#BA1A1A</code> 允許作為「你已按」語意，屬設計例外。
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 1: Completed -->
+  <section>
+    <h2>§1 已完成並部署</h2>
+    <hr class="rule">
+
+    <table class="completed">
+      <thead>
+        <tr>
+          <th style="width:50px">#</th>
+          <th>問題 / 修法摘要</th>
+          <th style="width:90px">根因</th>
+          <th style="width:120px">檔案</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="badge-done">F1</span></td>
+          <td>搜尋變只輸入注音 &mdash; 每次 keystroke 重建 input 中斷 IME；拆 <code>renderPanelList()</code> + <code>compositionstart/end</code> guard</td>
+          <td style="font-size:13px;color:var(--gray-500)">innerHTML 重建</td>
+          <td><span class="file-mono">src/index.js</span></td>
+        </tr>
+        <tr>
+          <td><span class="badge-done">F2</span></td>
+          <td>手機版全部留言不能上下滑 &mdash; <code>.pc-panel-list</code> 加 <code>min-height:0</code> + touch scroll；手機 panel <code>100dvh</code> 全寬</td>
+          <td style="font-size:13px;color:var(--gray-500)">flex 缺 min-height:0</td>
+          <td><span class="file-mono">src/styles.js</span></td>
+        </tr>
+        <tr>
+          <td><span class="badge-done">F3</span></td>
+          <td>缺工程/設計篩選 &mdash; toolbar 加「全部 / 設計 / 工程」chips (<code>panel.typeFilter</code>)</td>
+          <td style="font-size:13px;color:var(--gray-500)">功能缺失</td>
+          <td><span class="file-mono">src/index.js</span></td>
+        </tr>
+        <tr>
+          <td><span class="badge-done">F4</span></td>
+          <td>按鈕沒照 design system &mdash; 只留 pin 紅；mention/搜尋/tag/排序 改回 teal</td>
+          <td style="font-size:13px;color:var(--gray-500)">accent 染色錯誤</td>
+          <td><span class="file-mono">src/styles.js</span></td>
+        </tr>
+        <tr>
+          <td><span class="badge-done">F5</span></td>
+          <td>表情符號要知道誰按 &mdash; 桌機 hover 已顯示名單 (<code>chip.title</code>)；手機 tap 版見 B5</td>
+          <td style="font-size:13px;color:var(--gray-500)">缺名單顯示</td>
+          <td><span class="file-mono">src/index.js</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Section 2: Timeline -->
+  <section>
+    <h2>§2 實作待辦</h2>
+    <hr class="rule">
+
+    <div class="highlight-note">
+      <strong>本輪完成（2026-05-30）：</strong> A1 A2 A3 A4 A6（留言系統）、B3、C2（視覺 regression MVP）、B5（手機 reaction 名單）、B6（同頁導向 + pin flash）
+    </div>
+
+    <h3>A. 留言系統（pc.js）</h3>
+    <div class="timeline">
+
+      <div class="tl-item done">
+        <div><span class="tl-id">A1</span><span class="tl-done-badge">DONE</span><span class="tl-title">回覆階層收尾（D1）</span></div>
+        <div class="tl-desc"><code>buildCommentItem</code> resolve 鈕改 toggle；reply 渲染處移除 <code>onReply</code>，replies 無回覆鈕。</div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">A2</span><span class="tl-done-badge">DONE</span><span class="tl-title">留言 bar 浮底（D3）</span></div>
+        <div class="tl-desc">使用者選右下角浮動膠囊。消費端移除 <code>authBarTarget:&#39;.header&#39;</code> → bar 不再注入 header。</div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">A3</span><span class="tl-done-badge">DONE</span><span class="tl-title">Pin 重設計（D4）</span></div>
+        <div class="tl-desc">四角統一 <code>border-radius: 11px</code>；尾巴從底邊偏左直線段長出（<code>left:10px</code>，輕微不對稱 5/6px）。用 C2 fixture ×4 截圖驗證。</div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">A4</span><span class="tl-done-badge">DONE</span><span class="tl-title">Emoji 微調（D2）</span></div>
+        <div class="tl-desc"><code>REACTION_EMOJIS</code> 補到 8 顆：<code>[&#39;&#128077;&#39;,&#39;&#10084;&#65039;&#39;,&#39;&#127881;&#39;,&#39;&#128516;&#39;,&#39;&#128064;&#39;,&#39;&#128591;&#39;,&#39;&#129300;&#39;,&#39;&#128293;&#39;]</code></div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">A6</span><span class="tl-done-badge">DONE</span><span class="tl-title">Pin 蓋住頁面 header（z-index）</span></div>
+        <div class="tl-desc">根因：<code>.phone</code> 未形成 stacking context，pin (z-index 210) 蓋過 sticky <code>.header</code> (z-index 100)。修法：<code>.phone</code> 加 <code>isolation:isolate</code>，整個手機框關進一個 context。套用 3 doc。</div>
+      </div>
+
+    </div>
+
+    <h3>B. 文件</h3>
+    <div class="timeline">
+
+      <div class="tl-item todo">
+        <div><span class="tl-id">B1</span><span class="tl-todo-badge">TODO</span><span class="tl-title">guide v2 更新</span></div>
+        <div class="tl-desc"><code>prototype-comments-guide.html</code> 補 reactions / @tag / 搜尋 / 篩選 / 排序 / 回覆 / 紅 pin（目前完全缺 v2 說明）。</div>
+      </div>
+
+      <div class="tl-item todo">
+        <div><span class="tl-id">B2</span><span class="tl-todo-badge">TODO</span><span class="tl-title">design-spec 不可變條款</span></div>
+        <div class="tl-desc">把 §0 色彩/行為條款寫進 <code>prototype-comments-design-spec.html</code>（主 + worktree 兩份要同步）。</div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">B3</span><span class="tl-done-badge">DONE</span><span class="tl-title">專案規格寫入消費端</span></div>
+        <div class="tl-desc">D3 條款已加進消費端 <code>AGENTS.md</code>（或 CLAUDE.md）。</div>
+      </div>
+
+      <div class="tl-item todo">
+        <div><span class="tl-id">B4</span><span class="tl-todo-badge">TODO</span><span class="tl-title">完整 design review</span></div>
+        <div class="tl-desc">逐畫面盤點不合理處 + 方案，產出 review report（html-doc 樣板）。</div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">B5</span><span class="tl-done-badge">DONE</span><span class="tl-title">Reaction 手機顯示誰按</span></div>
+        <div class="tl-desc"><code>showReactionUsers</code> — 無 hover 裝置 tap chip → popover 列名單 + toggle 按鈕（mine 紅 / 非 mine teal）；桌機維持 hover <code>title</code> + click toggle。</div>
+      </div>
+
+      <div class="tl-item bug">
+        <div><span class="tl-id">B6</span><span class="tl-done-badge">DONE</span><span class="tl-title">全部留言面板：已在該頁時導向失效</span></div>
+        <div class="tl-desc">同頁路徑加 <code>await setTimeout(0)</code> 對齊時序 + 點到的 pin 加 <code>pc-pin-flash</code> 高亮閃爍。⚠️ 需使用者實機驗證。</div>
+      </div>
+
+    </div>
+
+    <h3>C. 工具 / 測試</h3>
+    <div class="timeline">
+
+      <div class="tl-item todo">
+        <div><span class="tl-id">C1</span><span class="tl-todo-badge">TODO</span><span class="tl-title">doc-sync skill</span></div>
+        <div class="tl-desc">掃 pc.js 程式碼 + config + 文件 → 自動更新四份設計文件 + 提醒需同步處。</div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">C2</span><span class="tl-done-badge">MVP DONE</span><span class="tl-title">e2e + 視覺 regression 測試（使用者要求「優先做」）</span></div>
+        <div class="tl-desc">
+          Playwright chromium 裝好；<code>shot.js</code> 對任意 HTML 出 desktop 1440&times;900 + mobile 375 兩張截圖。<br>
+          <strong>已建 bootstrap：</strong> <code>test/visual/</code> — <code>fixture.html</code>（純 sample DOM）+ <code>visual-shot.js</code>（ESM runner，直接 <code>import { STYLES }</code>）+ <code>baselines/</code>（已建）。<br>
+          涵蓋 pin 各態 / ×4 放大 / reactions / toolbar / reply / B5 popover。<strong>上線即抓到 A3 圓角問題。</strong><br>
+          <em>後續：自動 pixel diff（pixelmatch）、需 Firebase 的 e2e。</em>
+        </div>
+      </div>
+
+      <div class="tl-item todo">
+        <div><span class="tl-id">C3</span><span class="tl-todo-badge">TODO</span><span class="tl-title">ui-flow 完整功能說明</span></div>
+        <div class="tl-desc">ui-flow HTML 加 RWD onboarding overlay（引導使用者點擊、說明不會壞版）。</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Section 3: Roadmap -->
+  <section>
+    <h2>§3 Roadmap 評估</h2>
+    <hr class="rule">
+
+    <div class="roadmap-grid">
+      <div class="roadmap-card">
+        <div class="r-header">
+          <span class="r-id p4">R1</span>
+          <span class="r-title">ui-flow 多模式產出</span>
+        </div>
+        <div class="r-body">
+          現況：prototype-first — 設計師做好 prototype → 部署 Netlify → ui-flow skill 截圖 + overlay。<br>
+          新模式：spec + Storybook → 直接生「設計稿 + ui-flow」，讓 flow 在 prototype 之前就存在。
+          <ul>
+            <li>建議分階段：先做 R3 → 再由 stories 組合畫面 → 再由 spec 驅動 flow</li>
+            <li>PoC 對象：羽球比賽系統（已有 Storybook）</li>
+          </ul>
+        </div>
+        <div class="r-meta">效益高 / 成本高 &nbsp; <span class="badge-feasibility f-medium">可行性中</span></div>
+      </div>
+
+      <div class="roadmap-card">
+        <div class="r-header">
+          <span class="r-id p2">R2</span>
+          <span class="r-title">設計稿留言 → 自動 report.html</span>
+        </div>
+        <div class="r-body">
+          目標：每畫面 = 截圖 + unresolved 留言（標記點 + 列表）。雙用途：人閱讀 + AI 修正設計稿的資料來源。
+          <ul>
+            <li>管線：query Firestore → 截圖 → 合成 → 輸出 <code>report.html</code> + machine-readable JSON</li>
+            <li>截圖管線已存在（prototype-flow-doc skill capture）</li>
+          </ul>
+        </div>
+        <div class="r-meta">效益最高 / 成本中 &nbsp; <span class="badge-feasibility f-high">可行性高</span></div>
+      </div>
+
+      <div class="roadmap-card">
+        <div class="r-header">
+          <span class="r-id p3">R3</span>
+          <span class="r-title">UI component 畫面綁定 Storybook id</span>
+        </div>
+        <div class="r-body">
+          目標：ui-flow 畫面區塊對應到 Storybook component ID，建立 設計 ↔ component ↔ code 追溯。
+          <ul>
+            <li>靠 data 屬性 / mapping manifest：<code>data-storybook-id</code></li>
+            <li>建議先做手動 manifest，再自動化</li>
+            <li>R1 的前置基石</li>
+          </ul>
+        </div>
+        <div class="r-meta">效益中 / 成本中高 &nbsp; <span class="badge-feasibility f-medium">可行性中高</span></div>
+      </div>
+
+      <div class="roadmap-card">
+        <div class="r-header">
+          <span class="r-id p1">R4</span>
+          <span class="r-title">dev note 可讀性</span>
+        </div>
+        <div class="r-body">
+          目標：改善 ui-flow skill 產 dev note 那段的輸出品質 — 白話、行動導向、依 tag 分組、去術語。
+          <ul>
+            <li>檢視：<code>~/.claude/skills/prototype-flow-doc/scripts/03-generate*</code></li>
+            <li>連同 C3 一起做</li>
+          </ul>
+        </div>
+        <div class="r-meta">效益中 / 成本低 &nbsp; <span class="badge-feasibility f-high">快速 win</span></div>
+      </div>
+    </div>
+
+    <h3>優先序建議</h3>
+    <div style="background:var(--white);border:var(--border);border-radius:var(--radius-panel);padding:4px 20px;">
+      <ol class="priority-list">
+        <li><span class="p-rank active">1</span><div><strong>R4 + C3</strong> — 低成本快速 win</div></li>
+        <li><span class="p-rank active">2</span><div><strong>R2</strong> report.html — 價值最高、延伸現有管線</div></li>
+        <li><span class="p-rank">3</span><div><strong>R3</strong> Storybook id 手動 manifest — 追溯基石</div></li>
+        <li><span class="p-rank">4</span><div><strong>R1</strong> spec→設計稿多模式 — 最大工程，分階段 PoC</div></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- Section 4.5: Repo restructure -->
+  <section>
+    <h2>§4.5 Repo 重整（Option A，待 /compact 後執行）</h2>
+    <hr class="rule">
+    <div class="callout warn">使用者 2026-05-30 核准 Option A。通用 ui-flow / pc.js kit 收進 <code>prototype-comments</code> repo + 部署獨立說明站；消費端專案只留專屬內容。</div>
+
+    <h3>現況（散 3 處）</h3>
+    <div class="memo-panel" style="margin-bottom:20px">
+      <div class="memo-row"><span class="memo-tag">repo</span><code>prototype-comments/</code> — src/ pc.js 原始碼、build.py、example/、test/</div>
+      <div class="memo-row"><span class="memo-tag">消費端</span><code>docs/design/</code> — 通用 kit（pc.js 複製 + guide/design-spec/firebase-setup + ui-flow 工具鏈 + design-system）＋ 專屬（tournament ui-flow/mockup）</div>
+      <div class="memo-row"><span class="memo-tag">demo 站</span>示例 flow + pc.js 複製 + 密碼閘 &rarr; 見私有部署筆記</div>
+    </div>
+
+    <h3>重整步驟</h3>
+    <ol class="steps">
+      <li>在 <code>prototype-comments</code> 建 <code>docs/</code>（或 <code>site/</code>），把通用 kit 檔從消費端搬過去：guide、design-spec、firebase-setup、ui-flow-template/process/improvement-roadmap、design-system、index.html。</li>
+      <li><code>build.py</code> 改成同時輸出 pc.js 到 <code>prototype-comments/docs/pc.js</code>；消費端與 demo 站改消費 release artifact，不再各自為政。記錄 sync 指令。</li>
+      <li>kit <code>index.html</code>：reference demo 站（密碼閘）當 live demo 連結。</li>
+      <li>修所有搬移檔的相對路徑（pc.js 引用、彼此連結、Firebase config）。</li>
+      <li>部署 <code>prototype-comments/docs</code> → 新 netlify 站（kit 說明站）。</li>
+      <li>消費端 <code>docs/design/</code> 只留 tournament-ui-flow.html、tournament-ui-mockup.html + 消費用 pc.js；移除已搬走的通用檔，更新 AGENTS.md「現有設計文件」表與 index 連結。</li>
+      <li><strong>三處 commit 分離：</strong> prototype-comments（src 改 + kit docs 進場）、消費端（移除通用檔、留專屬）、demo 部署資料夾（pc.js 同步 + init 改）。各自 repo 各自 commit，不混。</li>
+      <li>guide.html 內過時的 <code>authBarTarget:&#39;.header&#39;</code> 說明（B1/B2 待辦）一併在搬移時更新。</li>
+    </ol>
+
+    <div class="callout">
+      <strong>注意：</strong> prototype-comments 是公開 GitHub repo。搬進去的文件<strong>不得含內部專案機密</strong>（部署 id、密碼、內部功能名、內部截圖）。demo 連結指向「有密碼閘」的站即可。
+    </div>
+  </section>
+
+  <!-- Section 4.6: Publish strategy -->
+  <section>
+    <h2>§4.6 pc.js 發布策略</h2>
+    <hr class="rule">
+    <div class="callout">痛點：pc.js 是 <code>build.py</code> 產的 bundle，各消費端各存一份 copy；改一次要 cp + 重部署多處。<br>
+    技術前提：消費端是靜態 HTML 設計站（無 bundler / npm build step），用 ESM <code>import { initPrototypeComments }</code> 引入。</div>
+
+    <div class="publish-block">
+      <div class="pb-seq">
+        <strong>拍板順序（使用者同意，現在不過早正式化）：</strong>
+        <ol>
+          <li>先把手上 C2 / A3 / B5 收尾（已完成）</li>
+          <li>執行 Option A：通用 kit 全收進 prototype-comments（含 skill source 放 <code>repo/skills/</code> + symlink 到 <code>~/.claude/skills/</code>，讓 skill 跟 kit 一起版控）</li>
+          <li>用一陣子，等出現「要 publish / 要 semver / 多個 consumer」其中之一，<strong>才</strong>考慮正式 package 化</li>
+        </ol>
+      </div>
+
+      <div class="option-grid">
+        <div class="option-card favored">
+          <div class="option-label fav">A. jsDelivr from GitHub（傾向）</div>
+          build &rarr; commit <code>dist/pc.js</code> &rarr; git tag &rarr; 各 HTML 改引 <code>cdn.jsdelivr.net/gh/...</code>。零複製、版本可控、免 npm publish。<code>@&lt;tag&gt;</code> 可 pin；<code>@latest</code> 自動更新但有 CDN 快取延遲。
+        </div>
+        <div class="option-card">
+          <div class="option-label neutral">B. npm publish + CDN</div>
+          正式 <code>@scope/pc</code>，<code>npm i</code>（給有 bundler 的 consumer）+ unpkg/jsDelivr（給靜態站）。版本生態完整，但要 npm 帳號 + publish 流程。
+        </div>
+        <div class="option-card">
+          <div class="option-label neutral">C. 維持複製但自動化</div>
+          <code>build.py</code> 一次輸出到所有消費端路徑 + sync script。治標，仍是多份 copy。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 4: Deploy memo -->
+  <section>
+    <h2>§4 部署 / 驗證備忘</h2>
+    <hr class="rule">
+    <div class="memo-panel">
+      <div class="memo-row">
+        <span class="memo-tag">build</span>
+        pc.js bundle：<code>prototype-comments/build.py</code> 輸出至消費端 <code>docs/design/pc.js</code>（~78,000 chars）。改完跑 <code>node --check</code>。
+      </div>
+      <div class="memo-row">
+        <span class="memo-tag">deploy</span>
+        內部 demo 站、kit docs 站的 netlify site id 與密碼 &rarr; 見私有部署筆記（不寫入本公開 repo）。
+      </div>
+      <div class="memo-row">
+        <span class="memo-tag">sync</span>
+        改 pc.js 要 <code>cp</code> 過去再部署。design-spec 有兩份（主 repo + worktree）需同步，搬進 prototype-comments 後變單一來源。
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    SSOT &middot; prototype-comments + 消費端 docs/design/ &nbsp;&mdash;&nbsp; 最後更新 2026-05-30
+  </footer>
+
+</div>
+</body>
+</html>

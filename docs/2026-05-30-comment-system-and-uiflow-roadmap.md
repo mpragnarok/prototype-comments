@@ -42,10 +42,10 @@
 ### A. 留言系統（pc.js）
 - **✅ A1 回覆階層收尾（D1）** — DONE 2026-05-30：`buildCommentItem` resolve 鈕改 toggle（`isRootComment && onResolve`，依 `c.resolved` 顯示「✓ Resolve / ↩ 取消解決」，呼叫 `onResolve(!c.resolved)`）；reply 渲染處（`index.js` panel + `note-comments.js`）移除 `onReply` → replies 無回覆鈕。
 - **✅ A2 留言 bar 浮底（D3）** — DONE 2026-05-30：使用者選**右下角浮動膠囊（現有 `bottom:64px;right:12px`）**。移除消費端 ui-flow 模板與內部 demo flow 共 3 處實際 init 的 `authBarTarget:'.header'` → bar 不再注入 header、桌機/手機都浮動。（guide.html 的範例碼與參數表仍寫舊行為，待 B1 一併更新。）
-- **🔁 A3 Pin 重設計（D4）** — 重做中：第一版（min-width 24/height 24/radius 12 + 白圈 ring）實際渲染像圓 badge、不像對話泡（使用者回報「差太多」）。根因＝① 白圈 `0 0 0 2px #fff` 讓本體像獨立徽章、尾巴脫節；② 1 位數內容 + radius 12 → 近似圓形而非 rounded-rect bubble。**修法**：拿掉白圈（mockup 本就無），改 rounded-rect 比例（寬>高）+ 明顯尾巴，使單一數字也讀得出 speech bubble。重新部署後請使用者對照 mockup 確認。
+- **✅ A3 Pin 重設計（D4）** — DONE 2026-05-30：四角統一 `border-radius: 11px`（原 `10px 10px 10px 3px` 左下 3px 近直角，與其他三角 10px 不協調，使用者圖回報）；尾巴 `::before` 從底邊偏左直線段長出（`left:10px`、輕微不對稱 5/6px）。用 C2 fixture ×4 放大截圖驗證四角一致、尾巴銜接自然。
 - **✅ A4 Emoji 微調（D2）** — DONE 2026-05-30：`REACTION_EMOJIS` 補到 8 顆 `['👍','❤️','🎉','😄','👀','🙏','🤔','🔥']`。
 - **✅ A6 Pin 蓋住頁面 header（z-index）** — DONE 2026-05-30：根因＝`.phone`(手機外框) 未形成 stacking context，pin(z-index 210) 直接跟 root 比、蓋過 sticky `.header`(z-index 100)。修法＝`.phone` 加 `isolation:isolate` → 整個手機框（含 pin 子樹）關進一個 context、降到 header 之下；body 層的 auth bar(z 9000)/mobile-nav(z 200)/popover 不受影響。套用 3 doc。（2026-05-30 使用者回報）
-- **B5 reaction 手機顯示誰按**：chip tap → 小 popover 列名單（桌機已有 hover title）。
+- **✅ B5 reaction 手機顯示誰按** — DONE 2026-05-30：`showReactionUsers` — 無 hover 裝置（`matchMedia('(hover: none)')`）tap chip → popover 列名單 + toggle 按鈕（mine 紅 #BA1A1A 例外 / 非 mine teal hover）；桌機維持 hover `title` + click toggle（API 相容、不破壞既有行為）。C2 fixture 涵蓋 mine/非 mine 兩態。
 - **🐞 B6 全部留言面板：已在該頁時導向失效**（2026-05-30 使用者回報）：「全部留言」面板點**設計類型(positional)**留言，原本會導到該畫面並讓該 pin 的留言跳出；但**若已經在該畫面**，點了沒反應。位置：`index.js navigateToComment`——舊邏輯只有 `screenId !== getScreenId()` 才走 navigate+150ms async 路徑，同頁是純同步、且無視覺回饋。**修法（2026-05-30）**：同頁路徑也 `await setTimeout(0)` 對齊時序 + 點到的 pin 加 `pc-pin-flash` 高亮閃爍，確保同頁也「跳出來」。⚠️ 靜態讀無法 100% 確認原始失效機制，需使用者實機驗證。
 
 ### B. 文件
@@ -66,7 +66,7 @@
     4. **e2e（需 Firebase 部分）**：建立留言、resolve、reply → 用 Firebase emulator 或 test project + seed，避免動到正式資料。
     5. **ui-flow skill**：對產出的 ui-flow HTML（template/tournament）兩 viewport 截圖 baseline。
   - **落點**：`prototype-comments/test/visual/`（fixtures + runner + baselines）；ui-flow skill 端在 `~/.claude/skills/prototype-flow-doc/` 加截圖比對步驟。
-  - **狀態**：bootstrap done，完整建置待 fresh context（屬新子系統，依消費端 AGENTS.md 應另開 plan）。
+  - **狀態**：✅ MVP DONE 2026-05-30 — `test/visual/`：`fixture.html`（純 sample DOM）+ `visual-shot.js`（ESM runner，**不複製 CSS**：直接 `import { STYLES }`，注入後截 desktop 1440×900 + mobile 375×812）+ `baselines/`（已建）。涵蓋 pin 各態 / 放大 ×4 / reactions / toolbar / reply / B5 popover。**上線即抓到並驗證了 A3 圓角**。關鍵教訓：舊 `render-test.html` 手抄一份過時 pin CSS（圓形 teal）→ 測不到真退化；C2 鐵則是載真實 STYLES。後續：自動 pixel diff（pixelmatch）、需 Firebase 的 e2e。設計見 `docs/2026-05-30-feat-c2-visual-regression.md`。
 - **C3 ui-flow 完整功能說明**：ui-flow HTML 加 RWD onboarding overlay（引導使用者點擊、說明不會壞版）。
 
 ---
@@ -127,6 +127,24 @@
 ### 注意
 - prototype-comments 是公開 github repo → 搬進去的文件**不得含內部專案機密**（部署 id、密碼、內部功能名、內部截圖）；demo 連結指向「有密碼閘」的站即可，不把內部截圖塞進公開 kit repo。
 - design-spec 原本主 repo + worktree 兩份同步問題，搬進 prototype-comments 後變單一來源，順便解掉。
+
+## 4.6 pc.js 發布策略 — 取代「每專案複製一份」（使用者 2026-05-30 拍板順序）
+
+**痛點**：pc.js 是 `build.py` 產的 bundle，各消費端（設計站、內部 demo 站）各存一份 copy；改一次要 `cp` + 重部署多處，維護麻煩。
+
+**關鍵技術前提**：消費端是**靜態 HTML 設計站**（無 bundler / npm build step），用 ESM `import { initPrototypeComments } from './pc.js'` 引入。→ 純 `npm install` 對靜態站無直接幫助，要嘛 CDN、要嘛 bundler。
+
+**拍板順序（使用者同意，現在不過早正式化，避免綁手綁腳）**：
+1. **先把手上 C2 / A3 / B5 收尾**。
+2. **執行 Option A**：通用 kit 全收進 prototype-comments（含 skill source 放 repo `skills/` + symlink 到 `~/.claude/skills/`，讓 skill 跟 kit 一起版控）。
+3. **用一陣子**，等出現「要 publish / 要 semver / 多個 consumer」其中之一，**才**考慮 npm workspaces 正式 package 化。
+
+**未來 package 化的技術選項（③ 階段再定，先記錄避免忘）**：
+- **A. jsDelivr from GitHub（傾向）**：build → commit `dist/pc.js` → git tag → 各 HTML 改引 `https://cdn.jsdelivr.net/gh/mpragnarok/prototype-comments@<tag>/dist/pc.js`。零複製、版本可控、免 npm publish。版本策略：`@<tag>` 可 pin（改版各站 bump 一個字串，仍遠輕於 `cp` 整檔）；`@latest` 自動更新但有 CDN 快取延遲、不可 pin。
+- **B. npm publish + CDN**：正式 `@scope/pc`，`npm i`（給未來有 bundler 的 consumer）+ unpkg/jsDelivr（給靜態站）。版本生態完整，但要 npm 帳號 + publish 流程。
+- **C. 維持複製但自動化**：`build.py` 一次輸出到所有消費端路徑 + sync script（治標，仍是多份 copy）。
+
+→ **傾向 A**，等 ③ 觸發條件出現再實作。npm workspaces monorepo 不在現階段。
 
 ## 4. 部署 / 驗證備忘
 - pc.js bundle：`prototype-comments/build.py` → 消費端 `docs/design/pc.js`（~78,000 chars）。改完跑 `node --check`。
