@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<!--
+  test/e2e/harness.html — e2e 測試載入頁（透過本地 http server serve，避開 file:// CORS）
+
+  載入真實 bundle dist/pc.js + in-memory mock-firebase，expose window.__pcTest 給
+  e2e spec 用 page.evaluate 注入 mock、init、操作、斷言。不連真 Firebase / 無網路。
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>pc.js e2e harness</title>
+<style>
+  html, body { margin: 0; }
+  /* designTarget：模擬手機框，內含可捲動 screen */
+  #phone { position: relative; width: 375px; height: 640px; overflow: hidden; background: #fff; margin: 0 auto; }
+  .screen { min-height: 100%; }
+</style>
+</head>
+<body>
+<div id="phone">
+  <div class="screen" data-screen="s1" id="screen-s1">
+    <div style="height:200px;padding:16px;">e2e harness screen s1</div>
+  </div>
+</div>
+
+<script type="module">
+  import { initPrototypeComments } from '/dist/pc.js';
+  import { createMockFirebase } from '/test/mock-firebase.js';
+
+  // 提供 e2e spec 用的測試入口
+  window.__pcTest = {
+    createMockFirebase,
+    // init wrapper：帶上 harness 預設 opts，e2e 只需傳 mock 與覆寫項
+    init: (mockFb, overrides = {}) => initPrototypeComments({
+      projectId:    'e2e',
+      getScreenId:  () => 's1',
+      getMode:      () => 'design',
+      designTarget: '#phone',
+      _firebase:    mockFb,
+      ...overrides,
+    }),
+    ready: true,
+  };
+</script>
+</body>
+</html>

@@ -20,7 +20,8 @@ export function createMockFirebase(initial = {}) {
   };
   (initial.comments || []).forEach(c => {
     const id = c.id || `m${++idSeq}`;
-    state.docs.set(id, { ...c, id: undefined });
+    const { id: _omit, ...data } = c;
+    state.docs.set(id, data);
   });
 
   const docsArray = () => [...state.docs.entries()].map(([id, data]) => ({
