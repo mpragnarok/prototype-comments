@@ -1232,17 +1232,15 @@ export async function initPrototypeComments(opts = {}) {
   }
 
   function addDragListeners() {
-    document.addEventListener('mousemove', onDragMove);
-    document.addEventListener('mouseup', onDragEnd);
-    document.addEventListener('touchmove', onDragMoveTouch, { passive: false });
-    document.addEventListener('touchend', onDragEndTouch);
+    // 全程用 pointer events：pointerdown 已 preventDefault（切斷 compatibility mouse events），
+    // 若 drag 用 mousemove/up 會收不到 → 統一 pointer 才動得了。pointer 也統一涵蓋 touch。
+    document.addEventListener('pointermove', onDragMove);
+    document.addEventListener('pointerup', onDragEnd);
   }
 
   function removeDragListeners() {
-    document.removeEventListener('mousemove', onDragMove);
-    document.removeEventListener('mouseup', onDragEnd);
-    document.removeEventListener('touchmove', onDragMoveTouch);
-    document.removeEventListener('touchend', onDragEndTouch);
+    document.removeEventListener('pointermove', onDragMove);
+    document.removeEventListener('pointerup', onDragEnd);
     clearAutoScroll();
   }
 

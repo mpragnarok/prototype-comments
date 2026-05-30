@@ -82,6 +82,22 @@ const seedComment = (over = {}) => ({ type: 'positional', screenId: 's1', x: 50,
     assert(info.bg === 'rgb(209, 213, 219)', `resolved pin 泡泡應灰 #d1d5db，實際 ${info.bg}（紅=rgb(186,26,26) 即重現跑版）`);
   });
 
+  await test('long-press drag → 自己未解決 pin 位置更新 (#6 drag 收尾)', async () => {
+    const pin = page.locator('.pc-pin:not(.resolved)').first();
+    const box = await pin.boundingBox();
+    assert(box, 'unresolved pin not found');
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.waitForTimeout(650);              // > 500ms 進入 drag
+    await page.mouse.move(cx + 50, cy + 70, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForTimeout(250);
+    const c = await page.evaluate(() => window.__fb.__docs().find(d => d.type === 'positional' && !d.parentId && !d.resolved));
+    console.log('     dragged pos:', JSON.stringify({ x: c.x, y: c.y }));
+    assert(c.x !== 50 || c.y !== 50, `pin 應已移動（原 x:50,y:50），實際 ${JSON.stringify({ x: c.x, y: c.y })}`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
