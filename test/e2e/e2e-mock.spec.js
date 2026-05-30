@@ -64,6 +64,24 @@ const seedComment = (over = {}) => ({ type: 'positional', screenId: 's1', x: 50,
     assert(/💬/.test(label), `expected 💬 in pin label, got "${label}"`);
   });
 
+  await test('resolved pin → 整顆灰 #d1d5db（#3 跑版重現）', async () => {
+    await page.evaluate(() => {
+      window.__fb.__seed({ type: 'positional', screenId: 's1', x: 30, y: 30, body: '已完成', authorUid: 'u1', authorName: '設計師 A', resolved: true, parentId: null });
+      document.dispatchEvent(new CustomEvent('pc:screen-change', { detail: {} }));
+    });
+    await page.waitForTimeout(300);
+    const info = await page.evaluate(() => {
+      const r = [...document.querySelectorAll('.pc-pin')].find(p => p.classList.contains('resolved'));
+      if (!r) return { found: false };
+      const cs = getComputedStyle(r);
+      const tail = getComputedStyle(r, '::before');
+      return { found: true, label: r.textContent, bg: cs.backgroundColor, tailColor: tail.borderTopColor };
+    });
+    console.log('     resolved pin:', JSON.stringify(info));
+    assert(info.found, 'resolved pin not rendered');
+    assert(info.bg === 'rgb(209, 213, 219)', `resolved pin 泡泡應灰 #d1d5db，實際 ${info.bg}（紅=rgb(186,26,26) 即重現跑版）`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
