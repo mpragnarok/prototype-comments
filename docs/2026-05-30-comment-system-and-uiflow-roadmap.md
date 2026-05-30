@@ -144,7 +144,15 @@
 - **B. npm publish + CDN**：正式 `@scope/pc`，`npm i`（給未來有 bundler 的 consumer）+ unpkg/jsDelivr（給靜態站）。版本生態完整，但要 npm 帳號 + publish 流程。
 - **C. 維持複製但自動化**：`build.py` 一次輸出到所有消費端路徑 + sync script（治標，仍是多份 copy）。
 
-→ **傾向 A**，等 ③ 觸發條件出現再實作。npm workspaces monorepo 不在現階段。
+→ **傾向 A**。
+
+### ✅ 已實作（2026-05-30，使用者主動要求「html 直接引用、不複製」→ ③ 觸發提前）
+A 方案（jsDelivr from GitHub）已上線：
+- `build.py` 多輸出 `dist/pc.js`，commit 進 repo（`.gitignore` 用 `dist/*` + `!dist/pc.js`）並 push GitHub。
+- jsDelivr 服務 `https://cdn.jsdelivr.net/gh/mpragnarok/prototype-comments@main/dist/pc.js`（已 200 驗證）。
+- **所有消費端 HTML 改引 CDN，零複製**：vitallink `protocol-setting-flow.html`、jubo `tournament-ui-flow.html` / `ui-flow-template.html`。
+- **改 pc.js 流程**：改 `src/` → `python3 build.py` → commit `dist/pc.js` + push → `curl https://purge.jsdelivr.net/gh/mpragnarok/prototype-comments@main/dist/pc.js`（讓 @main 立即更新，否則 ~12h 快取）。
+- 未來要 pin 版本改 `@<tag>`；npm workspaces 仍不在現階段。
 
 ## 4. 部署 / 驗證備忘
 - pc.js bundle：`prototype-comments/build.py` → 消費端 `docs/design/pc.js`（~78,000 chars）。改完跑 `node --check`。
