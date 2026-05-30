@@ -880,16 +880,20 @@ export async function initPrototypeComments(opts = {}) {
         showThreadPopover(e.clientX, e.clientY, c.id);
       });
 
-      // Long-press (500 ms) to enter drag mode — own pins only
+      // Long-press (500 ms) to enter drag mode — own unresolved pins only.
+      // 用 Pointer Events + setPointerCapture：游標脫離 pin（hover 放大造成）也抓得住，
+      // 不再因 mouseleave 取消長按。press 期間加 .pressing 停用 hover 放大穩住游標。
       if (currentUser && c.authorUid === currentUser.uid && !c.resolved) {
         let pressTimer = null;
         const startPress = () => {
+          pinEl.classList.add('pressing');
           pressTimer = setTimeout(() => {
             pressTimer = null;
             movingPinId = c.id;
             isDragging = true;
             dragPinEl = pinEl;
             closeAllPopovers();
+            pinEl.classList.remove('pressing');
             pinEl.classList.add('moving');
             document.body.classList.add('pc-dragging');
             addDragListeners();
@@ -897,17 +901,20 @@ export async function initPrototypeComments(opts = {}) {
         };
         const cancelPress = () => {
           if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+          pinEl.classList.remove('pressing');
         };
-        pinEl.addEventListener('mousedown', e => {
-          if (e.button !== 0) return;
+        pinEl.addEventListener('pointerdown', e => {
+          if (e.button != null && e.button > 0) return;   // 僅主鍵 / 觸控
           e.preventDefault();
+          try { pinEl.setPointerCapture(e.pointerId); } catch (_) {}
           startPress();
         });
-        pinEl.addEventListener('mouseup',    cancelPress);
-        pinEl.addEventListener('mouseleave', cancelPress);
-        pinEl.addEventListener('touchstart', () => startPress(), { passive: true });
-        pinEl.addEventListener('touchend',    cancelPress);
-        pinEl.addEventListener('touchcancel', cancelPress);
+        pinEl.addEventListener('pointerup', cancelPress);
+        pinEl.addEventListener('pointercancel', cancelPress);
+        // press 階段（尚未進 drag）明顯移動 → 視為滑動，取消長按
+        pinEl.addEventListener('pointermove', e => {
+          if (pressTimer && (Math.abs(e.movementX) > 4 || Math.abs(e.movementY) > 4)) cancelPress();
+        });
       }
 
       overlay.appendChild(pinEl);

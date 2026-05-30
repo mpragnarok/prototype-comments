@@ -120,6 +120,9 @@ export const STYLES = `
   border-top: 8px solid #BA1A1A;
 }
 .pc-pin:hover { transform: translate(-50%, -50%) scale(calc(var(--pc-pin-scale, 1) * 1.2)); }
+/* 長按計時 / 拖曳中：停用 hover 放大，避免游標脫離 pin 觸發 mouseleave 取消長按 */
+.pc-pin.pressing { transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1)); }
+.pc-pin.moving { transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1)); opacity: .7; cursor: grabbing; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
 .pc-pin.resolved {
   background: #d1d5db;
   color: #6b7280;
