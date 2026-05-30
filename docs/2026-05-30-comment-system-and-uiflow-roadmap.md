@@ -84,11 +84,12 @@
 - **效益 / 成本**：效益高（左移、設計與程式同源）；成本高。
 - **建議分階段**：① 先做 R3（畫面區塊綁 story ID）→ ② 由 stories 組合單一畫面 → ③ 由 spec 驅動整段 flow。先在羽球比賽系統做 PoC。
 
-### R2. 設計稿留言 → 自動 report.html
+### R2. 設計稿留言 → 自動 report.html — ✅ DONE 2026-05-30
 - **目標**：當 ui-flow 有設計稿留言 (pc.js) 時，產出報告：每畫面 = 截圖 + 該畫面 unresolved 留言（標記點 + 列表）。雙用途：① 給人閱讀 ② 當 AI 修正設計稿/prototype 的資料來源。
 - **可行性**：高。留言已在 Firestore（依 `projectId` 可查）；截圖管線已存在（prototype-flow-doc skill capture）。
 - **管線**：query unresolved comments → 每畫面截圖 → 合成（截圖 + pin 標記 + 留言清單）→ 輸出 `report.html`（html-doc 樣板）+ 一份 machine-readable JSON/MD 給 AI。
 - **成本**：中。**建議**：留言系統穩定後優先做，這是現有 capture + pc.js 的自然延伸，價值最高。
+- **實作**：`prototype-flow-doc/scripts/05-comment-report.js`（零依賴，Firestore REST public read）。每畫面 phone-frame 依 x/y% 放編號 pin（紅未解決／灰已解決）+ 對應留言卡（作者／內容／reaction／單層回覆），輸出 `report.html` + machine-readable `report.json`（screens[].comments[] 給 AI）。截圖以 `--shots <dir>/<screenId>.png` **可插拔**疊背景，無截圖顯示佔位框。**已對 live `tournament-ui-flow`（26 留言/10 畫面/19 未解決 root）跑通並驗證 HTML 平衡 + JSON schema**。SKILL.md 已記錄用法。後續可選：接 capture 管線自動補各畫面截圖。
 
 ### R3. UI component 畫面綁定 Storybook id
 - **公司流程**：react/flutter prototype → Netlify → ui-flow kit 產畫面流程交付。希望把 ui-flow 畫面區塊對應到 Storybook component ID，建立 設計↔component↔code 追溯。
@@ -103,9 +104,9 @@
 - **實作**：新增 `references/dev-note-writing.md` 撰寫規範（5 條硬規則 + tag 表 + 好壞對照 + 寫完自檢），SKILL.md「devNotes 寫白話」與完成檢查兩處連結進去。順手把 `03-generate.js` pcInit 殘留的 `authBarTarget:'.header'` 移除（對齊 D3 浮底，避免每次產 flow 又把 bar 塞回 header）。`node --check` 通過。
 
 ### Roadmap 優先序建議
-1. **R4 + C3**（低成本快速 win）
-2. **R2 report.html**（價值最高、延伸現有管線）
-3. **R3 storybook id 手動 manifest**（追溯基石）
+1. ~~**R4 + C3**（低成本快速 win）~~ ✅ DONE 2026-05-30
+2. ~~**R2 report.html**（價值最高、延伸現有管線）~~ ✅ DONE 2026-05-30（MVP，截圖疊圖可選後補）
+3. **R3 storybook id 手動 manifest**（追溯基石）← 下一個
 4. **R1 spec→設計稿 多模式**（最大工程，分階段 PoC）
 
 ---
