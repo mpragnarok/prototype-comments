@@ -41,7 +41,7 @@
 
 ### A. 留言系統（pc.js）
 - **✅ A1 回覆階層收尾（D1）** — DONE 2026-05-30：`buildCommentItem` resolve 鈕改 toggle（`isRootComment && onResolve`，依 `c.resolved` 顯示「✓ Resolve / ↩ 取消解決」，呼叫 `onResolve(!c.resolved)`）；reply 渲染處（`index.js` panel + `note-comments.js`）移除 `onReply` → replies 無回覆鈕。
-- **✅ A2 留言 bar 浮底（D3）** — DONE 2026-05-30：使用者選**右下角浮動膠囊（現有 `bottom:64px;right:12px`）**。移除消費端 ui-flow 模板與內部 demo flow 共 3 處實際 init 的 `authBarTarget:'.header'` → bar 不再注入 header、桌機/手機都浮動。（guide.html 的範例碼與參數表仍寫舊行為，待 B1 一併更新。）
+- **✅ A2 留言 bar 浮底（D3）** — DONE 2026-05-30：使用者選**右下角浮動膠囊（現有 `bottom:64px;right:12px`）**。移除消費端 ui-flow 模板與內部 demo flow 共 3 處實際 init 的 `authBarTarget:'.header'` → bar 不再注入 header、桌機/手機都浮動。（guide.html 範例碼與參數表已於 B1 更新為浮底行為。）
 - **✅ A3 Pin 重設計（D4）** — DONE 2026-05-30：四角統一 `border-radius: 11px`（原 `10px 10px 10px 3px` 左下 3px 近直角，與其他三角 10px 不協調，使用者圖回報）；尾巴 `::before` 從底邊偏左直線段長出（`left:10px`、輕微不對稱 5/6px）。用 C2 fixture ×4 放大截圖驗證四角一致、尾巴銜接自然。
 - **✅ A4 Emoji 微調（D2）** — DONE 2026-05-30：`REACTION_EMOJIS` 補到 8 顆 `['👍','❤️','🎉','😄','👀','🙏','🤔','🔥']`。
 - **✅ A6 Pin 蓋住頁面 header（z-index）** — DONE 2026-05-30：根因＝`.phone`(手機外框) 未形成 stacking context，pin(z-index 210) 直接跟 root 比、蓋過 sticky `.header`(z-index 100)。修法＝`.phone` 加 `isolation:isolate` → 整個手機框（含 pin 子樹）關進一個 context、降到 header 之下；body 層的 auth bar(z 9000)/mobile-nav(z 200)/popover 不受影響。套用 3 doc。（2026-05-30 使用者回報）
@@ -51,7 +51,7 @@
 - **✅ #4 回覆 thread popover 送出後自動關閉** — DONE 2026-05-30：根因＝positional pin thread 唯一回覆途徑（底部 textarea + submit）在 `await store.save()` 後**主動 `closeAllPopovers()`**，與 snapshot handler（會自動把新回覆刷進開著的 popover）打架。修法：移除該 `closeAllPopovers()`，改「清空 textarea + `refreshThread()`」→ popover 保持開著、回覆即時出現、可連續回覆（對齊 note thread 的 inline 回覆 UX）。e2e 先重現（`popOpen:false`）再修（`popOpen:true, replyShown:true, taCleared:true`）。
 
 ### B. 文件
-- **B1 guide v2 更新**：`prototype-comments-guide.html` 補 reactions / @tag / 搜尋 / 篩選 / 排序 / 回覆 / 紅 pin（目前完全缺 v2）。
+- **✅ B1 guide v2 更新** — DONE 2026-05-30：`prototype-comments-guide.html` 新增「留言功能一覽」章節（表情回應 8 顆 + 桌機 hover／手機長按看名單、@提及 teal 高亮、搜尋／狀態 tab／類型 chip／tag chip／排序、單層回覆與 resolve toggle、紅 pin #BA1A1A／已解決灰 pin #6b7280 + pc-pin-flash）。同步：移除 setup 範例的 `authBarTarget:'.header'`（改說明省略＝浮右下角，對齊現行 3 處 init）、參數表補 `authBarTarget` 新語意 + `scrollContainer`、Firestore schema 補 `reactions` map 欄位、nav + TL;DR 更新、日期 2026-05-30。HTML tag 平衡已驗。
 - **B2 design-spec 不可變條款**：把 §0 色彩/行為條款寫進 `prototype-comments-design-spec.html`（主＋worktree 兩份要同步）。
 - **B3 專案規格**：把 D3 條款加進消費端專案 `AGENTS.md`（或 CLAUDE.md）。
 - **B4 完整 design review**：逐畫面盤點不合理處 + 方案，產出 review report（html-doc 樣板）。
@@ -71,7 +71,7 @@
   - **狀態**：✅ MVP DONE 2026-05-30 — `test/visual/`：`fixture.html`（純 sample DOM）+ `visual-shot.js`（ESM runner，**不複製 CSS**：直接 `import { STYLES }`，注入後截 desktop 1440×900 + mobile 375×812）+ `baselines/`（已建）。涵蓋 pin 各態 / 放大 ×4 / reactions / toolbar / reply / B5 popover。**上線即抓到並驗證了 A3 圓角**。關鍵教訓：舊 `render-test.html` 手抄一份過時 pin CSS（圓形 teal）→ 測不到真退化；C2 鐵則是載真實 STYLES。設計見 `docs/2026-05-30-feat-c2-visual-regression.md`。
   - **✅ #8 視覺 runner 改 pixelmatch（2026-05-30）**：byte 比對 → `pixelmatch` + `pngjs`（dev deps），每像素 threshold 0.1 + 整圖容忍 0.2%，尺寸不符判 fail，DIFFER 輸出 `*.diff.png` + `process.exit(1)` 供 CI gate。**根因修正**：截圖前注入 `*{animation:none;transition:none}` 停用動畫——`pc-pin-flash`(.55s×2) 與 `pc-pin.moving`(pulse 無限) 會讓每次截到不同 frame 造成假 DIFFER（連兩次 run 0px 差異驗證確定性）。fixture pin markup 同步補 `.pc-pin-ic` 結構對齊 live render；B5 名單 popover 樣本改 list-only（對齊 #5）。
   - **✅ #7 GitHub Actions CI（2026-05-30）**：`.github/workflows/e2e.yml`（push/PR to main）→ `npm install`（repo gitignore lock，不可用 `npm ci`）+ `playwright install chromium --with-deps` + `npm run test:e2e`（**硬 gate**，mock firebase 跨平台一致）。視覺 regression 設 `continue-on-error`（informational）+ 上傳 `output/` 截圖與 diff 為 artifact——**因 baseline 在 macOS 產生，CI(Linux) 字型/emoji 字形渲染本質不同，pixelmatch 無法吸收**；要變硬 gate 需在同一 Linux 容器重產 baseline。npm scripts：`test:e2e` / `test:visual` / `test:visual:update` / `test`。
-- **C3 ui-flow 完整功能說明**：ui-flow HTML 加 RWD onboarding overlay（引導使用者點擊、說明不會壞版）。
+- **✅ C3 ui-flow 完整功能說明** — DONE 2026-05-30：ui-flow HTML 加首訪 onboarding overlay。首訪自動開、4 步引導（左側切畫面／點 hotspot 跳頁／設計⇄工程／留言），`localStorage('uiflow-onboarding-dismissed')` 記住關閉，左下角「?」FAB 可重開（避開 pc.js 右側 bar），`window.showOnboarding()` 可程式開啟。RWD：桌機置中卡片、手機 bottom-sheet（避開 mobile-nav）、ESC/背景點關閉。套用 `ui-flow-template.html`（master，03-generate 產的 flow 自動繼承）+ `tournament-ui-flow.html`（live）。兩檔 HTML tag 平衡 + 內嵌 JS `node --check` 通過。
 
 ---
 
@@ -95,11 +95,12 @@
 - **可行性**：中–高。靠 data 屬性 / mapping manifest：capture 時記錄每區塊對應的 story ID（prototype DOM 帶 `data-storybook-id` 或外部 manifest）。
 - **成本**：中–高（依 prototype 是否吐 story ID）。**建議**：先做「手動 mapping manifest」拿到追溯價值，再自動化。是 R1 的前置基石。
 
-### R4. dev note 可讀性
+### R4. dev note 可讀性 — ✅ DONE 2026-05-30
 - **目標**：檢視 ui-flow skill 產 dev note 那段，讓輸出更好讀懂。
 - **檢視點**：`~/.claude/skills/prototype-flow-doc/scripts/03-generate*` 產 devNotes 的邏輯 / prompt。
 - **改法**：白話、行動導向、依 tag 分組、去術語、明確「這版改了什麼」。
 - **成本**：低。**建議**：快速 win，連同 C3 一起做。
+- **實作**：新增 `references/dev-note-writing.md` 撰寫規範（5 條硬規則 + tag 表 + 好壞對照 + 寫完自檢），SKILL.md「devNotes 寫白話」與完成檢查兩處連結進去。順手把 `03-generate.js` pcInit 殘留的 `authBarTarget:'.header'` 移除（對齊 D3 浮底，避免每次產 flow 又把 bar 塞回 header）。`node --check` 通過。
 
 ### Roadmap 優先序建議
 1. **R4 + C3**（低成本快速 win）
