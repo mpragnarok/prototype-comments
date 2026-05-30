@@ -78,17 +78,18 @@ export async function initPrototypeComments(opts = {}) {
     navigateTo        = null,   // (screenId: string) => void  — consumer provides
     authBarTarget     = null,   // CSS selector for a flex header to inject auth bar into
     scrollContainer   = null,   // CSS selector for scrollable body inside the phone frame
+    _firebase         = null,   // 測試用：注入 in-memory firebase mock，略過 CDN load + 真 Firebase
   } = opts;
 
-  if (!firebaseConfig) {
+  if (!firebaseConfig && !_firebase) {
     console.error('[prototype-comments] firebaseConfig is required');
     return;
   }
 
   injectStyles();
 
-  // Load Firebase SDK
-  const fb = await loadFirebase();
+  // Load Firebase SDK（測試可用 _firebase 注入 mock，略過 gstatic CDN）
+  const fb = _firebase || await loadFirebase();
 
   // Init Firebase app (avoid duplicate)
   const app = fb.getApps().length
