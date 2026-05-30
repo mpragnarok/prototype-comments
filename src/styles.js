@@ -124,11 +124,11 @@ export const STYLES = `
 .pc-pin.pressing { transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1)); }
 .pc-pin.moving { transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1)); opacity: .7; cursor: grabbing; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
 .pc-pin.resolved {
-  background: #d1d5db;
-  color: #6b7280;
-  opacity: .7;
+  background: #6b7280;                  /* gray-500：白字對比度 ~4.6:1 達 WCAG AA，一眼讀得出 ✓ */
+  color: #fff;
+  opacity: .80;                          /* 仍保留「已解決=次要、退到背景」語意，但不再糊掉 */
 }
-.pc-pin.resolved::before { border-top-color: #d1d5db; }
+.pc-pin.resolved::before { border-top-color: #6b7280; }
 .pc-pin.pc-pin-edge::before { display: none; }   /* edge pin 用 ::after 箭頭，不顯示泡泡尾巴 */
 .pc-pin-label { line-height: 1; display: inline-flex; align-items: center; gap: 1px; }
 .pc-pin-ic { flex: 0 0 16px; display: inline-flex; justify-content: center; overflow: hidden; }   /* icon 固定寬框(不縮不漲) → 💬/✓ 同寬，resolved 與未解決 pin 對齊 */

@@ -5,10 +5,14 @@
   "description": "Drop-in Firebase comment overlay for HTML prototypes",
   "scripts": {
     "test:render": "open test/render-test.html",
-    "test:e2e": "node test/e2e-comments.spec.js",
-    "test:e2e:local": "USE_LOCAL=1 node test/e2e-comments.spec.js"
+    "test:e2e": "node test/e2e/e2e-mock.spec.js",
+    "test:visual": "node test/visual/visual-shot.js",
+    "test:visual:update": "node test/visual/visual-shot.js --update",
+    "test": "npm run test:e2e && npm run test:visual"
   },
   "devDependencies": {
-    "playwright": "^1.52.0"
+    "pixelmatch": "^7.2.0",
+    "playwright": "^1.52.0",
+    "pngjs": "^7.0.0"
   }
 }

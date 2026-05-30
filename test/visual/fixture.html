@@ -51,23 +51,23 @@
   <h2>Pin — 狀態</h2>
   <div class="vf-grid">
     <div class="vf-cell">
-      <div class="pc-pin"><span class="pc-pin-label">💬1</span></div>
+      <div class="pc-pin"><span class="pc-pin-label"><span class="pc-pin-ic">💬</span>1</span></div>
       <span class="vf-lbl">未解決·單位數</span>
     </div>
     <div class="vf-cell">
-      <div class="pc-pin"><span class="pc-pin-label">💬12</span></div>
+      <div class="pc-pin"><span class="pc-pin-label"><span class="pc-pin-ic">💬</span>12</span></div>
       <span class="vf-lbl">未解決·多位數</span>
     </div>
     <div class="vf-cell">
-      <div class="pc-pin resolved"><span class="pc-pin-label">✓3</span></div>
+      <div class="pc-pin resolved"><span class="pc-pin-label"><span class="pc-pin-ic">✓</span>3</span></div>
       <span class="vf-lbl">已解決</span>
     </div>
     <div class="vf-cell">
-      <div class="pc-pin pc-pin-edge"><span class="pc-pin-label">💬2</span></div>
+      <div class="pc-pin pc-pin-edge"><span class="pc-pin-label"><span class="pc-pin-ic">💬</span>2</span></div>
       <span class="vf-lbl">edge pin</span>
     </div>
     <div class="vf-cell">
-      <div class="pc-pin pc-pin-flash"><span class="pc-pin-label">💬1</span></div>
+      <div class="pc-pin pc-pin-flash"><span class="pc-pin-label"><span class="pc-pin-ic">💬</span>1</span></div>
       <span class="vf-lbl">flash 高亮</span>
     </div>
   </div>
@@ -78,11 +78,11 @@
   <h2>Pin — 放大 ×4（檢視左下圓角與尾巴銜接）</h2>
   <div class="vf-grid">
     <div class="vf-cell vf-zoom">
-      <div class="pc-pin"><span class="pc-pin-label">💬1</span></div>
+      <div class="pc-pin"><span class="pc-pin-label"><span class="pc-pin-ic">💬</span>1</span></div>
       <span class="vf-lbl">未解決</span>
     </div>
     <div class="vf-cell vf-zoom">
-      <div class="pc-pin resolved"><span class="pc-pin-label">✓1</span></div>
+      <div class="pc-pin resolved"><span class="pc-pin-label"><span class="pc-pin-ic">✓</span>1</span></div>
       <span class="vf-lbl">已解決</span>
     </div>
   </div>
@@ -105,18 +105,16 @@
   </div>
 </div>
 
-<!-- ── B5 reaction 名單 popover ─────────────── -->
+<!-- ── B5 reaction 名單 popover（#5 重設計：純名單，桌機 hover / 手機長按觸發；toggle 改由 click/tap）─── -->
 <div class="vf-sec">
-  <h2>B5 — reaction「誰按了」popover（手機 tap；position 攤平展示）</h2>
+  <h2>B5 — reaction「誰按了」純名單 popover（桌機 hover / 手機長按；position 攤平展示）</h2>
   <div class="vf-grid">
     <div class="pc-reaction-users" style="position:static;">
-      <div class="pc-reaction-users-row">👍  設計師 A</div>
+      <div class="pc-reaction-users-row">👍  設計師 A（你）</div>
       <div class="pc-reaction-users-row">👍  工程師 B</div>
-      <button class="pc-reaction-users-toggle mine">✓ 已按，點此取消</button>
     </div>
     <div class="pc-reaction-users" style="position:static;">
       <div class="pc-reaction-users-row">🎉  PM C</div>
-      <button class="pc-reaction-users-toggle">我也按一個</button>
     </div>
   </div>
 </div>

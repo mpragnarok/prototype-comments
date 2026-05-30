@@ -4,16 +4,20 @@
 
 ---
 
-## ‼️ 改功能前的強制流程（使用者 2026-05-30 核准，無例外）
+## ‼️ 設計規範 / 規格變更流程（使用者 2026-05-30 核准，無例外）
 
-任何**功能性改動**，動工寫 code 前必須依序完成下列，並**等使用者明確確認後才能動工**：
+任何**設計規範或功能規格**的改動，一律走這條鏈，**第 2 步是強制 GATE，未取得明確核准不得動工**：
 
-1. **先更新 SSOT roadmap**：`docs/2026-05-30-comment-system-and-uiflow-roadmap.md`（記錄這次改什麼、為什麼）。
-2. **若涉及設計規範 / design system** → 一起更新（不可變條款、design-spec），不可只改 code。
-3. **為該功能新增規格文件 spec doc**：`docs/{YYYY-MM-DD}-{feat|fix}-{slug}.md`（描述需求、行為、邊界、驗收）。
-4. **把以上 1–3 的變更提交使用者確認** → 確認後才動工。
+1. **提 plan（html-doc 格式）** — 改規格前先用 `html-doc` skill 出一份「要怎麼改」的計畫，含：問題、方案比較、影響的檔案清單。輸出到 `docs/previews/{YYYY-MM-DD}-{feat|fix}-{slug}.html`，開給使用者看。
+2. **使用者 review → 明確核准** — `🚧 GATE`：等使用者說 OK 才進下一步。不可邊問邊改。
+3. **實作** — 改 `src/` code ＋ 對應 test（功能必附 e2e；畫面改動必附 visual regression，見下）。
+4. **更新回來源文件（SSOT）** — 把定案同步回設計規範來源：
+   - 設計規則 → `jubo/docs/design/prototype-comments-design-spec.html`（唯一設計規範來源）
+   - 進度 / 決策 → `docs/2026-05-30-comment-system-and-uiflow-roadmap.md`（§2.A）
+   - 該功能規格 → `docs/{YYYY-MM-DD}-{feat|fix}-{slug}.md`（需求 / 行為 / 邊界 / 驗收）
+5. **doctrine 檔案只放 reference** — `AGENTS.md` / `CLAUDE.md` **不內嵌設計細節**，只指向上述來源文件 + 本流程。要查設計規則就點連結到 design-spec，避免兩處重複、漂移。
 
-> 「我說要改動功能」時，先改 SSOT / design system / spec，請我確認，**不要直接改 code**。
+> 「我說要改動規格 / 功能」時：先出 html-doc plan、請我確認，**不要直接改 code 或來源文件**。
 
 ---
 
@@ -27,13 +31,15 @@ CI：GitHub Actions 應在 push / PR 跑 `test:e2e` + 視覺 regression（見 `.
 
 ---
 
-## 設計不可變條款（與消費端 jubo `AGENTS.md` 同步，違反需先取得同意）
+## 設計規範來源（不在此內嵌，一律 reference）
 
-- **主色 teal `#0FA0A0`**：所有互動 accent（focus、active chip、hover、mention）。
-- **系統紅 `#BA1A1A` 只給 pin**：不得用於一般按鈕 / chip / 連結。例外：reaction「mine」狀態允許紅色調 `#FFDAD6`/`#BA1A1A`。
-- **留言 bar 永遠浮動在視窗底部**，不注入頁面 header。
-- **回覆階層單層**：root 留言可回覆 + resolve/unresolve；replies 不可再回覆、不可 resolve。
-- **Emoji reactions 精選 6–8 顆**，不掛整套 emoji。
+設計規則的**唯一來源（SSOT）**是設計規範文件，不在 doctrine 檔案重複：
+
+- **設計規範**：[`jubo/docs/design/prototype-comments-design-spec.html`](../jubo-line-badminton-check-in-system/docs/design/prototype-comments-design-spec.html) — 色彩系統、pin/overlay token、功能規格、不可變條款（teal 主色、紅只給 pin、bar 浮底、單層回覆、精選 emoji、resolved pin 樣式…）。
+- **進度 / 決策**：`docs/2026-05-30-comment-system-and-uiflow-roadmap.md`
+- **各功能規格**：`docs/{date}-{feat|fix}-{slug}.md`
+
+> 改任何設計規則前，回到上面的流程：先 html-doc plan → 核准 → 改 code + test → **更新 design-spec.html**。違反不可變條款需先取得同意。
 
 ---
 

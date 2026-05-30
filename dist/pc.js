@@ -124,11 +124,11 @@ const STYLES = `
 .pc-pin.pressing { transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1)); }
 .pc-pin.moving { transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1)); opacity: .7; cursor: grabbing; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
 .pc-pin.resolved {
-  background: #d1d5db;
-  color: #6b7280;
-  opacity: .7;
+  background: #6b7280;                  /* gray-500：白字對比度 ~4.6:1 達 WCAG AA，一眼讀得出 ✓ */
+  color: #fff;
+  opacity: .80;                          /* 仍保留「已解決=次要、退到背景」語意，但不再糊掉 */
 }
-.pc-pin.resolved::before { border-top-color: #d1d5db; }
+.pc-pin.resolved::before { border-top-color: #6b7280; }
 .pc-pin.pc-pin-edge::before { display: none; }   /* edge pin 用 ::after 箭頭，不顯示泡泡尾巴 */
 .pc-pin-label { line-height: 1; display: inline-flex; align-items: center; gap: 1px; }
 .pc-pin-ic { flex: 0 0 16px; display: inline-flex; justify-content: center; overflow: hidden; }   /* icon 固定寬框(不縮不漲) → 💬/✓ 同寬，resolved 與未解決 pin 對齊 */
@@ -1513,29 +1513,56 @@ export async function initPrototypeComments(opts = {}) {
     document.body.appendChild(pop);
     setTimeout(() => document.addEventListener('click', function h() { pop.remove(); document.removeEventListener('click', h); }), 0);
   }
-  // B5: 手機無 hover → tap chip 顯示「誰按了」popover（含 toggle 自己反應的按鈕）
-  function showReactionUsers(anchor, emoji, users, c, onReact) {
-    const existing = document.querySelector('.pc-reaction-users');
-    if (existing) { existing.remove(); return; }
+  // B5（#5 重設計）：顯示「誰按了某 emoji」純名單 popover。
+  // 桌機 hover 觸發、手機長按觸發；toggle 自己的反應改由 chip 的 click/tap 處理（不放進此 popover）。
+  function showReactionUsers(anchor, emoji, users, { dismissable = false } = {}) {
+    document.querySelectorAll('.pc-reaction-users').forEach(p => p.remove());
     const pop = el('div', 'pc-reaction-users');
+    const myUid = currentUser && currentUser.uid;
     users.forEach(u => {
       const row = el('div', 'pc-reaction-users-row');
-      row.textContent = emoji + '  ' + u.name;
+      row.textContent = emoji + '  ' + u.name + (u.uid === myUid ? '（你）' : '');
       pop.appendChild(row);
     });
-    const myUid = currentUser && currentUser.uid;
-    if (onReact && myUid) {
-      const mine = users.some(u => u.uid === myUid);
-      const tg = el('button', 'pc-reaction-users-toggle' + (mine ? ' mine' : ''));
-      tg.textContent = mine ? '✓ 已按，點此取消' : '我也按一個';
-      tg.onclick = (e) => { e.stopPropagation(); toggleReaction(c, emoji, onReact); pop.remove(); };
-      pop.appendChild(tg);
-    }
     const r = anchor.getBoundingClientRect();
     pop.style.left = Math.min(r.left, window.innerWidth - 230) + 'px';
     pop.style.top = (r.bottom + 4) + 'px';
     document.body.appendChild(pop);
-    setTimeout(() => document.addEventListener('click', function h() { pop.remove(); document.removeEventListener('click', h); }), 0);
+    if (dismissable) {
+      setTimeout(() => document.addEventListener('pointerdown', function h(ev) {
+        if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener('pointerdown', h); }
+      }), 0);
+    }
+    return pop;
+  }
+  // 桌機：hover chip 看名單、click toggle；手機：長按 chip 看名單、tap toggle。
+  function bindReactionChip(chip, c, emoji, users, onReact) {
+    const noHover = window.matchMedia && window.matchMedia('(hover: none)').matches;
+    if (noHover) {
+      let lpTimer = null, lpFired = false;
+      chip.addEventListener('pointerdown', () => {
+        lpFired = false;
+        lpTimer = setTimeout(() => { lpFired = true; showReactionUsers(chip, emoji, users, { dismissable: true }); }, 400);
+      });
+      const cancelLp = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
+      chip.addEventListener('pointerup', cancelLp);
+      chip.addEventListener('pointercancel', cancelLp);
+      chip.addEventListener('pointerleave', cancelLp);
+      chip.onclick = (e) => {
+        e.stopPropagation();
+        if (lpFired) { lpFired = false; return; }   // 長按剛開名單 → 這次 tap 不 toggle
+        toggleReaction(c, emoji, onReact);
+      };
+    } else {
+      let hoverPop = null;
+      chip.addEventListener('mouseenter', () => { hoverPop = showReactionUsers(chip, emoji, users); });
+      chip.addEventListener('mouseleave', () => { if (hoverPop) { hoverPop.remove(); hoverPop = null; } });
+      chip.onclick = (e) => {
+        e.stopPropagation();
+        if (hoverPop) { hoverPop.remove(); hoverPop = null; }
+        toggleReaction(c, emoji, onReact);
+      };
+    }
   }
   function buildReactions(c, onReact) {
     const wrap = el('div', 'pc-ci-reactions');
@@ -1547,15 +1574,8 @@ export async function initPrototypeComments(opts = {}) {
       const chip = el('button', 'pc-reaction-chip');
       if (myUid && users.some(u => u.uid === myUid)) chip.classList.add('mine');
       chip.innerHTML = emoji + ' <span>' + users.length + '</span>';
-      chip.title = users.map(u => u.name).join(', ');   // who reacted
-      if (onReact && myUid) chip.onclick = (e) => {
-        // 無 hover（手機）：tap 顯示名單 popover（含 toggle）；桌機：維持 hover 看名單 + click 直接 toggle
-        if (window.matchMedia && window.matchMedia('(hover: none)').matches) {
-          e.stopPropagation(); showReactionUsers(chip, emoji, users, c, onReact);
-        } else {
-          toggleReaction(c, emoji, onReact);
-        }
-      };
+      chip.title = users.map(u => u.name).join(', ');   // 原生 tooltip fallback
+      if (onReact && myUid) bindReactionChip(chip, c, emoji, users, onReact);
       wrap.appendChild(chip);
     });
     if (onReact && myUid) {
@@ -1858,7 +1878,12 @@ export async function initPrototypeComments(opts = {}) {
           authorPhoto: currentUser.photoURL || '',
           resolved: false,
         });
-        closeAllPopovers();
+        // #4：回覆後保持 popover 開著（像對話 thread），清空輸入方便連續回覆。
+        // 不再 closeAllPopovers()——snapshot handler 會自動把新回覆刷進 thread，
+        // 這裡先本地 refresh 給即時回饋。
+        ta.value = '';
+        submitBtn.disabled = true;
+        refreshThread();
       };
       actions.appendChild(submitBtn);
       popEl.appendChild(actions);

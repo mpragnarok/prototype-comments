@@ -1,4 +1,4 @@
-name: E2E Tests
+name: Tests
 
 on:
   push:
@@ -18,9 +18,28 @@ jobs:
         with:
           node-version: '20'
 
+      # 用 npm install（非 npm ci）：repo 刻意 gitignore package-lock.json（drop-in library），CI 無 lock 可用。
       - run: npm install
 
       - run: npx playwright install chromium --with-deps
 
-      - run: npm run test:e2e
+      # e2e 是硬 gate：純行為 / computed style 斷言，跨平台一致（Firebase 用 in-memory mock，無網路）。
+      - name: e2e (mock firebase)
+        run: npm run test:e2e
         timeout-minutes: 5
+
+      # 視覺 regression：baseline 在 macOS 產生，CI(Linux) 的字型 / emoji 字形渲染本質不同，
+      # pixelmatch threshold 無法吸收（非單純 subpixel）。因此在 CI 設為「informational」：
+      # 不擋 PR，改上傳截圖 + diff PNG 供人眼審。要讓它變硬 gate 需在同一 Linux 容器重產 baseline。
+      - name: visual regression (informational — mac baseline vs linux)
+        id: visual
+        continue-on-error: true
+        run: npm run test:visual
+
+      - name: upload visual screenshots + diff
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-output
+          path: test/visual/output/
+          if-no-files-found: ignore
