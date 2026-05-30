@@ -1,6 +1,6 @@
 export function createNoteModule({
   store, getCurrentUser, getScreenId, engNoteSelector, getComments, noteKey, el, timeAgo,
-  buildCommentItem,
+  buildCommentItem, attachMentions,
 }) {
 
   function getNoteComments(tag, text) {
@@ -12,21 +12,48 @@ export function createNoteModule({
     threadEl.innerHTML = '';
     const nc = getNoteComments(tag, text);
     const refresh = () => renderNoteThread(threadEl, tag, text);
+    const user = getCurrentUser();
+    const roots = nc.filter(c => !c.parentId);
+    const repliesOf = id => nc.filter(c => c.parentId === id);
 
-    nc.forEach(c => {
-      const user = getCurrentUser();
-      threadEl.appendChild(buildCommentItem(c, true, {
+    const saveReply = parentId => async body => {
+      await store.save({
+        type: 'note', screenId: getScreenId(), noteKey: noteKey(tag, text), noteTag: tag, noteText: text,
+        parentId, body,
+        authorUid: user.uid, authorName: user.displayName || user.email, authorPhoto: user.photoURL || '', resolved: false,
+      });
+    };
+
+    roots.forEach((c, i) => {
+      threadEl.appendChild(buildCommentItem(c, i === 0, {
         onResolve: resolved => store.update(c.id, { resolved }),
         onDelete:  ()       => store.remove(c.id),
+        onDeleteThread: ()  => Promise.all(getNoteComments(tag, text).map(t => store.remove(t.id))),
         onEdit:    body     => store.update(c.id, { body, edited: true }),
+        onReact:   r        => store.update(c.id, { reactions: r }),
+        onReply:   user ? saveReply(c.id) : null,
         onUpdated: refresh,
       }));
+      const reps = repliesOf(c.id);
+      if (reps.length) {
+        const indent = el('div', 'pc-note-replies');
+        reps.forEach(r => {
+          indent.appendChild(buildCommentItem(r, false, {
+            onDelete:  ()    => store.remove(r.id),
+            onEdit:    body  => store.update(r.id, { body, edited: true }),
+            onReact:   rr    => store.update(r.id, { reactions: rr }),
+            // D1: replies 不可再回覆 — 不傳 onReply
+            onUpdated: refresh,
+          }));
+        });
+        threadEl.appendChild(indent);
+      }
     });
 
-    const user = getCurrentUser();
     if (user) {
       const wrap = el('div', 'pc-note-input-wrap');
-      const ta = el('textarea', 'pc-note-textarea', { placeholder: '留言…' });
+      const ta = el('textarea', 'pc-note-textarea', { placeholder: '留言…（@ 可標記人）' });
+      if (attachMentions) attachMentions(ta);
       const btn = el('button', 'pc-note-submit', { disabled: '' });
       btn.textContent = '送出';
       ta.addEventListener('input', () => { btn.disabled = !ta.value.trim(); });

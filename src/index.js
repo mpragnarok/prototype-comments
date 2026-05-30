@@ -144,7 +144,7 @@ export async function initPrototypeComments(opts = {}) {
   let autoScrollDir   = 0;                  // 1 = down, -1 = up, 0 = none
 
   // panel state
-  const panel = { open: false, filter: 'all', el: null, unsub: null };
+  const panel = { open: false, filter: 'all', typeFilter: 'all', search: '', tagFilter: null, sort: 'new', expandedNote: null, el: null, listEl: null, unsub: null };
 
   // ── Auth Bar ───────────────────────────────────────────────────────────────
   function buildAuthBar() {
@@ -484,7 +484,8 @@ export async function initPrototypeComments(opts = {}) {
       if (thread) popEl.appendChild(thread);
     }
 
-    const ta = el('textarea', 'pc-textarea', { placeholder: '留下你的意見…' });
+    const ta = el('textarea', 'pc-textarea', { placeholder: '留下你的意見…（@ 可標記人）' });
+    attachMentions(ta);
     popEl.appendChild(ta);
     ta.focus();
 
@@ -544,8 +545,114 @@ export async function initPrototypeComments(opts = {}) {
     positionPopover(popEl, clientX, clientY);
   }
 
+  // Escape HTML then turn URLs into clickable links (Feature: linkify)
+  function escapeHtml(s) {
+    return (s || '').replace(/[&<>"']/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+  }
+  function linkify(s, names) {
+    let h = escapeHtml(s);
+    h = h.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" class="pc-link">$1</a>');
+    // highlight known @full-names first (longest first, so "Mina Huang" beats "Mina")
+    (names || []).slice().filter(Boolean).sort((a, b) => b.length - a.length).forEach(n => {
+      const e = escapeHtml(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      h = h.replace(new RegExp('@' + e, 'g'), '<span class="pc-mention">@' + escapeHtml(n) + '</span>');
+    });
+    return h;
+  }
+
+  // ── @mention (Figma-style): pool = distinct comment authors in this projectId ──
+  function peopleList() {
+    const m = new Map();
+    allComments.forEach(c => { if (c.authorUid && c.authorName) m.set(c.authorUid, { uid: c.authorUid, name: c.authorName, photo: c.authorPhoto || '' }); });
+    return [...m.values()];
+  }
+  function attachMentions(ta) {
+    let pop = null;
+    const close = () => { if (pop) { pop.remove(); pop = null; } };
+    ta.addEventListener('input', () => {
+      const pos = ta.selectionStart;
+      const before = ta.value.slice(0, pos);
+      const m = before.match(/@([^\s@]*)$/);
+      close();
+      if (!m) return;
+      const q = m[1].toLowerCase();
+      const matches = peopleList().filter(p => p.name.toLowerCase().includes(q)).slice(0, 6);
+      if (!matches.length) return;
+      pop = el('div', 'pc-mention-pop');
+      matches.forEach(p => {
+        const opt = el('button', 'pc-mention-opt');
+        opt.innerHTML = (p.photo ? `<img src="${p.photo}" alt="">` : '<span class="pc-mention-ph"></span>') + `<span>${escapeHtml(p.name)}</span>`;
+        opt.onmousedown = (e) => {
+          e.preventDefault();
+          const start = pos - m[0].length;
+          ta.value = ta.value.slice(0, start) + '@' + p.name + ' ' + ta.value.slice(pos);
+          const np = start + p.name.length + 2;
+          ta.setSelectionRange(np, np);
+          close(); ta.focus();
+          ta.dispatchEvent(new Event('input'));
+        };
+        pop.appendChild(opt);
+      });
+      const r = ta.getBoundingClientRect();
+      pop.style.left = r.left + 'px';
+      pop.style.top = (r.bottom + 2) + 'px';
+      pop.style.width = r.width + 'px';
+      document.body.appendChild(pop);
+    });
+    ta.addEventListener('blur', () => setTimeout(close, 150));
+  }
+
+  // ── Emoji reactions (Figma-style: any logged-in user can react; shows who) ──
+  const REACTION_EMOJIS = ['👍','❤️','🎉','😄','👀','🙏','🤔','🔥'];
+  function toggleReaction(c, emoji, onReact) {
+    if (!currentUser) return;
+    const me = { uid: currentUser.uid, name: currentUser.displayName || currentUser.email || '匿名' };
+    const r = { ...(c.reactions || {}) };
+    const list = (r[emoji] || []).slice();
+    const i = list.findIndex(u => u.uid === me.uid);
+    if (i >= 0) list.splice(i, 1); else list.push(me);
+    if (list.length) r[emoji] = list; else delete r[emoji];
+    onReact(r);
+  }
+  function showEmojiPicker(anchor, c, onReact) {
+    const existing = document.querySelector('.pc-emoji-picker');
+    if (existing) { existing.remove(); return; }
+    const pop = el('div', 'pc-emoji-picker');
+    REACTION_EMOJIS.forEach(em => {
+      const b = el('button', 'pc-emoji-opt'); b.textContent = em;
+      b.onclick = (e) => { e.stopPropagation(); toggleReaction(c, em, onReact); pop.remove(); };
+      pop.appendChild(b);
+    });
+    const r = anchor.getBoundingClientRect();
+    pop.style.left = Math.min(r.left, window.innerWidth - 220) + 'px';
+    pop.style.top = (r.bottom + 4) + 'px';
+    document.body.appendChild(pop);
+    setTimeout(() => document.addEventListener('click', function h() { pop.remove(); document.removeEventListener('click', h); }), 0);
+  }
+  function buildReactions(c, onReact) {
+    const wrap = el('div', 'pc-ci-reactions');
+    const reactions = c.reactions || {};
+    const myUid = currentUser && currentUser.uid;
+    Object.keys(reactions).forEach(emoji => {
+      const users = reactions[emoji] || [];
+      if (!users.length) return;
+      const chip = el('button', 'pc-reaction-chip');
+      if (myUid && users.some(u => u.uid === myUid)) chip.classList.add('mine');
+      chip.innerHTML = emoji + ' <span>' + users.length + '</span>';
+      chip.title = users.map(u => u.name).join(', ');   // who reacted
+      if (onReact && myUid) chip.onclick = () => toggleReaction(c, emoji, onReact);
+      wrap.appendChild(chip);
+    });
+    if (onReact && myUid) {
+      const add = el('button', 'pc-reaction-add'); add.textContent = '🙂'; add.title = '加表情';
+      add.onclick = (e) => { e.stopPropagation(); showEmojiPicker(add, c, onReact); };
+      wrap.appendChild(add);
+    }
+    return wrap;
+  }
+
   // Build a single comment item element with edit/delete/resolve actions
-  function buildCommentItem(c, isRootComment, { onResolve, onDelete, onEdit, onUpdated } = {}) {
+  function buildCommentItem(c, isRootComment, { onResolve, onDelete, onDeleteThread, onEdit, onReact, onReply, onUpdated } = {}) {
     const item = el('div', 'pc-comment-item');
 
     if (c.authorPhoto) {
@@ -560,23 +667,52 @@ export async function initPrototypeComments(opts = {}) {
     meta.appendChild(an); meta.appendChild(at);
     bodyEl.appendChild(meta);
 
-    const txtEl = el('p', 'pc-ci-text'); txtEl.textContent = c.body;
+    const txtEl = el('p', 'pc-ci-text'); txtEl.innerHTML = linkify(c.body, peopleList().map(p => p.name));
     bodyEl.appendChild(txtEl);
+
+    // Emoji reactions row (any logged-in user)
+    if (onReact) bodyEl.appendChild(buildReactions(c, onReact));
 
     const acts = el('div', 'pc-ci-actions');
 
-    // Resolve (root comments only)
-    if (!c.resolved && isRootComment) {
+    // Resolve / Unresolve toggle (root comments only) — D1: root 可 resolve 也可 unresolve
+    if (isRootComment && onResolve) {
       const resolveBtn = el('button', 'pc-ci-action resolve');
-      resolveBtn.textContent = '✓ Resolve';
+      resolveBtn.textContent = c.resolved ? '↩ 取消解決' : '✓ Resolve';
       resolveBtn.onclick = async () => {
-        if (onResolve) await onResolve(true);
+        await onResolve(!c.resolved);
         if (onUpdated) onUpdated();
       };
       acts.appendChild(resolveBtn);
     }
 
 
+
+    // Reply (any logged-in user) — opens inline reply box; used by note/eng threads
+    if (onReply && currentUser) {
+      const replyBtn = el('button', 'pc-ci-action');
+      replyBtn.textContent = '↩ 回覆';
+      replyBtn.onclick = () => {
+        if (bodyEl.querySelector('.pc-reply-box')) return;
+        const box = el('div', 'pc-reply-box');
+        const rta = el('textarea', 'pc-note-textarea', { placeholder: '回覆…（@ 可標記人）' });
+        attachMentions(rta);
+        const send = el('button', 'pc-note-submit'); send.textContent = '送出';
+        const cancel = el('button', 'pc-btn-cancel'); cancel.textContent = '取消';
+        cancel.style.cssText = 'margin-left:4px;font-size:11px;padding:4px 8px;';
+        const row = el('div', ''); row.style.cssText = 'display:flex;gap:6px;margin-top:6px;';
+        row.appendChild(send); row.appendChild(cancel);
+        box.appendChild(rta); box.appendChild(row); bodyEl.appendChild(box);
+        cancel.onclick = () => box.remove();
+        send.onclick = async () => {
+          const b = rta.value.trim(); if (!b) return; send.disabled = true;
+          await onReply(b); box.remove();
+          if (onUpdated) onUpdated();
+        };
+        rta.focus();
+      };
+      acts.appendChild(replyBtn);
+    }
 
     // Edit (own comments only) + Delete (own replies only)
     if (currentUser && c.authorUid === currentUser.uid) {
@@ -616,17 +752,21 @@ export async function initPrototypeComments(opts = {}) {
       };
       acts.appendChild(editBtn);
 
-      // Delete — replies only; root comments can only be Resolved, never deleted
-      if (!isRootComment) {
-        const delBtn = el('button', 'pc-ci-action');
-        delBtn.textContent = '刪除';
-        delBtn.onclick = async () => {
+      // Delete — Figma-style: replies delete themselves; root deletes the whole thread (with confirm)
+      const delBtn = el('button', 'pc-ci-action');
+      delBtn.textContent = '刪除';
+      delBtn.onclick = async () => {
+        if (isRootComment) {
+          if (!confirm('確定要刪除這個 thread 嗎？\n此 thread 的所有留言都會被刪除，且無法復原。')) return;
+          if (onDeleteThread) await onDeleteThread();
+          else if (onDelete) await onDelete();
+        } else {
           if (!confirm('刪除這則留言？')) return;
           if (onDelete) await onDelete();
-          if (onUpdated) onUpdated();
-        };
-        acts.appendChild(delBtn);
-      }
+        }
+        if (onUpdated) onUpdated();
+      };
+      acts.appendChild(delBtn);
     }
 
     bodyEl.appendChild(acts);
@@ -645,7 +785,9 @@ export async function initPrototypeComments(opts = {}) {
       div.appendChild(buildCommentItem(c, c.id === commentId, {
         onResolve: resolved => store.update(c.id, { resolved }),
         onDelete:  ()       => store.remove(c.id),
+        onDeleteThread: ()  => Promise.all(threadComments.map(t => store.remove(t.id))),
         onEdit:    body     => store.update(c.id, { body, edited: true }),
+        onReact:   r        => store.update(c.id, { reactions: r }),
         onUpdated,
       }));
     });
@@ -696,7 +838,8 @@ export async function initPrototypeComments(opts = {}) {
       pinEl.style.top  = `${pinVisualY}%`;
       pinEl.style.setProperty('--pc-pin-scale', scale);
       const label = el('span', 'pc-pin-label');
-      label.textContent = threadCount;
+      // 方案 C 對話泡：未解決顯示 💬N、已解決顯示 ✓N（與當初核准的 mockup 一致）
+      label.textContent = (c.resolved ? '✓' : '💬') + threadCount;
       pinEl.appendChild(label);
 
       pinEl.addEventListener('click', e => {
@@ -769,7 +912,8 @@ export async function initPrototypeComments(opts = {}) {
     if (thread) popEl.appendChild(thread);
 
     if (currentUser) {
-      const ta = el('textarea', 'pc-textarea', { placeholder: '回覆…', rows: '2' });
+      const ta = el('textarea', 'pc-textarea', { placeholder: '回覆…（@ 可標記人）', rows: '2' });
+      attachMentions(ta);
       ta.style.minHeight = '52px';
       popEl.appendChild(ta);
       const actions = el('div', 'pc-popover-actions');
@@ -891,6 +1035,47 @@ export async function initPrototypeComments(opts = {}) {
     if (panel.el) panel.el.classList.remove('open');
   }
 
+  // Render a note's full thread inline inside the panel (reliable — uses comment data,
+  // not page rows; avoids the stale-noteKey / hidden-mode problems of scrolling to a row)
+  function renderInlineNoteThread(container, root) {
+    container.innerHTML = '';
+    const key = root.noteKey;
+    const all = allComments.filter(x => x.type === 'note' && x.noteKey === key);
+    const repliesOf = id => all.filter(x => x.parentId === id);
+    const refresh = renderPanel;
+    const saveReply = parentId => async body => {
+      await store.save({
+        type: 'note', screenId: root.screenId, noteKey: key, noteTag: root.noteTag, noteText: root.noteText,
+        parentId, body,
+        authorUid: currentUser.uid, authorName: currentUser.displayName || currentUser.email,
+        authorPhoto: currentUser.photoURL || '', resolved: false,
+      });
+    };
+    all.filter(x => !x.parentId).forEach((c, i) => {
+      container.appendChild(buildCommentItem(c, i === 0, {
+        onResolve: r => store.update(c.id, { resolved: r }),
+        onDelete:  () => store.remove(c.id),
+        onDeleteThread: () => Promise.all(all.map(t => store.remove(t.id))),
+        onEdit:    b => store.update(c.id, { body: b, edited: true }),
+        onReact:   r => store.update(c.id, { reactions: r }),
+        onReply:   currentUser ? saveReply(c.id) : null,
+        onUpdated: refresh,
+      }));
+      const reps = repliesOf(c.id);
+      if (reps.length) {
+        const ind = el('div', 'pc-note-replies');
+        reps.forEach(r => ind.appendChild(buildCommentItem(r, false, {
+          onDelete: () => store.remove(r.id),
+          onEdit:   b => store.update(r.id, { body: b, edited: true }),
+          onReact:  rr => store.update(r.id, { reactions: rr }),
+          // D1: replies 不可再回覆 — 不傳 onReply
+          onUpdated: refresh,
+        })));
+        container.appendChild(ind);
+      }
+    });
+  }
+
   function renderPanel() {
     if (!panel.el) return;
     panel.el.innerHTML = '';
@@ -911,6 +1096,60 @@ export async function initPrototypeComments(opts = {}) {
     });
     panel.el.appendChild(tabs);
 
+    // Search box (Figma-style)
+    const searchWrap = el('div', 'pc-panel-search');
+    const searchInput = el('input', 'pc-panel-search-input', { type: 'text', placeholder: '🔍 搜尋留言、作者、tag、畫面…' });
+    searchInput.value = panel.search || '';
+    let composing = false;
+    searchInput.addEventListener('compositionstart', () => { composing = true; });
+    searchInput.addEventListener('compositionend', () => {
+      composing = false; panel.search = searchInput.value; renderPanelList();
+    });
+    searchInput.oninput = () => {
+      if (composing) return;            // mid-IME composition (注音/拼音) — don't re-filter yet
+      panel.search = searchInput.value;
+      renderPanelList();                // re-render ONLY the list → input element survives, IME intact
+    };
+    searchWrap.appendChild(searchInput);
+    panel.el.appendChild(searchWrap);
+
+    // Tag filter chips (clickable) + sort button — kept visually separate from status tabs
+    const toolbar = el('div', 'pc-panel-toolbar');
+    const chipsWrap = el('div', 'pc-panel-tagchips');
+    // Type filter: 設計留言 (positional pins) vs 工程留言 (notes)
+    [['all', '全部項目'], ['design', '🎨 設計'], ['eng', '🔧 工程']].forEach(([t, label]) => {
+      const chip = el('button', `pc-panel-tagchip pc-panel-typechip${panel.typeFilter === t ? ' active' : ''}`);
+      chip.textContent = label;
+      chip.onclick = () => { panel.typeFilter = t; renderPanel(); };
+      chipsWrap.appendChild(chip);
+    });
+    const tags = [...new Set(allComments.filter(c => !c.parentId && c.noteTag).map(c => c.noteTag))];
+    tags.forEach(t => {
+      const chip = el('button', `pc-panel-tagchip${panel.tagFilter === t ? ' active' : ''}`);
+      chip.textContent = '#' + t;
+      chip.onclick = () => { panel.tagFilter = panel.tagFilter === t ? null : t; renderPanel(); };
+      chipsWrap.appendChild(chip);
+    });
+    toolbar.appendChild(chipsWrap);
+    const sortBtn = el('button', 'pc-panel-sort');
+    sortBtn.textContent = panel.sort === 'old' ? '↑ 最舊優先' : '↓ 最新優先';
+    sortBtn.title = '切換排序';
+    sortBtn.onclick = () => { panel.sort = panel.sort === 'old' ? 'new' : 'old'; renderPanel(); };
+    toolbar.appendChild(sortBtn);
+    panel.el.appendChild(toolbar);
+
+    panel.listEl = el('div', 'pc-panel-list');
+    panel.el.appendChild(panel.listEl);
+    renderPanelList();
+  }
+
+  // Re-renders ONLY the list portion. Called on every search keystroke so the
+  // search <input> element is never destroyed mid-IME-composition (注音 bug fix).
+  function renderPanelList() {
+    const list = panel.listEl;
+    if (!list) return;
+    list.innerHTML = '';
+
     const pinNums = {};
     [...allComments]
       .filter(c => !c.parentId && c.type === 'positional')
@@ -920,24 +1159,45 @@ export async function initPrototypeComments(opts = {}) {
         pinNums[c.screenId][c.id] = Object.keys(pinNums[c.screenId]).length + 1;
       });
 
+    const q = (panel.search || '').trim().toLowerCase();
     const roots = allComments.filter(c => !c.parentId && (
       panel.filter === 'all'      ? true :
       panel.filter === 'open'     ? !c.resolved :
       /* resolved */                 c.resolved
-    ));
-
-    const list = el('div', 'pc-panel-list');
+    )).filter(c => !panel.tagFilter || c.noteTag === panel.tagFilter)
+      .filter(c => panel.typeFilter === 'all' ? true :
+                   panel.typeFilter === 'design' ? c.type === 'positional' :
+                   /* eng */ c.type === 'note')
+      .filter(c => {
+        if (!q) return true;
+        return [c.body, c.authorName, c.noteTag, c.noteText, c.screenId]
+          .filter(Boolean).join(' ').toLowerCase().includes(q);
+      })
+      .sort((a, b) => {
+        const ta = a.createdAt?.toMillis?.() ?? 0, tb = b.createdAt?.toMillis?.() ?? 0;
+        return panel.sort === 'old' ? ta - tb : tb - ta;
+      });
 
     if (!roots.length) {
       const empty = el('div', 'pc-panel-empty');
       empty.textContent =
+        q                           ? '找不到符合的留言' :
         panel.filter === 'open'     ? '沒有未解決的留言 🎉' :
         panel.filter === 'resolved' ? '還沒有已解決的留言' : '還沒有留言';
       list.appendChild(empty);
     } else {
       roots.forEach(c => {
         const item = el('div', `pc-panel-item${c.resolved ? ' resolved' : ''}`);
-        item.onclick = () => navigateToComment(c);
+        if (c.type === 'note') {
+          // Note/eng comment → expand its thread inline in the panel (reliable)
+          item.onclick = (e) => {
+            if (e.target.closest('.pc-panel-inline-thread')) return;  // don't toggle when interacting inside
+            panel.expandedNote = panel.expandedNote === c.noteKey ? null : c.noteKey;
+            renderPanel();
+          };
+        } else {
+          item.onclick = () => navigateToComment(c);
+        }
 
         const topRow = el('div', 'pc-panel-top-row');
         const modeChip = el('span', 'pc-panel-chip');
@@ -992,19 +1252,25 @@ export async function initPrototypeComments(opts = {}) {
           item.appendChild(rc);
         }
 
+        // Inline-expanded note thread
+        if (c.type === 'note' && panel.expandedNote === c.noteKey) {
+          const inline = el('div', 'pc-panel-inline-thread');
+          renderInlineNoteThread(inline, c);
+          item.appendChild(inline);
+        }
+
         list.appendChild(item);
       });
     }
-
-    panel.el.appendChild(list);
   }
 
   async function navigateToComment(comment) {
     closePanel();
-    if (navigateTo && comment.screenId && comment.screenId !== getScreenId()) {
-      navigateTo(comment.screenId);
-      await new Promise(r => setTimeout(r, 150));
-    }
+    // B6: 只有換頁才走 navigate；同頁也讓出一個 tick 對齊時序（避免同步路徑下
+    //     剛開的 popover 被同一輪事件處理清掉），確保已在該頁時仍能「跳出來」
+    const onOtherScreen = navigateTo && comment.screenId && comment.screenId !== getScreenId();
+    if (onOtherScreen) navigateTo(comment.screenId);
+    await new Promise(r => setTimeout(r, onOtherScreen ? 150 : 0));
 
     if (comment.type === 'note' && comment.noteKey) {
       for (const row of document.querySelectorAll('[data-pc-injected]')) {
@@ -1022,6 +1288,14 @@ export async function initPrototypeComments(opts = {}) {
 
     const overlay = document.getElementById('pc-overlay');
     if (overlay && comment.x != null) {
+      // B6: 高亮該 pin 讓留言「跳出來」（同頁無換頁動畫時的視覺回饋）
+      const pinEl = overlay.querySelector(`.pc-pin[data-comment-id="${comment.id}"]`);
+      if (pinEl) {
+        pinEl.classList.remove('pc-pin-flash');
+        void pinEl.offsetWidth;            // reflow → 重新觸發 animation
+        pinEl.classList.add('pc-pin-flash');
+        setTimeout(() => pinEl.classList.remove('pc-pin-flash'), 1300);
+      }
       const rect = overlay.getBoundingClientRect();
       const cx = rect.left + (comment.x / 100) * rect.width;
       const cy = rect.top  + (comment.y / 100) * rect.height - getScrollTop();
@@ -1033,6 +1307,7 @@ export async function initPrototypeComments(opts = {}) {
   const noteModule = createNoteModule({
     store,
     getCurrentUser: () => currentUser,
+    attachMentions,
     getScreenId,
     engNoteSelector,
     getComments:    () => comments,

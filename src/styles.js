@@ -85,35 +85,122 @@ export const STYLES = `
   cursor: pointer;
 }
 
-/* Comment Pin */
+/* Comment Pin — 對話泡 bubble (方案 C)
+   rounded-rect 比例（寬>高）+ 左下尾巴 → 單一數字也讀得出 speech bubble；不加白圈 */
 .pc-pin {
   position: absolute;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: #0FA0A0;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: 30px;
+  height: 22px;
+  padding: 0 8px 1px;
+  border-radius: 10px 10px 10px 3px;   /* 三角左下，配尾巴 */
+  background: #BA1A1A;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: monospace;
   cursor: pointer;
   z-index: 210;
-  box-shadow: 0 2px 8px rgba(15,160,160,.5), 0 0 0 2px #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,.3);
   transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1));
   transform-origin: center;
   transition: transform .15s, opacity .15s;
   pointer-events: all;
-  font-family: monospace;
+}
+.pc-pin::before {                        /* 對話泡尾巴，左下角指向錨點 */
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 7px;
+  width: 0; height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 9px solid #BA1A1A;
 }
 .pc-pin:hover { transform: translate(-50%, -50%) scale(calc(var(--pc-pin-scale, 1) * 1.2)); }
 .pc-pin.resolved {
   background: #d1d5db;
-  box-shadow: 0 0 0 2px #fff;
-  opacity: .6;
+  color: #6b7280;
+  opacity: .7;
 }
+.pc-pin.resolved::before { border-top-color: #d1d5db; }
+.pc-pin.pc-pin-edge::before { display: none; }   /* edge pin 用 ::after 箭頭，不顯示泡泡尾巴 */
 .pc-pin-label { line-height: 1; }
+
+/* B6: 「全部留言」導向同頁時，pin 閃爍高亮讓留言「跳出來」 */
+.pc-pin.pc-pin-flash { animation: pc-pin-flash .55s ease 2; z-index: 211; }
+@keyframes pc-pin-flash {
+  0%, 100% { transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1)); box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+  50%      { transform: translate(-50%, -50%) scale(calc(var(--pc-pin-scale, 1) * 1.5)); box-shadow: 0 0 0 4px rgba(186,26,26,.35), 0 2px 8px rgba(0,0,0,.35); }
+}
+
+/* Emoji reactions */
+.pc-ci-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 2px; align-items: center; }
+.pc-reaction-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 7px; border-radius: 12px; cursor: pointer;
+  border: 1px solid #e5e7eb; background: #f8fafc; font-size: 12px; line-height: 1.4;
+  font-family: inherit; transition: all .12s;
+}
+.pc-reaction-chip span { font-size: 11px; color: #64748b; font-weight: 600; }
+.pc-reaction-chip:hover { border-color: #cbd5e1; }
+.pc-reaction-chip.mine { background: #FFDAD6; border-color: #BA1A1A; }
+.pc-reaction-chip.mine span { color: #BA1A1A; }
+.pc-reaction-add {
+  width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
+  border: 1px dashed #cbd5e1; background: #fff; font-size: 12px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center; opacity: .65;
+}
+.pc-reaction-add:hover { opacity: 1; border-color: #0FA0A0; }
+.pc-emoji-picker {
+  position: fixed; z-index: 2147483647; display: flex; gap: 2px;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 5px 7px; box-shadow: 0 6px 24px rgba(0,0,0,.16);
+}
+.pc-emoji-opt {
+  border: none; background: none; cursor: pointer; font-size: 18px;
+  width: 30px; height: 30px; border-radius: 7px; line-height: 1;
+}
+.pc-emoji-opt:hover { background: #f1f5f9; }
+
+/* All-comments panel search */
+.pc-panel-search { padding: 8px 12px 4px; }
+.pc-panel-search-input {
+  width: 100%; box-sizing: border-box; padding: 7px 10px;
+  border: 1px solid #e5e7eb; border-radius: 8px; font-size: 13px;
+  font-family: inherit; outline: none;
+}
+.pc-panel-search-input:focus { border-color: #0FA0A0; }
+.pc-panel-toolbar { display: flex; align-items: center; gap: 8px; padding: 0 12px 8px; flex-wrap: wrap; }
+.pc-panel-tagchips { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
+.pc-panel-tagchip { font-size: 11px; padding: 3px 9px; border-radius: 12px; border: 1px solid #e5e7eb; background: #fff; color: #64748b; cursor: pointer; font-family: inherit; }
+.pc-panel-tagchip:hover { border-color: #cbd5e1; }
+.pc-panel-tagchip.active { background: #0FA0A0; border-color: #0FA0A0; color: #fff; }
+.pc-panel-sort { font-size: 12px; padding: 4px 10px; border-radius: 8px; border: 1px solid #e5e7eb; background: #f8fafc; color: #475569; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.pc-panel-sort:hover { border-color: #0FA0A0; color: #0FA0A0; }
+
+/* @mention */
+.pc-mention { color: #0FA0A0; font-weight: 600; }
+.pc-mention-pop {
+  position: fixed; z-index: 2147483647; background: #fff;
+  border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.16);
+  max-height: 200px; overflow-y: auto; padding: 4px;
+}
+.pc-mention-opt {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: none; background: none; cursor: pointer; padding: 6px 8px;
+  border-radius: 6px; font-size: 13px; font-family: inherit; text-align: left;
+}
+.pc-mention-opt:hover { background: #f1f5f9; }
+.pc-mention-opt img, .pc-mention-ph { width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0; object-fit: cover; }
+.pc-mention-ph { background: #e5e7eb; }
+
+/* Note/eng reply threads (1-level nesting) */
+.pc-note-replies { margin-left: 22px; padding-left: 10px; border-left: 2px solid #eef2f2; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.pc-reply-box { margin-top: 6px; }
+.pc-panel-inline-thread { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #e5e7eb; cursor: default; }
 
 /* Input Popover */
 .pc-popover {
@@ -385,7 +472,10 @@ export const STYLES = `
 
 .pc-panel-list {
   flex: 1;
+  min-height: 0;                      /* flex child must shrink so overflow-y can scroll */
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 8px 0;
 }
 .pc-panel-empty {
@@ -567,5 +657,13 @@ body.pc-dragging, body.pc-dragging * { cursor: grabbing !important; }
   #pc-auth-mobile-wrap .pc-user-name { display: none; }
   .pc-signin-text { display: none; }
   #pc-auth-mobile-wrap .pc-sign-in-btn { padding: 6px 8px; }
+
+  /* All-comments panel: full-width + dynamic viewport height so the list scrolls
+     (100vh is taller than the visible area on mobile → bottom was unreachable) */
+  .pc-panel {
+    width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+  }
 }
 `;
