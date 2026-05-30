@@ -89,7 +89,10 @@
 - **可行性**：高。留言已在 Firestore（依 `projectId` 可查）；截圖管線已存在（prototype-flow-doc skill capture）。
 - **管線**：query unresolved comments → 每畫面截圖 → 合成（截圖 + pin 標記 + 留言清單）→ 輸出 `report.html`（html-doc 樣板）+ 一份 machine-readable JSON/MD 給 AI。
 - **成本**：中。**建議**：留言系統穩定後優先做，這是現有 capture + pc.js 的自然延伸，價值最高。
-- **實作**：`prototype-flow-doc/scripts/05-comment-report.js`（零依賴，Firestore REST public read）。每畫面 phone-frame 依 x/y% 放編號 pin（紅未解決／灰已解決）+ 對應留言卡（作者／內容／reaction／單層回覆），輸出 `report.html` + machine-readable `report.json`（screens[].comments[] 給 AI）。截圖以 `--shots <dir>/<screenId>.png` **可插拔**疊背景，無截圖顯示佔位框。**已對 live `tournament-ui-flow`（26 留言/10 畫面/19 未解決 root）跑通並驗證 HTML 平衡 + JSON schema**。SKILL.md 已記錄用法。後續可選：接 capture 管線自動補各畫面截圖。
+- **實作**：`prototype-flow-doc/scripts/05-comment-report.js`（Firestore REST public read）。每畫面 phone-frame 依 x/y% 放編號 pin（紅未解決／灰已解決）+ 對應留言卡（作者／內容／reaction／單層回覆），輸出 `report.html` + machine-readable `report.json`（screens[].comments[] 給 AI）。
+  - **截圖（2026-05-31 補）**：`--flow <html|url>` 用 playwright 載入 flow、逐畫面 `goto` + 截 `#phone`（addInitScript 設 onboarding dismissed、route abort pc.js → 無 auth bar/無重複 pin），base64 嵌進 report；frame 改依圖比例（has-shot 解除固定 aspect）。`--shots <dir>` 仍可用現成 png。**已對 live `tournament-ui-flow` 跑通：26 留言/10 畫面/19 未解決，截圖 10/10 嵌入**。
+  - **測試（2026-05-31 補）**：純函式抽出可測（`group`/`pinMap`/`commentCard`/`buildJson`/`buildHtml`/`decode` 全參數化、export）；`05-comment-report.test.js`（`node:test`，零依賴）17 cases green，涵蓋 Standard/Boundary/Branching(includeResolved・positional vs note・resolved pin)/Error(decode 未知型別)/escape。
+  - SKILL.md 已記錄用法。
 
 ### R3. UI component 畫面綁定 Storybook id
 - **公司流程**：react/flutter prototype → Netlify → ui-flow kit 產畫面流程交付。希望把 ui-flow 畫面區塊對應到 Storybook component ID，建立 設計↔component↔code 追溯。
