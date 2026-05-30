@@ -39,8 +39,12 @@ for fname, role in files:
 
 result = '\n\n'.join(parts) + '\n'
 
-os.makedirs(os.path.dirname(output), exist_ok=True)
-with open(output, 'w') as f:
-    f.write(result)
+def _write(path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write(result)
+    print(f'Built {path} ({len(result):,} chars)')
 
-print(f'Built {output} ({len(result):,} chars)')
+_write(output)
+# 同步輸出一份到本 repo dist/（e2e harness 載入 + 未來 CDN release artifact，見 SSOT §4.6）
+_write(os.path.join(os.path.dirname(__file__), 'dist', 'pc.js'))
