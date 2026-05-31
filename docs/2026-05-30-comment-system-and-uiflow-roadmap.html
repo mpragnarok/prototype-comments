@@ -331,6 +331,7 @@
   }
   .tl-item.done::before   { background: var(--olive); }
   .tl-item.todo::before   { background: var(--clay);  }
+  .tl-item.partial::before{ background: var(--clay);  }
   .tl-item.bug::before    { background: var(--rust);  }
   .tl-done-badge {
     font-family: var(--mono);
@@ -347,6 +348,14 @@
     color: var(--clay);
     font-weight: 600;
     text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-right: 6px;
+  }
+  .tl-partial-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--clay);
+    font-weight: 600;
     letter-spacing: 0.04em;
     margin-right: 6px;
   }
@@ -660,7 +669,7 @@
       <span class="mono-pill">SSOT</span>
     </div>
     <div class="date-meta">
-      最後更新：2026-05-30 &nbsp;&middot;&nbsp;
+      最後更新：2026-06-01 &nbsp;&middot;&nbsp;
       <code>prototype-comments</code> &amp; 消費端 <code>docs/design/</code>
     </div>
   </header>
@@ -668,19 +677,19 @@
   <!-- Summary grid -->
   <div class="summary-band">
     <div class="stat-card accent-olive">
-      <div class="stat-num olive">11</div>
-      <div class="stat-label">本輪完成項</div>
-      <div class="stat-sub">A1 A2 A3 A4 A6 B3 B5 B6 C2 F1-F5</div>
+      <div class="stat-num olive">20</div>
+      <div class="stat-label">已完成項</div>
+      <div class="stat-sub">A1 A2 A3 A4 A6 A7 #4 B1 B3 B5 B6 B7 B8 B9 B10 C2 C3 C4 e2e-gate F1-F5</div>
     </div>
     <div class="stat-card accent-clay">
-      <div class="stat-num clay">5</div>
+      <div class="stat-num clay">3</div>
       <div class="stat-label">仍待辦</div>
-      <div class="stat-sub">B1 B2 B4 C1 C3</div>
+      <div class="stat-sub">B2（部分）B4 C1</div>
     </div>
     <div class="stat-card accent-teal">
-      <div class="stat-num teal">2026-05-30</div>
+      <div class="stat-num teal">2026-06-01</div>
       <div class="stat-label">最後更新</div>
-      <div class="stat-sub">本輪 session</div>
+      <div class="stat-sub">盤點對帳 session</div>
     </div>
   </div>
 
@@ -798,7 +807,8 @@
     <hr class="rule">
 
     <div class="highlight-note">
-      <strong>本輪完成（2026-05-30）：</strong> A1 A2 A3 A4 A6（留言系統）、B3、C2（視覺 regression MVP）、B5（手機 reaction 名單）、B6（同頁導向 + pin flash）
+      <strong>已完成（截至 2026-06-01）：</strong> A1 A2 A3 A4 A6 A7 #4 B5 B6 B7 B8 B9（留言系統）、B1 B3（文件）、C2 C3 C4 e2e gate 修復（工具 / 測試）。<br>
+      <strong>仍待辦：</strong> B2（部分——色彩條款已寫，僅「bar 浮底」行為條款待補）、B4、C1。
     </div>
 
     <h3>A. 留言系統（pc.js）</h3>
@@ -829,19 +839,59 @@
         <div class="tl-desc">根因：<code>.phone</code> 未形成 stacking context，pin (z-index 210) 蓋過 sticky <code>.header</code> (z-index 100)。修法：<code>.phone</code> 加 <code>isolation:isolate</code>，整個手機框關進一個 context。套用 3 doc。</div>
       </div>
 
+      <div class="tl-item done">
+        <div><span class="tl-id">A7</span><span class="tl-done-badge">DONE</span><span class="tl-title">resolved pin 對比度修正</span></div>
+        <div class="tl-desc">使用者回報「resolved pin 看不清楚」。根因：淡灰底 + 灰字 + <code>opacity .7</code> 三層疊加 → 對比 ~2.5:1，低於 WCAG AA。方案 A：<code>.pc-pin.resolved</code> 改 <code>background:#6b7280; color:#fff; opacity:.80</code>（尾巴同色）→ 對比 ~4.6:1 達 AA。同步更新 design-spec.html。</div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">#4</span><span class="tl-done-badge">DONE</span><span class="tl-title">回覆 thread popover 送出後自動關閉</span></div>
+        <div class="tl-desc">根因：positional pin thread 回覆在 <code>await store.save()</code> 後主動 <code>closeAllPopovers()</code>，與 snapshot handler 打架。修法：移除該呼叫，改「清空 textarea + <code>refreshThread()</code>」→ popover 保持開著、可連續回覆。e2e 先重現再修。</div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">B5</span><span class="tl-done-badge">DONE</span><span class="tl-title">reaction「誰按了」重設計（#5）</span></div>
+        <div class="tl-desc">拆「看名單」與「toggle」。桌機：hover chip → <code>showReactionUsers</code> 純名單 popover，click → toggle；手機：長按 ≥400ms → 名單，短按 tap → toggle。名單標自己「（你）」。新增 <code>bindReactionChip</code>。e2e 兩路徑綠。</div>
+      </div>
+
+      <div class="tl-item bug">
+        <div><span class="tl-id">B6</span><span class="tl-done-badge">DONE</span><span class="tl-title">全部留言面板：已在該頁時導向失效</span></div>
+        <div class="tl-desc">同頁路徑加 <code>await setTimeout(0)</code> 對齊時序 + 點到的 pin 加 <code>pc-pin-flash</code> 高亮閃爍。⚠️ 需使用者實機驗證。</div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">B7</span><span class="tl-done-badge">DONE</span><span class="tl-title">全部留言面板 inline thread 不重複主留言</span></div>
+        <div class="tl-desc">根因：panel item 已顯示 root 摘要，展開時 <code>renderInlineNoteThread</code> 又用完整 <code>buildCommentItem</code> 渲染一次 → 第一張卡重複。修法：<code>buildCommentItem</code> 加 <code>compact</code> 參數（略過頭像／作者／內容，只留 reactions＋操作）；inline thread 只渲染該 root 的 sub-thread。e2e source-check 鎖 <code>compact:true</code> + <code>parentId === root.id</code>。</div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">B8</span><span class="tl-done-badge">DONE</span><span class="tl-title">reaction「看誰按了」確認已上線</span></div>
+        <div class="tl-desc">查證 B5 已實作＋e2e 兩路徑綠＋進 <code>dist/pc.js</code>＋<code>main</code> 已 push＋jsDelivr CDN 實測含 <code>bindReactionChip</code>/<code>showReactionUsers</code>。功能在且 live：桌機 hover reaction chip（如 👍2 膠囊）→名單；手機長按 ≥400ms。無需新開發，僅說明互動位置。</div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">B9</span><span class="tl-done-badge">DONE</span><span class="tl-title">留言決議寫回（採用/不採用/待議）</span></div>
+        <div class="tl-desc">留言加 <code>decision</code>('accepted'|'rejected'|'pending'|null) + <code>decisionNote</code>，純 additive。只貼主留言、與 <code>resolved</code> 正交、採用=olive／待議=clay／不採用=灰（不可用紅）。pc.js + report 工具 + Firestore rules 白名單 + design-spec 條款全同步。測試 mock e2e 8/0、legacy 32/0、report 24/0、garble 0。⚠️ 待使用者執行 <code>firebase deploy --only firestore:rules</code> + 權限 smoke test。</div>
+      </div>
+
+      <div class="tl-item">
+        <div><span class="tl-id">B10</span><span class="tl-done-badge">DONE</span><span class="tl-title">全部留言面板：主留言控制項移到最外層</span></div>
+        <div class="tl-desc">使用者回報「點開後第一個留言出現兩次」（附圖）。修法：<code>renderInlineNoteThread</code> → <code>renderExpandedNote(item, root)</code>——root 控制項（reactions／resolve／回覆／決議）包一層 <code>.pc-panel-root-ctrl</code> 掛到 panel item 本身（最外層），展開區（<code>.pc-panel-inline-thread</code>）只列回覆。item.onclick guard 改 <code>closest('.pc-panel-inline-thread, .pc-panel-root-ctrl')</code> → 點控制項不誤收合。測試：legacy e2e source-check 改鎖新結構（33/0）＋ mock e2e 8/0 ＋ 視覺 regression 加 B10 fixture 樣本、baseline 更新、0px。bundle rebuild + node --check OK。<span style="color:var(--clay)">⚠️ 待 push dist/pc.js + purge jsDelivr 才上 CDN。</span></div>
+      </div>
+
     </div>
 
     <h3>B. 文件</h3>
     <div class="timeline">
 
-      <div class="tl-item todo">
-        <div><span class="tl-id">B1</span><span class="tl-todo-badge">TODO</span><span class="tl-title">guide v2 更新</span></div>
-        <div class="tl-desc"><code>prototype-comments-guide.html</code> 補 reactions / @tag / 搜尋 / 篩選 / 排序 / 回覆 / 紅 pin（目前完全缺 v2 說明）。</div>
+      <div class="tl-item done">
+        <div><span class="tl-id">B1</span><span class="tl-done-badge">DONE</span><span class="tl-title">guide v2 更新</span></div>
+        <div class="tl-desc"><code>prototype-comments-guide.html</code> 新增「留言功能一覽」章節（表情回應 8 顆 + 桌機 hover／手機長按看名單、@提及 teal 高亮、搜尋／狀態 tab／類型 chip／tag chip／排序、單層回覆與 resolve toggle、紅 pin #BA1A1A／已解決灰 pin #6b7280 + pc-pin-flash）。同步移除 setup 範例 <code>authBarTarget:&#39;.header&#39;</code>、參數表補新語意 + <code>scrollContainer</code>、schema 補 <code>reactions</code>。HTML tag 平衡已驗。</div>
       </div>
 
-      <div class="tl-item todo">
-        <div><span class="tl-id">B2</span><span class="tl-todo-badge">TODO</span><span class="tl-title">design-spec 不可變條款</span></div>
-        <div class="tl-desc">把 §0 色彩/行為條款寫進 <code>prototype-comments-design-spec.html</code>（主 + worktree 兩份要同步）。</div>
+      <div class="tl-item partial">
+        <div><span class="tl-id">B2</span><span class="tl-partial-badge">部分</span><span class="tl-title">design-spec 不可變條款</span></div>
+        <div class="tl-desc"><code>prototype-comments-design-spec.html</code> 已含<strong>色彩條款</strong>——teal 主色 <code>#0FA0A0</code>、紅只給 pin <code>#BA1A1A</code>、react「mine」例外 <code>#FFDAD6</code>+邊框、decision 色彩（採用 olive／待議 clay／不採用灰）、<code>--pc-pin-bg</code> token。<strong>待補一段</strong>：「留言 bar 永遠浮動視窗底部」<strong>行為</strong>條款目前只在消費端 AGENTS.md + guide.html，未明寫進 design-spec。</div>
       </div>
 
       <div class="tl-item done">
@@ -852,16 +902,6 @@
       <div class="tl-item todo">
         <div><span class="tl-id">B4</span><span class="tl-todo-badge">TODO</span><span class="tl-title">完整 design review</span></div>
         <div class="tl-desc">逐畫面盤點不合理處 + 方案，產出 review report（html-doc 樣板）。</div>
-      </div>
-
-      <div class="tl-item done">
-        <div><span class="tl-id">B5</span><span class="tl-done-badge">DONE</span><span class="tl-title">Reaction 手機顯示誰按</span></div>
-        <div class="tl-desc"><code>showReactionUsers</code> — 無 hover 裝置 tap chip → popover 列名單 + toggle 按鈕（mine 紅 / 非 mine teal）；桌機維持 hover <code>title</code> + click toggle。</div>
-      </div>
-
-      <div class="tl-item bug">
-        <div><span class="tl-id">B6</span><span class="tl-done-badge">DONE</span><span class="tl-title">全部留言面板：已在該頁時導向失效</span></div>
-        <div class="tl-desc">同頁路徑加 <code>await setTimeout(0)</code> 對齊時序 + 點到的 pin 加 <code>pc-pin-flash</code> 高亮閃爍。⚠️ 需使用者實機驗證。</div>
       </div>
 
     </div>
@@ -884,9 +924,19 @@
         </div>
       </div>
 
-      <div class="tl-item todo">
-        <div><span class="tl-id">C3</span><span class="tl-todo-badge">TODO</span><span class="tl-title">ui-flow 完整功能說明</span></div>
-        <div class="tl-desc">ui-flow HTML 加 RWD onboarding overlay（引導使用者點擊、說明不會壞版）。</div>
+      <div class="tl-item done">
+        <div><span class="tl-id">C3</span><span class="tl-done-badge">DONE</span><span class="tl-title">ui-flow 完整功能說明</span></div>
+        <div class="tl-desc">ui-flow HTML 加首訪 onboarding overlay。首訪自動開、4 步引導（切畫面／點 hotspot 跳頁／設計⇄工程／留言），<code>localStorage</code> 記住關閉，左下角「?」FAB 可重開。RWD：桌機置中卡片、手機 bottom-sheet、ESC／背景點關閉。套用 template（master）+ tournament-ui-flow（live）。HTML tag 平衡 + 內嵌 JS <code>node --check</code> 通過。</div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">C4</span><span class="tl-done-badge">DONE</span><span class="tl-title">ui-flow 右側 info-panel scroll bar</span></div>
+        <div class="tl-desc">使用者回報「右邊說明要能滑」。根因：<code>body{min-height:100vh}</code> 非固定高度 → <code>.info-panel</code> 雖 <code>overflow-y:auto</code> 但無有界高度故不出捲軸。修法：桌機 <code>body{height:100vh;overflow:hidden}</code> 鎖高度，三欄各自在有界高度內捲；<code>@media(max-width:767px)</code> 恢復整頁捲。套用 template（master）+ tournament-ui-flow（live）。⚠️ 需 deploy 後實機目視確認。</div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">e2e gate</span><span class="tl-done-badge">DONE</span><span class="tl-title">e2e gate regression 修復</span></div>
+        <div class="tl-desc">使用者回報「e2e 被搞爆」。根因：重加密碼閘後 legacy spec 預設打 <code>LIVE_URL</code>（被閘擋成登入頁）→ 5 測失敗；另 1 測需 eng-mode 頁面 timeout。修法：(1) 預設 target 改本地 <code>example/index.html</code>，live 改 <code>USE_LIVE=1</code> opt-in；(2) MO 測無 eng-mode 頁面 graceful skip。31→0 fail。</div>
       </div>
 
     </div>
@@ -1057,7 +1107,7 @@
   </section>
 
   <footer>
-    SSOT &middot; prototype-comments + 消費端 docs/design/ &nbsp;&mdash;&nbsp; 最後更新 2026-05-30
+    SSOT &middot; prototype-comments + 消費端 docs/design/ &nbsp;&mdash;&nbsp; 最後更新 2026-06-01
   </footer>
 
 </div>

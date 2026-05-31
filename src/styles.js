@@ -220,6 +220,8 @@ export const STYLES = `
 .pc-note-replies { margin-left: 22px; padding-left: 10px; border-left: 2px solid #eef2f2; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
 .pc-reply-box { margin-top: 6px; }
 .pc-panel-inline-thread { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #e5e7eb; cursor: default; }
+/* B10: root 控制項（reactions/resolve/回覆/決議）放 panel item 最外層，compact 扁平呈現、與摘要間以虛線分隔 */
+.pc-panel-root-ctrl { margin-top: 6px; padding-top: 6px; border-top: 1px dashed #e5e7eb; cursor: default; }
 
 /* Input Popover */
 .pc-popover {

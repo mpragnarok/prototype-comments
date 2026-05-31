@@ -163,6 +163,52 @@
   </div>
 </div>
 
+<!-- ── B10 全部留言展開：root 控制項在最外層、展開區只列回覆 ── -->
+<div class="vf-sec">
+  <h2>B10 — 全部留言展開：root 控制項在 item 最外層、下方只列回覆</h2>
+  <div class="pc-panel-item" style="max-width:320px;">
+    <div class="pc-panel-top-row">
+      <span class="pc-panel-chip" style="background:rgba(99,102,241,.12);color:#6366f1;">🔧 工程</span>
+      <span class="pc-panel-chip">前端</span>
+      <span class="pc-ci-time" style="margin-left:auto;">2 小時前</span>
+    </div>
+    <div class="pc-panel-meta"><span class="pc-ci-author">設計師 A</span></div>
+    <p class="pc-panel-excerpt">這段 spec 的 loading 狀態要補一個 skeleton…</p>
+    <span class="pc-panel-reply-count">↩ 1 則回覆</span>
+    <!-- root 控制項（最外層）：compact — 無頭像/作者/內容，只有 reactions＋操作＋決議 -->
+    <div class="pc-panel-root-ctrl">
+      <div class="pc-comment-item">
+        <div class="pc-ci-body">
+          <div class="pc-ci-reactions">
+            <button class="pc-reaction-chip">👍 <span>2</span></button>
+            <button class="pc-reaction-add">＋</button>
+          </div>
+          <div class="pc-ci-actions">
+            <button class="pc-ci-action resolve">✓ Resolve</button>
+            <button class="pc-ci-action">↩ 回覆</button>
+          </div>
+          <div class="pc-ci-decision">
+            <button class="pc-ci-dec-btn accepted active">✓ 採用</button>
+            <button class="pc-ci-dec-btn rejected">✕ 不採用</button>
+            <button class="pc-ci-dec-btn pending">⋯ 待議</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- 展開區：只列回覆（不再重複 root 主留言）-->
+    <div class="pc-panel-inline-thread">
+      <div class="pc-note-replies">
+        <div class="pc-comment-item">
+          <div class="pc-ci-body">
+            <div class="pc-ci-meta"><span class="pc-ci-author">工程師 B</span><span class="pc-ci-time">1 小時前</span></div>
+            <p class="pc-ci-text">收到，補一個 3 行 skeleton</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── REPLY THREAD（D1 單層）─────────────── -->
 <div class="vf-sec">
   <h2>回覆階層（D1：root 可回覆+resolve，reply 不可）</h2>

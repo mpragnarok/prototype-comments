@@ -2,7 +2,7 @@
 
 > **單一事實來源（SSOT）**。本檔記錄留言系統 (pc.js) 與 ui-flow 工具鏈的所有「已完成 / 待辦 / 評估」，避免長 session 中斷後失去脈絡。
 > 跨兩個 repo：本 repo `prototype-comments`（pc.js 原始碼）與消費端專案的 `docs/design/`（ui-flow、設計文件、pc.js bundle）。
-> 最後更新：2026-05-30
+> 最後更新：2026-06-01（盤點對帳：B3 標完成、B2 標部分、補 B10）
 >
 > ⚠️ 本 repo 為公開 repo。具體部署識別碼（netlify site id、內部 demo 站 URL、密碼）一律不寫入本檔，改記於私有部署筆記。
 
@@ -56,10 +56,12 @@
 - **✅ e2e gate regression 修復**（2026-05-31 使用者回報「e2e 被搞爆」）：根因＝重加密碼閘後，legacy `test/e2e-comments.spec.js` 預設打 `LIVE_URL`（被閘擋成登入頁）→ overlay/auth-bar/CSS 掛載類 5 測失敗；另 1 測（MO regression）需 eng-mode 頁面、minimal example 無故 timeout。**修法**：(1) 預設 target 改本地 `example/index.html`（public repo 不能放閘密碼），live 改 `USE_LIVE=1` opt-in；(2) MO 測在無 eng-mode 頁面 graceful skip。31→0 fail。`npm test`（官方套件＝mock e2e + visual）本來就全綠、未受影響。
 - **✅ B9 留言決議寫回（採用/不採用/待議）** — DONE 2026-05-31（使用者核准 GATE plan「開工」）：留言加 `decision`('accepted'|'rejected'|'pending'|null) + `decisionNote`，純 additive 無 migration。只貼**主留言**、與 `resolved` 正交不連動、採用=olive/待議=clay/不採用=灰(不可用紅)。**pc.js**：`buildCommentItem` 加 `onDecision` callback + meta 決議 badge + 操作列三鍵(toggle)＋有決議時註記框(blur 存)；三處接線（positional popover / note thread / panel inline）。決議鍵 `stopPropagation()` 修 popover 誤關（store.update 同步 snapshot replaceWith→detach 按鈕→outside-close）。**report 工具**（`05-comment-report.js`）：commentCard 決議 badge + 三鍵 + 註記框；buildHtml 在 meta 有 `apiKey`+`fbProject` 時注入 Firebase SDK + Google 登入 + `updateDoc` 寫回（未登入唯讀、disabled）；buildJson 加 `decision`/`decisionNote` 給 AI。**rules**：`jubo/firestore.rules` update 白名單 → `['resolved','reactions','decision','decisionNote']`（同時補回漂移掉的 `reactions`）。**SSOT**：design-spec 加決議色票+條款+rules row、功能規格 `docs/2026-05-31-feat-comment-decision.md`。**測試**：mock e2e 8/0（含決議寫回+toggle+popover 不關）、legacy 32/0、visual identical（fixture 加決議樣本、baseline 更新）、report 工具 24/0、buildHtml garble 0。Plan：`docs/previews/2026-05-31-feat-comment-decision-writeback.html`。⚠️ **待使用者執行**：`firebase deploy --only firestore:rules` + 權限 smoke test（網路封鎖在本 session 做不到）。
 
+- **✅ B10 全部留言面板：主留言控制項移到最外層 — DONE 2026-06-01**（使用者回報「點開後第一個留言出現兩次」，附圖，授權「做完」）：B7 已不重複作者＋內容，但 `renderInlineNoteThread` 仍以 `buildCommentItem(root,true,{compact:true})` 把 root 渲成一張**獨立卡**，視覺上仍像「第一則留言又出現一次」。**修法**：`renderInlineNoteThread` → `renderExpandedNote(item, root)`——root 的控制項（reactions／resolve／回覆／決議）包一層 `.pc-panel-root-ctrl` 掛到 **panel item 本身（最外層）**，展開區（`.pc-panel-inline-thread`）只列**回覆**。item.onclick guard 改 `closest('.pc-panel-inline-thread, .pc-panel-root-ctrl')` → 點控制項不會誤收合（決議鍵原本就有 `stopPropagation`）。`.pc-panel-root-ctrl` 加虛線分隔、compact 扁平呈現。**測試**：legacy e2e source-check 改鎖「`renderExpandedNote` 把 ctrl 掛 item、`compact:true` 只出現一次、回覆 `parentId===root.id`、guard 含 root-ctrl」（33/0）；mock e2e 8/0；視覺 regression 加 B10 fixture 樣本、baseline 更新、deterministic 0px。bundle rebuild + `node --check` OK。
+
 ### B. 文件
 - **✅ B1 guide v2 更新** — DONE 2026-05-30：`prototype-comments-guide.html` 新增「留言功能一覽」章節（表情回應 8 顆 + 桌機 hover／手機長按看名單、@提及 teal 高亮、搜尋／狀態 tab／類型 chip／tag chip／排序、單層回覆與 resolve toggle、紅 pin #BA1A1A／已解決灰 pin #6b7280 + pc-pin-flash）。同步：移除 setup 範例的 `authBarTarget:'.header'`（改說明省略＝浮右下角，對齊現行 3 處 init）、參數表補 `authBarTarget` 新語意 + `scrollContainer`、Firestore schema 補 `reactions` map 欄位、nav + TL;DR 更新、日期 2026-05-30。HTML tag 平衡已驗。
-- **B2 design-spec 不可變條款**：把 §0 色彩/行為條款寫進 `prototype-comments-design-spec.html`（主＋worktree 兩份要同步）。
-- **B3 專案規格**：把 D3 條款加進消費端專案 `AGENTS.md`（或 CLAUDE.md）。
+- **🟡 B2 design-spec 不可變條款（部分）**（盤點 2026-06-01）：`prototype-comments-design-spec.html` 已含**色彩條款**——teal 主色 `#0FA0A0`、紅只給 pin `#BA1A1A`、react「mine」例外 `#FFDAD6`+邊框 `#BA1A1A`、decision 色彩條款（採用 olive／待議 clay／不採用灰）、`--pc-pin-bg` token。**待補一段**：「留言 bar 永遠浮動視窗底部」**行為**條款目前只在消費端 `AGENTS.md` + guide.html，未明寫進 design-spec。worktree 兩份問題隨 §4.5 收斂為單一來源。
+- **✅ B3 專案規格（D3 條款進消費端 AGENTS.md）— DONE**（盤點 2026-06-01 確認）：jubo `AGENTS.md`「### 留言系統 (pc.js) 設計規範」段（L128-133）已以 design-spec.html 為**唯一 SSOT**、doctrine 不重複，並列出不可變條款（teal 主色／紅只給 pin／bar 浮底／單層回覆／精選 emoji／resolved pin 樣式）。
 - **B4 完整 design review**：逐畫面盤點不合理處 + 方案，產出 review report（html-doc 樣板）。
 
 ### C. 工具 / 測試

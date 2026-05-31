@@ -31,6 +31,18 @@ CI：GitHub Actions 應在 push / PR 跑 `test:e2e` + 視覺 regression（見 `.
 
 ---
 
+## ‼️ Roadmap 文件 .md + .html 必須同步
+
+`docs/2026-05-30-comment-system-and-uiflow-roadmap` 同時存在 **`.md`（SSOT，可編輯）** 與 **`.html`（手寫、供瀏覽）**，**沒有 md→html 自動產生器**。
+
+- **改 roadmap 時，兩個檔都要改**：先改 `.md`（事實來源），再把同樣的狀態變更**手動同步到 `.html`** 對應區塊（標記 ✅/🟡/🐞、新增項目、更新「最後更新」日期）。
+- **NEVER 只改一邊**：只改 `.md` 會讓線上/瀏覽版過時；只改 `.html` 會讓 SSOT 失真。
+- 完成後目視確認 `.html` 開得起來、無亂碼（中文段落完整）。
+
+> Why：2026-06-01 盤點發現 B3 早已完成、B2 部分完成，但 `.md`/`.html` 都沒標回去 → 使用者要求「兩個都要記得改」並立此規。
+
+---
+
 ## 設計規範來源（不在此內嵌，一律 reference）
 
 設計規則的**唯一來源（SSOT）**是設計規範文件，不在 doctrine 檔案重複：

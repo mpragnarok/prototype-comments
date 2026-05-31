@@ -341,16 +341,31 @@ await test('note-comments.js: injectAll() deduplicates by noteKey (no duplicate 
     'injectedKeys.add() not found — noteKey not being tracked after injection');
 });
 
-// ── Test 15b: panel inline thread 不重複主留言 — source check ──────────────────
-await test('index.js: renderInlineNoteThread 用 compact 主留言＋回覆 scope 到 root.id（不重複）', async () => {
+// ── Test 15b: B10 — 全部留言面板 root 控制項移到最外層、展開區只列回覆 — source check ──
+await test('index.js: renderExpandedNote 把 root 控制項放最外層(item)、展開區只列回覆', async () => {
   const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
-  const i = src.indexOf('function renderInlineNoteThread');
-  assert.ok(i !== -1, 'renderInlineNoteThread not found');
-  const body = src.slice(i, i + 1400);
-  assert.ok(/compact:\s*true/.test(body),
-    'renderInlineNoteThread 未用 compact:true 渲染主留言 — 點開第一項會重複主留言');
-  assert.ok(body.includes('x.parentId === root.id'),
-    '回覆未 scope 到 root.id — inline thread 仍會把整個 noteKey 的 root 都列出');
+  const i = src.indexOf('function renderExpandedNote');
+  assert.ok(i !== -1, 'renderExpandedNote not found（B10 重構未套用）');
+  const body = src.slice(i, i + 1800);
+  // root 控制項：compact 渲染 + 包 .pc-panel-root-ctrl + 掛到 item（最外層）
+  assert.ok(/compact:\s*true/.test(body), 'root 控制項未用 compact:true');
+  assert.ok(body.includes("el('div', 'pc-panel-root-ctrl')") && body.includes('item.appendChild(ctrl)'),
+    'root 控制項未包 .pc-panel-root-ctrl 或未掛到 item 最外層');
+  // compact 只能出現一次（root 控制項）；展開區不可再 compact 渲染 root → 否則又重複主留言
+  assert.equal((body.match(/compact:\s*true/g) || []).length, 1,
+    'compact:true 應只出現一次（root 控制項）；展開區不應再 compact 渲染 root');
+  assert.ok(body.includes('x.parentId === root.id'), '回覆未 scope 到 root.id');
+  assert.ok(body.includes('buildCommentItem(r, false'), '展開區未以 reply（isRoot=false）渲染回覆');
+  // 控制項在回覆區之前（最外層在上、回覆在下）
+  assert.ok(body.indexOf('pc-panel-root-ctrl') < body.indexOf('pc-panel-inline-thread'),
+    'root 控制項應在回覆區之前（最外層）');
+});
+
+// ── Test 15c: B10 — item.onclick guard 不因點控制項而收合面板 — source check ──
+await test('index.js: 全部留言 item.onclick guard 略過 .pc-panel-root-ctrl', async () => {
+  const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
+  assert.ok(/\.pc-panel-inline-thread,\s*\.pc-panel-root-ctrl/.test(src),
+    'item.onclick guard 未含 .pc-panel-root-ctrl — 點 resolve/回覆/決議 會誤收合面板');
 });
 
 // ── Test 16: navigateToComment handles note type — source check ───────────────

@@ -220,6 +220,8 @@ const STYLES = `
 .pc-note-replies { margin-left: 22px; padding-left: 10px; border-left: 2px solid #eef2f2; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
 .pc-reply-box { margin-top: 6px; }
 .pc-panel-inline-thread { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #e5e7eb; cursor: default; }
+/* B10: root 控制項（reactions/resolve/回覆/決議）放 panel item 最外層，compact 扁平呈現、與摘要間以虛線分隔 */
+.pc-panel-root-ctrl { margin-top: 6px; padding-top: 6px; border-top: 1px dashed #e5e7eb; cursor: default; }
 
 /* Input Popover */
 .pc-popover {
@@ -2083,27 +2085,25 @@ export async function initPrototypeComments(opts = {}) {
     if (panel.el) panel.el.classList.remove('open');
   }
 
-  // Render a note's full thread inline inside the panel (reliable — uses comment data,
-  // not page rows; avoids the stale-noteKey / hidden-mode problems of scrolling to a row)
-  function renderInlineNoteThread(container, root) {
-    container.innerHTML = '';
+  // Expand a note thread inside the panel. B10: root 的控制項（reactions／resolve／回覆／
+  // 決議）放到 panel item 本身（最外層）；下方展開區只列「回覆（replies）」，不再把 root
+  // 渲成一張獨立卡 → 解決「點開後第一則留言又出現一次」。
+  // 控制項包一層 .pc-panel-root-ctrl：item.onclick 的 guard 會略過它，避免點 resolve／回覆／
+  // 決議時誤觸發 item 的展開 toggle。
+  function renderExpandedNote(item, root) {
     const key = root.noteKey;
     const all = allComments.filter(x => x.type === 'note' && x.noteKey === key);
     const replies = all.filter(x => x.parentId === root.id)
       .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0));
-    const refresh = renderPanel;
-    const saveReply = async body => {
-      await store.save({
-        type: 'note', screenId: root.screenId, noteKey: key, noteTag: root.noteTag, noteText: root.noteText,
-        parentId: root.id, body,
-        authorUid: currentUser.uid, authorName: currentUser.displayName || currentUser.email,
-        authorPhoto: currentUser.photoURL || '', resolved: false,
-      });
-    };
+    const saveReply = body => store.save({
+      type: 'note', screenId: root.screenId, noteKey: key, noteTag: root.noteTag, noteText: root.noteText,
+      parentId: root.id, body,
+      authorUid: currentUser.uid, authorName: currentUser.displayName || currentUser.email,
+      authorPhoto: currentUser.photoURL || '', resolved: false,
+    });
 
-    // 主留言（root）已顯示在上方 panel item（作者＋摘要）。inline 用 compact 模式只渲染它的
-    // reactions＋操作（resolve／回覆／刪除），不重複作者＋內容；接著列出它的回覆。
-    container.appendChild(buildCommentItem(root, true, {
+    const ctrl = el('div', 'pc-panel-root-ctrl');
+    ctrl.appendChild(buildCommentItem(root, true, {
       compact: true,
       onResolve: r => store.update(root.id, { resolved: r }),
       onDelete:  () => store.remove(root.id),
@@ -2113,19 +2113,22 @@ export async function initPrototypeComments(opts = {}) {
       onReact:   r => store.update(root.id, { reactions: r }),
       onDecision: patch => store.update(root.id, patch),
       onReply:   currentUser ? saveReply : null,
-      onUpdated: refresh,
+      onUpdated: renderPanel,
     }));
+    item.appendChild(ctrl);
 
     if (replies.length) {
+      const inline = el('div', 'pc-panel-inline-thread');
       const ind = el('div', 'pc-note-replies');
       replies.forEach(r => ind.appendChild(buildCommentItem(r, false, {
         onDelete: () => store.remove(r.id),
         onEdit:   b => store.update(r.id, { body: b, edited: true }),
         onReact:  rr => store.update(r.id, { reactions: rr }),
         // D1: replies 不可再回覆 — 不傳 onReply
-        onUpdated: refresh,
+        onUpdated: renderPanel,
       })));
-      container.appendChild(ind);
+      inline.appendChild(ind);
+      item.appendChild(inline);
     }
   }
 
@@ -2244,7 +2247,8 @@ export async function initPrototypeComments(opts = {}) {
         if (c.type === 'note') {
           // Note/eng comment → expand its thread inline in the panel (reliable)
           item.onclick = (e) => {
-            if (e.target.closest('.pc-panel-inline-thread')) return;  // don't toggle when interacting inside
+            // 點最外層控制項(.pc-panel-root-ctrl) 或回覆區(.pc-panel-inline-thread) 內 → 不要 toggle 收合
+            if (e.target.closest('.pc-panel-inline-thread, .pc-panel-root-ctrl')) return;
             panel.expandedNote = panel.expandedNote === c.noteKey ? null : c.noteKey;
             renderPanel();
           };
@@ -2305,11 +2309,9 @@ export async function initPrototypeComments(opts = {}) {
           item.appendChild(rc);
         }
 
-        // Inline-expanded note thread
+        // Inline-expanded note thread (B10: 控制項在 item 最外層、展開區只列回覆)
         if (c.type === 'note' && panel.expandedNote === c.noteKey) {
-          const inline = el('div', 'pc-panel-inline-thread');
-          renderInlineNoteThread(inline, c);
-          item.appendChild(inline);
+          renderExpandedNote(item, c);
         }
 
         list.appendChild(item);
