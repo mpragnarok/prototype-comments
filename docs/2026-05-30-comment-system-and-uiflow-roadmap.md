@@ -104,9 +104,9 @@
     - **截圖對位**：viewport 1280→**1680**（ui-flow 桌面版不溢出，element 截圖才不位移；原本截到側邊欄/吃進右面板、左邊被切）。
     - **網頁設計稿放大**：截圖讀 PNG IHDR 判長寬比，橫式(網頁)→ `wide` class 整列放大、上下排版；直式(手機) 維持側欄小框。
     - **工程留言改 spec 討論串**：note 型不放截圖，改「依附的 dev note 規格文字卡(noteTag+noteText, 按 noteKey 分組) + 樓中樓」；buildJson 補 noteTag/noteText 給 AI。已對 live vitallink(s1/s2) 驗證。
-    - 測試 19 green（加 countGarble、isWide、note 維度）。
+    - 測試 19 green（加 countGarble、isWide、note 維度）；**B9 後增至 24**（決議 badge/三鍵/註記、buildJson 決議欄位、buildHtml writeback 注入分支）。
   - **skill 重構（2026-05-31）**：SKILL.md 定義 `gen`/`report` 兩 action（像 /dev），共用 Firebase/路徑 config；description 補 report 觸發詞。
-- **⏳ R2 下一步（採用/不採用 + 頁面決議，使用者 2026-05-31 選「報告可寫回 Firestore」）**：report.html 升級互動式——每則留言加 採用/不採用/待議 + 註記，寫回 Firestore；pc.js 留言加 `decision`/`decisionNote` 欄位。**動 pc.js = 走 GATE 流程（html plan → 核准 → 改 code+test → 更新 design-spec）**，尚未開始，需先出 plan。
+- **✅ R2 下一步（採用/不採用 + 頁面決議）— DONE 2026-05-31**（使用者選「報告可寫回 Firestore」→ 核准 GATE plan「開工」）：見 §2.A **B9**。report.html 互動化（三鍵 + 註記 + Google 登入寫回）、pc.js 留言加 `decision`/`decisionNote`、Firestore rules 白名單擴充、buildJson 帶決議給 AI。走完 GATE（plan→核准→code+test→更新 design-spec）。另出**人類導向說明文件** `jubo/docs/design/comment-report-guide.html`（已部署 design docs 站）。
 
 ### R3. UI component 畫面綁定 Storybook id
 - **公司流程**：react/flutter prototype → Netlify → ui-flow kit 產畫面流程交付。希望把 ui-flow 畫面區塊對應到 Storybook component ID，建立 設計↔component↔code 追溯。
