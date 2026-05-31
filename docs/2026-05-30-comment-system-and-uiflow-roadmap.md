@@ -110,6 +110,8 @@
   - **skill 重構（2026-05-31）**：SKILL.md 定義 `gen`/`report` 兩 action（像 /dev），共用 Firebase/路徑 config；description 補 report 觸發詞。
 - **✅ R2 下一步（採用/不採用 + 頁面決議）— DONE 2026-05-31**（使用者選「報告可寫回 Firestore」→ 核准 GATE plan「開工」）：見 §2.A **B9**。report.html 互動化（三鍵 + 註記 + Google 登入寫回）、pc.js 留言加 `decision`/`decisionNote`、Firestore rules 白名單擴充、buildJson 帶決議給 AI。走完 GATE（plan→核准→code+test→更新 design-spec）。另出**人類導向說明文件** `jubo/docs/design/comment-report-guide.html`（已部署 design docs 站）。
 
+- **✅ R2 報告本地決議模式（免登入）— DONE 2026-06-01**（使用者：「報告通常在本地看，還要登入 Google 太麻煩」）：把 report.html 決議從「Google 登入才能寫」改成**預設本地、免登入**。`05-comment-report.js`：commentCard 三鍵／註記移除 `disabled`、決議 badge 改 `.rp-dec-badge` slot 可即時更新；新增 `localDecisionScript`——決議存 in-memory + `localStorage('pcdec:<pc>')` best-effort，底部 bar「📋 複製決議 JSON／⬇️ 下載 report.json」把含 `decision` 的 JSON 交給 AI（file:// 的 localStorage 不保證持久 → 匯出才是可靠交付）。baked `<script id="rp-data">`（`<` 轉義防 `</script>` 提前結束）為匯出來源。`buildJson` 剝除 `apiKey` 不外洩到 report.json。Firebase 登入寫回降為選配 **`--cloud-sync`**（才注入 SDK + auth bar，給「要 pc.js overlay 同步」的情境）。測試 24→**27**（本地匯出 bar／rp-data 轉義／buildJson 剝 apiKey／cloud-sync 分支）。SSOT：更新 `comment-report-guide.html` + SKILL.md。
+
 ### R3. UI component 畫面綁定 Storybook id
 - **公司流程**：react/flutter prototype → Netlify → ui-flow kit 產畫面流程交付。希望把 ui-flow 畫面區塊對應到 Storybook component ID，建立 設計↔component↔code 追溯。
 - **可行性**：中–高。靠 data 屬性 / mapping manifest：capture 時記錄每區塊對應的 story ID（prototype DOM 帶 `data-storybook-id` 或外部 manifest）。
