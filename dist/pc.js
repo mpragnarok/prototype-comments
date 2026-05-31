@@ -1587,23 +1587,28 @@ export async function initPrototypeComments(opts = {}) {
   }
 
   // Build a single comment item element with edit/delete/resolve actions
-  function buildCommentItem(c, isRootComment, { onResolve, onDelete, onDeleteThread, onEdit, onReact, onReply, onUpdated } = {}) {
+  function buildCommentItem(c, isRootComment, { onResolve, onDelete, onDeleteThread, onEdit, onReact, onReply, onUpdated, compact } = {}) {
     const item = el('div', 'pc-comment-item');
 
-    if (c.authorPhoto) {
+    if (!compact && c.authorPhoto) {
       const av = el('img', 'pc-ci-avatar', { src: c.authorPhoto, alt: '' });
       item.appendChild(av);
     }
     const bodyEl = el('div', 'pc-ci-body');
-    const meta = el('div', 'pc-ci-meta');
-    const an = el('span', 'pc-ci-author'); an.textContent = c.authorName;
-    const at = el('span', 'pc-ci-time');
-    at.textContent = timeAgo(c.createdAt) + (c.edited ? ' · 已編輯' : '');
-    meta.appendChild(an); meta.appendChild(at);
-    bodyEl.appendChild(meta);
+    let txtEl = null;
+    // compact（全部留言 panel 的 inline 主留言）：略過頭像／作者／內容，只留 reactions＋操作，
+    // 避免與上方 panel item 的作者＋摘要重複（使用者回饋：點開第一項不要又是主留言）。
+    if (!compact) {
+      const meta = el('div', 'pc-ci-meta');
+      const an = el('span', 'pc-ci-author'); an.textContent = c.authorName;
+      const at = el('span', 'pc-ci-time');
+      at.textContent = timeAgo(c.createdAt) + (c.edited ? ' · 已編輯' : '');
+      meta.appendChild(an); meta.appendChild(at);
+      bodyEl.appendChild(meta);
 
-    const txtEl = el('p', 'pc-ci-text'); txtEl.innerHTML = linkify(c.body, peopleList().map(p => p.name));
-    bodyEl.appendChild(txtEl);
+      txtEl = el('p', 'pc-ci-text'); txtEl.innerHTML = linkify(c.body, peopleList().map(p => p.name));
+      bodyEl.appendChild(txtEl);
+    }
 
     // Emoji reactions row (any logged-in user)
     if (onReact) bodyEl.appendChild(buildReactions(c, onReact));
@@ -1651,6 +1656,7 @@ export async function initPrototypeComments(opts = {}) {
 
     // Edit (own comments only) + Delete (own replies only)
     if (currentUser && c.authorUid === currentUser.uid) {
+      if (!compact) {
       const editBtn = el('button', 'pc-ci-action');
       editBtn.textContent = '編輯';
       editBtn.onclick = () => {
@@ -1686,6 +1692,7 @@ export async function initPrototypeComments(opts = {}) {
         ta.focus();
       };
       acts.appendChild(editBtn);
+      }
 
       // Delete — Figma-style: replies delete themselves; root deletes the whole thread (with confirm)
       const delBtn = el('button', 'pc-ci-action');
@@ -1988,39 +1995,43 @@ export async function initPrototypeComments(opts = {}) {
     container.innerHTML = '';
     const key = root.noteKey;
     const all = allComments.filter(x => x.type === 'note' && x.noteKey === key);
-    const repliesOf = id => all.filter(x => x.parentId === id);
+    const replies = all.filter(x => x.parentId === root.id)
+      .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0));
     const refresh = renderPanel;
-    const saveReply = parentId => async body => {
+    const saveReply = async body => {
       await store.save({
         type: 'note', screenId: root.screenId, noteKey: key, noteTag: root.noteTag, noteText: root.noteText,
-        parentId, body,
+        parentId: root.id, body,
         authorUid: currentUser.uid, authorName: currentUser.displayName || currentUser.email,
         authorPhoto: currentUser.photoURL || '', resolved: false,
       });
     };
-    all.filter(x => !x.parentId).forEach((c, i) => {
-      container.appendChild(buildCommentItem(c, i === 0, {
-        onResolve: r => store.update(c.id, { resolved: r }),
-        onDelete:  () => store.remove(c.id),
-        onDeleteThread: () => Promise.all(all.map(t => store.remove(t.id))),
-        onEdit:    b => store.update(c.id, { body: b, edited: true }),
-        onReact:   r => store.update(c.id, { reactions: r }),
-        onReply:   currentUser ? saveReply(c.id) : null,
+
+    // 主留言（root）已顯示在上方 panel item（作者＋摘要）。inline 用 compact 模式只渲染它的
+    // reactions＋操作（resolve／回覆／刪除），不重複作者＋內容；接著列出它的回覆。
+    container.appendChild(buildCommentItem(root, true, {
+      compact: true,
+      onResolve: r => store.update(root.id, { resolved: r }),
+      onDelete:  () => store.remove(root.id),
+      onDeleteThread: () => Promise.all(
+        all.filter(x => x.id === root.id || x.parentId === root.id).map(t => store.remove(t.id))),
+      onEdit:    b => store.update(root.id, { body: b, edited: true }),
+      onReact:   r => store.update(root.id, { reactions: r }),
+      onReply:   currentUser ? saveReply : null,
+      onUpdated: refresh,
+    }));
+
+    if (replies.length) {
+      const ind = el('div', 'pc-note-replies');
+      replies.forEach(r => ind.appendChild(buildCommentItem(r, false, {
+        onDelete: () => store.remove(r.id),
+        onEdit:   b => store.update(r.id, { body: b, edited: true }),
+        onReact:  rr => store.update(r.id, { reactions: rr }),
+        // D1: replies 不可再回覆 — 不傳 onReply
         onUpdated: refresh,
-      }));
-      const reps = repliesOf(c.id);
-      if (reps.length) {
-        const ind = el('div', 'pc-note-replies');
-        reps.forEach(r => ind.appendChild(buildCommentItem(r, false, {
-          onDelete: () => store.remove(r.id),
-          onEdit:   b => store.update(r.id, { body: b, edited: true }),
-          onReact:  rr => store.update(r.id, { reactions: rr }),
-          // D1: replies 不可再回覆 — 不傳 onReply
-          onUpdated: refresh,
-        })));
-        container.appendChild(ind);
-      }
-    });
+      })));
+      container.appendChild(ind);
+    }
   }
 
   function renderPanel() {
