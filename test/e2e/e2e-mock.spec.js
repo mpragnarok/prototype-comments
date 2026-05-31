@@ -203,6 +203,35 @@ const seedComment = (over = {}) => ({ type: 'positional', screenId: 's1', x: 50,
     await mctx.close();
   });
 
+  await test('決議：點採用寫回 decision + active 樣式 + 註記寫回 + 再點取消(toggle) (decision-writeback)', async () => {
+    await page.mouse.move(2, 2);
+    await page.waitForTimeout(120);
+    const cid = await page.evaluate(() => window.__fb.__seed({ type: 'positional', screenId: 's1', x: 20, y: 82, body: '要決議的提案', authorUid: 'u2', authorName: '設計師 B', resolved: false, parentId: null }));
+    await page.waitForTimeout(200);
+    await page.click(`.pc-pin[data-comment-id="${cid}"]`);
+    await page.waitForSelector('.pc-popover .pc-ci-dec-btn.accepted', { timeout: 3000 });
+    // 點「採用」→ 寫回 decision=accepted + active 樣式
+    await page.click('.pc-popover .pc-ci-dec-btn.accepted');
+    await page.waitForTimeout(350);
+    const d1 = await page.evaluate(c => window.__fb.__docs().find(x => x.id === c)?.decision, cid);
+    assert(d1 === 'accepted', `點採用後 decision 應為 accepted，實際 ${d1}`);
+    const activeOk = await page.evaluate(() => !!document.querySelector('.pc-popover .pc-ci-dec-btn.accepted.active'));
+    assert(activeOk, '採用鍵應帶 active 樣式');
+    assert(await page.evaluate(() => !!document.querySelector('.pc-popover')), '點決議鍵後 popover 不該關閉（stopPropagation）');
+    // 註記框（有決議才出現）→ blur 寫回 decisionNote
+    await page.fill('.pc-popover .pc-ci-dec-note', '照這版改');
+    await page.evaluate(() => document.querySelector('.pc-popover .pc-ci-dec-note').blur());
+    await page.waitForTimeout(350);
+    const note = await page.evaluate(c => window.__fb.__docs().find(x => x.id === c)?.decisionNote, cid);
+    assert(note === '照這版改', `註記應寫回 decisionNote，實際 ${note}`);
+    // 再點採用 → 取消決議（toggle → null）
+    await page.click('.pc-popover .pc-ci-dec-btn.accepted');
+    await page.waitForTimeout(350);
+    const d2 = await page.evaluate(c => window.__fb.__docs().find(x => x.id === c)?.decision, cid);
+    assert(d2 === null || d2 === undefined, `再點採用應取消決議(null)，實際 ${d2}`);
+    console.log('     decision:', JSON.stringify({ d1, note, d2 }));
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

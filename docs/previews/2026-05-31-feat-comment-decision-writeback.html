@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan — 留言決議寫回（採用 / 不採用 / 待議）</title>
+<style>
+  :root{
+    --ivory:#FAF9F5; --slate:#141413; --clay:#D97757; --teal:#0FA0A0; --olive:#788C5D;
+    --oat:#E3DACC; --red:#BA1A1A; --gray-150:#ECEAE4; --gray-300:#D6D2C8; --gray-500:#8C8881; --gray-700:#57534E;
+    --serif:"Iowan Old Style",Georgia,serif; --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; --mono:"SF Mono",ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--ivory);color:var(--slate);font-family:var(--sans);line-height:1.6;padding:48px 24px}
+  .wrap{max-width:880px;margin:0 auto}
+  .tag{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--gray-500)}
+  h1{font-family:var(--serif);font-size:34px;line-height:1.2;margin:8px 0 12px}
+  .lede{font-size:17px;color:var(--gray-700);max-width:66ch}
+  .gate{display:inline-block;margin-top:14px;font-family:var(--mono);font-size:12px;background:var(--clay);color:#fff;padding:6px 12px;border-radius:6px}
+  .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--gray-300);border:1px solid var(--gray-300);border-radius:10px;overflow:hidden;margin:28px 0}
+  .cell{background:var(--ivory);padding:14px 16px}
+  .cell .k{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--gray-500)}
+  .cell .v{font-size:15px;margin-top:4px;font-weight:600;word-break:break-word}
+  .sec-head{display:flex;align-items:center;gap:12px;margin:40px 0 16px}
+  .sec-head .num{font-family:var(--mono);font-size:13px;background:var(--slate);color:var(--ivory);width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex:0 0 26px}
+  .sec-head h2{font-family:var(--serif);font-size:23px;font-weight:600}
+  p.body{margin:10px 0;color:var(--gray-700)}
+  ul.body{margin:10px 0 10px 4px;list-style:none}
+  ul.body li{padding-left:18px;position:relative;margin:7px 0;color:var(--gray-700)}
+  ul.body li::before{content:"—";position:absolute;left:0;color:var(--gray-500)}
+  b{color:var(--slate)}
+  .delta-list{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+  .delta-item{display:flex;gap:10px;align-items:baseline;background:#fff;border:1px solid var(--gray-150);border-radius:8px;padding:10px 12px}
+  .delta-pill{font-family:var(--mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase;padding:3px 8px;border-radius:5px;flex:0 0 auto}
+  .added{background:#E7EDDE;color:#3f5230}
+  .modified{background:var(--oat);color:#6b5a3e}
+  .removed{background:#F6DAD7;color:#7a221c}
+  .delta-item span.t{font-size:14px}
+  .risks{border:1px solid var(--gray-300);border-radius:10px;overflow:hidden;margin:14px 0}
+  .risks .row{display:grid;grid-template-columns:170px 90px 1fr;border-top:1px solid var(--gray-150)}
+  .risks .row:first-child{border-top:none}
+  .risks .row.head{background:var(--slate);color:var(--ivory)}
+  .risks .rcell{padding:11px 13px;font-size:13.5px}
+  .risks .row.head .rcell{font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+  .badge{font-family:var(--mono);font-size:10px;padding:3px 7px;border-radius:5px;display:inline-block}
+  .b-arch{background:#DDE7EC;color:#2c4a59}.b-compat{background:#F6DAD7;color:#7a221c}.b-ux{background:#E7EDDE;color:#3f5230}.b-sec{background:var(--oat);color:#6b5a3e}
+  .swatches{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0}
+  .sw{flex:1;min-width:180px;border:1px solid var(--gray-150);border-radius:10px;overflow:hidden;background:#fff}
+  .sw .chip{padding:14px;font-family:var(--mono);font-size:13px;font-weight:600;text-align:center}
+  .sw .meta{padding:10px 12px}.sw .meta b{display:block;font-size:14px}.sw .meta .hex{font-family:var(--mono);font-size:11px;color:var(--gray-500)}
+  .code{background:var(--slate);color:#E6E4DD;border-radius:10px;padding:16px 18px;overflow-x:auto;margin:12px 0}
+  .code .lbl{font-family:var(--mono);font-size:11px;color:#9a978f;margin-bottom:8px}
+  .code pre{font-family:var(--mono);font-size:12.5px;line-height:1.7;white-space:pre}
+  .code .c{color:#7e9c8b}.code .add{color:#9cc79c}.code .key{color:#d9a777}
+  .milestones{margin:14px 0;border-left:2px solid var(--gray-300);padding-left:0}
+  .milestone{position:relative;padding:4px 0 16px 26px}
+  .milestone::before{content:"";position:absolute;left:-7px;top:7px;width:12px;height:12px;border-radius:50%;background:var(--clay);border:2px solid var(--ivory)}
+  .milestone.done::before{background:var(--olive)}
+  .milestone .mt{font-weight:600;font-size:14.5px}
+  .milestone .md{font-size:13px;color:var(--gray-700);margin-top:3px}
+  .open-q{display:flex;flex-direction:column;gap:10px;margin:12px 0}
+  .q{background:#fff;border-left:3px solid var(--clay);border-radius:0 8px 8px 0;padding:12px 14px}
+  .q.ok{border-left-color:var(--olive)}
+  .q .qh{font-weight:600;font-size:14px;margin-bottom:4px}
+  .q .qb{font-size:13.5px;color:var(--gray-700)}
+  .files{margin:12px 0;font-family:var(--mono);font-size:12.5px}
+  .files .grp{font-weight:700;color:var(--slate);margin:14px 0 6px;font-family:var(--sans);font-size:13px}
+  .files .f{padding:5px 0 5px 16px;position:relative;color:var(--gray-700);border-bottom:1px dotted var(--gray-150)}
+  .files .f::before{content:"›";position:absolute;left:0;color:var(--clay)}
+  .files .f b{color:var(--slate)}
+  .foot{margin-top:48px;padding-top:18px;border-top:1px solid var(--gray-300);font-size:13px;color:var(--gray-500)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="tag">prototype-comments · GATE plan · 2026-05-31</div>
+  <h1>留言決議寫回：採用 / 不採用 / 待議 + 註記</h1>
+  <p class="lede">設計稿留言報告升級成「可決策」：每則 root 留言能標記 <b>採用 / 不採用 / 待議</b> 並附一句註記，按下即寫回 Firestore。pc.js overlay 與 report.html 共用同一個 <code>decision</code> 欄位，兩邊都看得到決議、AI 讀 <code>report.json</code> 就知道哪些要改。本檔是 GATE plan，<b>核准前不動 code</b>。</p>
+  <div class="gate">🚧 GATE — 等使用者明確核准才進實作</div>
+
+  <div class="summary">
+    <div class="cell"><div class="k">來源 repo</div><div class="v">prototype-comments<br>+ prototype-flow-doc skill</div></div>
+    <div class="cell"><div class="k">改動類型</div><div class="v">feat（additive 欄位）</div></div>
+    <div class="cell"><div class="k">影響面</div><div class="v">pc.js · report 工具 · Firestore rules · design-spec</div></div>
+    <div class="cell"><div class="k">Migration</div><div class="v">無（partial updateDoc）</div></div>
+  </div>
+
+  <!-- §1 -->
+  <div class="sec-head"><div class="num">1</div><h2>Why — 報告現在只能讀，不能決策</h2></div>
+  <p class="body">目前流程：設計師/工程在 pc.js 留言 → <code>05-comment-report.js</code> 蒐集成 report.html/json。報告是<b>唯讀</b>的：人看完留言後，「要不要採用」這個決定散落在口頭、聊天、記憶裡，沒有落到資料上。AI 拿到 report.json 也只看到留言內容，不知道哪些拍板要改、哪些被否決。</p>
+  <ul class="body">
+    <li>沒有「決議」這個 first-class 狀態 → 同一則留言反覆被討論</li>
+    <li><code>resolved</code> 只表示「thread 處理完」，不等於「設計採不採用」（兩者正交）</li>
+    <li>AI 修設計稿時無法分辨「這留言要照做」vs「這留言已被否決」</li>
+  </ul>
+
+  <!-- §2 -->
+  <div class="sec-head"><div class="num">2</div><h2>What changes</h2></div>
+  <div class="delta-list">
+    <div class="delta-item"><span class="delta-pill added">added</span><span class="t">留言新增兩個欄位：<code>decision</code>（<code>'accepted'|'rejected'|'pending'|null</code>）、<code>decisionNote</code>（string）</span></div>
+    <div class="delta-item"><span class="delta-pill added">added</span><span class="t">pc.js root 留言卡：決議 badge（meta 列）+ 三鍵切換（actions 列，任何登入者可按）</span></div>
+    <div class="delta-item"><span class="delta-pill added">added</span><span class="t">report.html：每則留言三鍵 + 註記框，Google 登入後寫回 Firestore</span></div>
+    <div class="delta-item"><span class="delta-pill added">added</span><span class="t">report.json：留言物件加 <code>decision</code> / <code>decisionNote</code>，供 AI 讀</span></div>
+    <div class="delta-item"><span class="delta-pill modified">modified</span><span class="t">Firestore update rule 白名單：<code>['resolved','reactions']</code> → 加 <code>'decision','decisionNote'</code></span></div>
+    <div class="delta-item"><span class="delta-pill modified">modified</span><span class="t">design-spec.html：新增「決議狀態」色彩/規格段；roadmap.md 記決策</span></div>
+  </div>
+
+  <!-- §3 -->
+  <div class="sec-head"><div class="num">3</div><h2>Design decisions（請逐項確認）</h2></div>
+  <div class="risks">
+    <div class="row head"><div class="rcell">決策</div><div class="rcell">分類</div><div class="rcell">方案 / 理由</div></div>
+    <div class="row"><div class="rcell">決議寫在哪</div><div class="rcell"><span class="badge b-arch">arch</span></div><div class="rcell"><b>兩邊都可寫（A3）</b>：report.html 是主決策面（人讀完一次拍板），pc.js overlay 也能設（看原型當下順手標）。兩邊共用同一 <code>decision</code> 欄位、同一套寫入邏輯語意。符合你說的「人直接在報告下決定」。</div></div>
+    <div class="row"><div class="rcell">decision vs resolved</div><div class="rcell"><span class="badge b-arch">arch</span></div><div class="rcell"><b>正交、互不連動</b>。decision=設計拍板；resolved=thread 收尾。可「採用但未 resolve」。不自動連動（避免隱性副作用）。</div></div>
+    <div class="row"><div class="rcell">不採用的顏色</div><div class="rcell"><span class="badge b-compat">不可變</span></div><div class="rcell"><b>用灰 <code>#6b7280</code>，不可用紅</b>。design-spec 不可變條款「紅只給 pin / @mention」。不採用＝低調灰（與 resolved pin 同色系），採用＝olive，待議＝clay。</div></div>
+    <div class="row"><div class="rcell">誰能改決議</div><div class="rcell"><span class="badge b-sec">rules</span></div><div class="rcell"><b>任何登入者</b>（reviewer 通常不是留言作者）。靠 rules 限定「只能改 decision/decisionNote 兩欄」，不能改 body/author。</div></div>
+    <div class="row"><div class="rcell">report.html 變重</div><div class="rcell"><span class="badge b-ux">ux</span></div><div class="rcell">report.html 需內嵌 Firebase SDK + Google 登入才能寫回。<b>未登入時三鍵 disabled、僅顯示既有決議</b>（唯讀），不破壞「純讀報告」的輕量情境。</div></div>
+  </div>
+
+  <!-- §3.5 decision states -->
+  <div class="sec-head"><div class="num">3.5</div><h2>決議狀態 — 色彩規格</h2></div>
+  <div class="swatches">
+    <div class="sw"><div class="chip" style="background:#788C5D;color:#fff">採用 accepted</div><div class="meta"><b>olive 底 + 白字</b><span class="hex">#788C5D · 成功語意</span></div></div>
+    <div class="sw"><div class="chip" style="background:#D97757;color:#fff">待議 pending</div><div class="meta"><b>clay 底 + 白字</b><span class="hex">#D97757 · 待處理語意</span></div></div>
+    <div class="sw"><div class="chip" style="background:#6b7280;color:#fff">不採用 rejected</div><div class="meta"><b>灰底 + 白字</b><span class="hex">#6b7280 · 不可用紅（不可變條款）</span></div></div>
+  </div>
+  <p class="body">未決議（<code>decision=null</code>）＝不顯示 badge，三鍵皆未選取狀態。設定後 badge 顯示在 author 名稱旁；點同一鍵可取消回 null。</p>
+
+  <!-- §4 -->
+  <div class="sec-head"><div class="num">4</div><h2>影響的檔案</h2></div>
+  <div class="files">
+    <div class="grp">A. pc.js（prototype-comments repo）— 走完整 GATE</div>
+    <div class="f"><b>src/index.js</b> · <code>buildCommentItem</code>：meta 加 decision badge；actions 加三鍵（root only），透過新 callback <code>onDecision({decision, note})</code></div>
+    <div class="f"><b>src/index.js</b> · <code>renderThread</code>（positional）：接 <code>onDecision</code> → <code>store.update(id,{decision,decisionNote})</code></div>
+    <div class="f"><b>src/note-comments.js</b> · <code>renderNoteThread</code>：同上接線</div>
+    <div class="f"><b>src/styles.js</b>：<code>.pc-ci-decision-badge</code> + <code>.pc-ci-decision-btn</code>（olive/clay/gray）</div>
+    <div class="f"><b>build.py</b>：rebuild bundle → <code>node --check dist/pc.js</code></div>
+    <div class="f"><b>test/e2e-*.spec.js</b>：設/清決議 e2e；<b>test/visual/</b>：badge 視覺 regression baseline</div>
+    <div class="grp">B. report 工具（~/.claude/skills/prototype-flow-doc/scripts）</div>
+    <div class="f"><b>05-comment-report.js</b> · <code>commentCard</code>：渲染 decision badge；report.html head 注入 Firebase SDK + 登入 + 三鍵寫回</div>
+    <div class="f"><b>05-comment-report.js</b> · <code>buildJson</code>：留言物件加 <code>decision</code>/<code>decisionNote</code></div>
+    <div class="f"><b>05-comment-report.test.js</b>：decision 渲染 + json shape 測試</div>
+    <div class="grp">C. Firestore rules（Firebase 專案，分開 deploy）</div>
+    <div class="f">update 白名單加 decision 欄位（見 §5）+ <code>firebase deploy --only firestore:rules</code> + 權限 smoke test</div>
+    <div class="grp">D. SSOT 文件</div>
+    <div class="f"><b>jubo/docs/design/prototype-comments-design-spec.html</b>：決議狀態色彩/規格段</div>
+    <div class="f"><b>docs/2026-05-30-...roadmap.md</b>：記決策；新增 <b>docs/2026-05-31-feat-comment-decision.md</b> 功能規格</div>
+  </div>
+
+  <!-- §5 -->
+  <div class="sec-head"><div class="num">5</div><h2>Firestore rules 變更（精確 diff）</h2></div>
+  <p class="body">現況（design-spec L155 記載）：<code>update</code> 允許「作者本人，或只改 <code>['resolved','reactions']</code>」。要讓非作者 reviewer 寫決議，把白名單兩欄加進去：</p>
+  <div class="code">
+    <div class="lbl">firestore.rules · match /prototype-comments/{project}/comments/{id}</div>
+<pre><span class="c">// 允許：作者本人改全部，或任何登入者只改白名單欄位</span>
+allow update: <span class="key">if</span> request.auth != null && (
+  resource.data.authorUid == request.auth.uid ||
+  request.resource.data.diff(resource.data).affectedKeys()
+<span class="add">    .hasOnly(['resolved', 'reactions', 'decision', 'decisionNote'])</span>
+);</pre>
+  </div>
+  <p class="body"><b>驗收</b>：deploy 後用「非作者帳號設 decision」應成功；用同帳號試改 body 應被拒（PERMISSION_DENIED）。需先確認各 Firebase 專案（jubo-badminton-design / prototype-comments-27106）目前的 rules 實體與此一致。</p>
+
+  <!-- §6 -->
+  <div class="sec-head"><div class="num">6</div><h2>Tasks</h2></div>
+  <div class="milestones">
+    <div class="milestone done"><div class="mt">T0 · 本 GATE plan</div><div class="md">html-doc plan（本檔）→ 等核准</div></div>
+    <div class="milestone"><div class="mt">T1 · pc.js 決議 UI + 接線</div><div class="md">buildCommentItem badge+三鍵、renderThread/renderNoteThread onDecision、styles；build + node --check</div></div>
+    <div class="milestone"><div class="mt">T2 · pc.js 測試</div><div class="md">e2e（設/清/切換決議）+ visual regression baseline</div></div>
+    <div class="milestone"><div class="mt">T3 · Firestore rules</div><div class="md">白名單加欄位 → deploy → 權限 smoke test（非作者可設、不可改 body）</div></div>
+    <div class="milestone"><div class="mt">T4 · report 工具</div><div class="md">05-comment-report.js：commentCard badge、Firebase SDK 登入寫回、buildJson 欄位 + 測試</div></div>
+    <div class="milestone"><div class="mt">T5 · SSOT 同步</div><div class="md">design-spec 決議段、roadmap 決策、功能規格 md</div></div>
+  </div>
+
+  <!-- §7 -->
+  <div class="sec-head"><div class="num">7</div><h2>給你確認的問題</h2></div>
+  <div class="open-q">
+    <div class="q ok"><div class="qh">✅ Q1 已定 · 決議只貼「主留言」</div><div class="qb">「採用／不採用／待議」只貼在每串最上面的<b>主留言</b>（＝一個提案）；它的<b>回覆不單獨給決議</b>（回覆是補充討論，不是獨立提案）。positional pin 與 note 的 root 都適用。<i>（使用者表示原問題聽不懂，於 goal 模式採此最單純預設定案，可反悔）</i></div></div>
+    <div class="q ok"><div class="qh">✅ Q2 已定 · 採用不自動 resolve</div><div class="qb">留言有兩個獨立狀態：<code>resolved</code>（這串收掉了）與新的 <code>decision</code>（採用／不採用）。按「採用」<b>不</b>會自動把該串標成已解決——兩者正交（可能「採用了但討論還沒完」）。最單純、無隱性副作用。<i>（同上，goal 模式定案，可反悔）</i></div></div>
+    <div class="q ok"><div class="qh">✅ Q3 已定 · report.html 寫回需 Google 登入</div><div class="qb">Firestore 寫入一定要 auth。report.html 內嵌 Google 登入；未登入＝唯讀看決議。使用者已答 OK。</div></div>
+    <div class="q ok"><div class="qh">✅ 基礎定案 · 不採用用灰不用紅、decision 與 resolved 正交、純 additive 無 migration</div><div class="qb">依不可變條款與現有資料模型直接定案。</div></div>
+  </div>
+  <p class="body" style="margin-top:14px"><b>本 plan 現已無待答問題</b> —— 等你一句「核准 / 開始」即進 T1。若對任一定案有意見，直接講要改哪點即可。</p>
+
+  <div class="foot">
+    GATE 流程：html-doc plan（本檔）→ <b>你核准</b> → 改 code+test → deploy rules → 更新 design-spec。<br>
+    核准後我會依 T1→T5 實作，每步附測試。回「OK / 開始」即進 T1；要調整方案請直接指出。
+  </div>
+
+</div>
+</body>
+</html>

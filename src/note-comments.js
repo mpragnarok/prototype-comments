@@ -31,6 +31,7 @@ export function createNoteModule({
         onDeleteThread: ()  => Promise.all(getNoteComments(tag, text).map(t => store.remove(t.id))),
         onEdit:    body     => store.update(c.id, { body, edited: true }),
         onReact:   r        => store.update(c.id, { reactions: r }),
+        onDecision: patch   => store.update(c.id, patch),
         onReply:   user ? saveReply(c.id) : null,
         onUpdated: refresh,
       }));

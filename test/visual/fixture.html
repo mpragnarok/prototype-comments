@@ -119,6 +119,32 @@
   </div>
 </div>
 
+<!-- ── DECISION（採用/不採用/待議）— 採用=olive、待議=clay、不採用=灰(不可用紅) ── -->
+<div class="vf-sec">
+  <h2>決議 decision — badge（meta 旁）+ 三鍵（採用 active）+ 註記框</h2>
+  <div class="pc-comment-item">
+    <div class="pc-ci-body">
+      <div class="pc-ci-meta">
+        <span class="pc-ci-author">設計師 A</span>
+        <span class="pc-ci-time">2 小時前</span>
+        <span class="pc-ci-dec-badge accepted">採用</span>
+      </div>
+      <p class="pc-ci-text">這個 spacing 要改成 16px</p>
+      <div class="pc-ci-decision">
+        <button class="pc-ci-dec-btn accepted active">✓ 採用</button>
+        <button class="pc-ci-dec-btn rejected">✕ 不採用</button>
+        <button class="pc-ci-dec-btn pending">⋯ 待議</button>
+      </div>
+      <input class="pc-ci-dec-note" type="text" value="照這版改，下個 sprint 跟進">
+    </div>
+  </div>
+  <div class="vf-grid" style="margin-top:10px;">
+    <span class="pc-ci-dec-badge accepted">採用</span>
+    <span class="pc-ci-dec-badge pending">待議</span>
+    <span class="pc-ci-dec-badge rejected">不採用</span>
+  </div>
+</div>
+
 <!-- ── PANEL TOOLBAR ──────────────────────── -->
 <div class="vf-sec">
   <h2>全部留言面板 — toolbar</h2>
