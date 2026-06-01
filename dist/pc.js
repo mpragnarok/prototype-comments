@@ -352,51 +352,7 @@ const STYLES = `
 .pc-ci-action:hover { color: #374151; }
 .pc-ci-action.resolve { color: #0FA0A0; }
 
-/* Decision（採用/不採用/待議）— 採用=olive、待議=clay、不採用=灰(不可用紅) */
-.pc-ci-dec-badge {
-  font-size: 9px;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 8px;
-  color: #fff;
-  letter-spacing: .03em;
-}
-.pc-ci-dec-badge.accepted { background: #788C5D; }
-.pc-ci-dec-badge.pending  { background: #D97757; }
-.pc-ci-dec-badge.rejected { background: #6b7280; }
-.pc-ci-decision {
-  display: flex;
-  gap: 6px;
-  margin-top: 6px;
-}
-.pc-ci-dec-btn {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 999px;
-  cursor: pointer;
-  background: #fff;
-  border: 1.5px solid #e5e7eb;
-  color: #9ca3af;
-  font-family: inherit;
-  transition: all .12s;
-}
-.pc-ci-dec-btn:hover { border-color: #d1d5db; color: #6b7280; }
-.pc-ci-dec-btn.accepted.active { background: #788C5D; border-color: #788C5D; color: #fff; }
-.pc-ci-dec-btn.pending.active  { background: #D97757; border-color: #D97757; color: #fff; }
-.pc-ci-dec-btn.rejected.active { background: #6b7280; border-color: #6b7280; color: #fff; }
-.pc-ci-dec-note {
-  margin-top: 6px;
-  width: 100%;
-  font-size: 11px;
-  padding: 5px 8px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  font-family: inherit;
-  color: #374151;
-  box-sizing: border-box;
-}
-.pc-ci-dec-note:focus { outline: none; border-color: #0FA0A0; }
+/* 決議（採用/不採用/待議）UI 已從留言 overlay 移除 → 只在 report.html；此處不再需要 .pc-ci-dec-* */
 
 /* Note Comment Badge */
 .pc-note-badge {
@@ -785,7 +741,6 @@ function createNoteModule({
         onDeleteThread: ()  => Promise.all(getNoteComments(tag, text).map(t => store.remove(t.id))),
         onEdit:    body     => store.update(c.id, { body, edited: true }),
         onReact:   r        => store.update(c.id, { reactions: r }),
-        onDecision: patch   => store.update(c.id, patch),
         onReply:   user ? saveReply(c.id) : null,
         onUpdated: refresh,
       }));
@@ -1537,13 +1492,8 @@ export async function initPrototypeComments(opts = {}) {
 
   // ── Emoji reactions (Figma-style: any logged-in user can react; shows who) ──
   const REACTION_EMOJIS = ['👍','❤️','🎉','😄','👀','🙏','🤔','🔥'];
-  // 決議（採用/不採用/待議）— 只貼主留言；採用=olive、待議=clay、不採用=灰(不可用紅，紅只給 pin)。
-  const DECISION_META = {
-    accepted: { label: '✓ 採用',  short: '採用' },
-    rejected: { label: '✕ 不採用', short: '不採用' },
-    pending:  { label: '⋯ 待議',  short: '待議' },
-  };
-  const DECISION_ORDER = ['accepted', 'rejected', 'pending'];
+  // 決議（採用/不採用/待議）已從留言 overlay 移除，改只在 report.html 操作（使用者 2026-06-01）。
+  // decision/decisionNote 仍是 Firestore 欄位，由 report 寫入；pc.js 不再顯示或編輯。
   function toggleReaction(c, emoji, onReact) {
     if (!currentUser) return;
     const me = { uid: currentUser.uid, name: currentUser.displayName || currentUser.email || '匿名' };
@@ -1643,7 +1593,7 @@ export async function initPrototypeComments(opts = {}) {
   }
 
   // Build a single comment item element with edit/delete/resolve actions
-  function buildCommentItem(c, isRootComment, { onResolve, onDelete, onDeleteThread, onEdit, onReact, onReply, onDecision, onUpdated, compact } = {}) {
+  function buildCommentItem(c, isRootComment, { onResolve, onDelete, onDeleteThread, onEdit, onReact, onReply, onUpdated, compact } = {}) {
     const item = el('div', 'pc-comment-item');
 
     if (!compact && c.authorPhoto) {
@@ -1660,11 +1610,6 @@ export async function initPrototypeComments(opts = {}) {
       const at = el('span', 'pc-ci-time');
       at.textContent = timeAgo(c.createdAt) + (c.edited ? ' · 已編輯' : '');
       meta.appendChild(an); meta.appendChild(at);
-      if (c.decision && DECISION_META[c.decision]) {
-        const db = el('span', `pc-ci-dec-badge ${c.decision}`);
-        db.textContent = DECISION_META[c.decision].short;
-        meta.appendChild(db);
-      }
       bodyEl.appendChild(meta);
 
       txtEl = el('p', 'pc-ci-text'); txtEl.innerHTML = linkify(c.body, peopleList().map(p => p.name));
@@ -1773,39 +1718,7 @@ export async function initPrototypeComments(opts = {}) {
     }
 
     bodyEl.appendChild(acts);
-
-    // 決議列（採用/不採用/待議 + 註記）— 只給主留言，任何登入者可設（reviewer 通常非作者）。
-    // 點已選的鍵 → 取消回 null。有決議時顯示註記框（blur/Enter 存，避免每鍵 re-render 破 IME）。
-    if (isRootComment && onDecision && currentUser) {
-      const decRow = el('div', 'pc-ci-decision');
-      DECISION_ORDER.forEach(val => {
-        const b = el('button', `pc-ci-dec-btn ${val}${c.decision === val ? ' active' : ''}`);
-        b.textContent = DECISION_META[val].label;
-        b.onclick = async (e) => {
-          // store.update 觸發同步 snapshot→thread replaceWith，會把本按鈕 detach；若讓 click 冒泡到
-          // document outside-close handler，detached target 會被判為「點 popover 外」而關閉。故 stopPropagation。
-          e.stopPropagation();
-          await onDecision({ decision: c.decision === val ? null : val });
-          if (onUpdated) onUpdated();
-        };
-        decRow.appendChild(b);
-      });
-      bodyEl.appendChild(decRow);
-
-      if (c.decision) {
-        const note = el('input', 'pc-ci-dec-note',
-          { type: 'text', placeholder: '決議註記（選填）…', value: c.decisionNote || '' });
-        const save = async () => {
-          const v = note.value.trim();
-          if (v === (c.decisionNote || '')) return;
-          await onDecision({ decisionNote: v });
-          if (onUpdated) onUpdated();
-        };
-        note.addEventListener('blur', save);
-        note.addEventListener('keydown', e => { if (e.key === 'Enter') note.blur(); });
-        bodyEl.appendChild(note);
-      }
-    }
+    // 決議（採用/不採用/待議）已從留言 overlay 移除 → 只在 report.html 操作。
 
     item.appendChild(bodyEl);
     return item;
@@ -1825,7 +1738,6 @@ export async function initPrototypeComments(opts = {}) {
         onDeleteThread: ()  => Promise.all(threadComments.map(t => store.remove(t.id))),
         onEdit:    body     => store.update(c.id, { body, edited: true }),
         onReact:   r        => store.update(c.id, { reactions: r }),
-        onDecision: patch   => store.update(c.id, patch),
         onUpdated,
       }));
     });
@@ -2111,7 +2023,6 @@ export async function initPrototypeComments(opts = {}) {
         all.filter(x => x.id === root.id || x.parentId === root.id).map(t => store.remove(t.id))),
       onEdit:    b => store.update(root.id, { body: b, edited: true }),
       onReact:   r => store.update(root.id, { reactions: r }),
-      onDecision: patch => store.update(root.id, patch),
       onReply:   currentUser ? saveReply : null,
       onUpdated: renderPanel,
     }));

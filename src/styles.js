@@ -352,51 +352,7 @@ export const STYLES = `
 .pc-ci-action:hover { color: #374151; }
 .pc-ci-action.resolve { color: #0FA0A0; }
 
-/* Decision（採用/不採用/待議）— 採用=olive、待議=clay、不採用=灰(不可用紅) */
-.pc-ci-dec-badge {
-  font-size: 9px;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 8px;
-  color: #fff;
-  letter-spacing: .03em;
-}
-.pc-ci-dec-badge.accepted { background: #788C5D; }
-.pc-ci-dec-badge.pending  { background: #D97757; }
-.pc-ci-dec-badge.rejected { background: #6b7280; }
-.pc-ci-decision {
-  display: flex;
-  gap: 6px;
-  margin-top: 6px;
-}
-.pc-ci-dec-btn {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 999px;
-  cursor: pointer;
-  background: #fff;
-  border: 1.5px solid #e5e7eb;
-  color: #9ca3af;
-  font-family: inherit;
-  transition: all .12s;
-}
-.pc-ci-dec-btn:hover { border-color: #d1d5db; color: #6b7280; }
-.pc-ci-dec-btn.accepted.active { background: #788C5D; border-color: #788C5D; color: #fff; }
-.pc-ci-dec-btn.pending.active  { background: #D97757; border-color: #D97757; color: #fff; }
-.pc-ci-dec-btn.rejected.active { background: #6b7280; border-color: #6b7280; color: #fff; }
-.pc-ci-dec-note {
-  margin-top: 6px;
-  width: 100%;
-  font-size: 11px;
-  padding: 5px 8px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  font-family: inherit;
-  color: #374151;
-  box-sizing: border-box;
-}
-.pc-ci-dec-note:focus { outline: none; border-color: #0FA0A0; }
+/* 決議（採用/不採用/待議）UI 已從留言 overlay 移除 → 只在 report.html；此處不再需要 .pc-ci-dec-* */
 
 /* Note Comment Badge */
 .pc-note-badge {

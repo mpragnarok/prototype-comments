@@ -119,31 +119,7 @@
   </div>
 </div>
 
-<!-- ── DECISION（採用/不採用/待議）— 採用=olive、待議=clay、不採用=灰(不可用紅) ── -->
-<div class="vf-sec">
-  <h2>決議 decision — badge（meta 旁）+ 三鍵（採用 active）+ 註記框</h2>
-  <div class="pc-comment-item">
-    <div class="pc-ci-body">
-      <div class="pc-ci-meta">
-        <span class="pc-ci-author">設計師 A</span>
-        <span class="pc-ci-time">2 小時前</span>
-        <span class="pc-ci-dec-badge accepted">採用</span>
-      </div>
-      <p class="pc-ci-text">這個 spacing 要改成 16px</p>
-      <div class="pc-ci-decision">
-        <button class="pc-ci-dec-btn accepted active">✓ 採用</button>
-        <button class="pc-ci-dec-btn rejected">✕ 不採用</button>
-        <button class="pc-ci-dec-btn pending">⋯ 待議</button>
-      </div>
-      <input class="pc-ci-dec-note" type="text" value="照這版改，下個 sprint 跟進">
-    </div>
-  </div>
-  <div class="vf-grid" style="margin-top:10px;">
-    <span class="pc-ci-dec-badge accepted">採用</span>
-    <span class="pc-ci-dec-badge pending">待議</span>
-    <span class="pc-ci-dec-badge rejected">不採用</span>
-  </div>
-</div>
+<!-- 決議（採用/不採用/待議）UI 已從留言 overlay 移除（改只在 report.html）→ fixture 不再含決議樣本 -->
 
 <!-- ── PANEL TOOLBAR ──────────────────────── -->
 <div class="vf-sec">
@@ -175,7 +151,7 @@
     <div class="pc-panel-meta"><span class="pc-ci-author">設計師 A</span></div>
     <p class="pc-panel-excerpt">這段 spec 的 loading 狀態要補一個 skeleton…</p>
     <span class="pc-panel-reply-count">↩ 1 則回覆</span>
-    <!-- root 控制項（最外層）：compact — 無頭像/作者/內容，只有 reactions＋操作＋決議 -->
+    <!-- root 控制項（最外層）：compact — 無頭像/作者/內容，只有 reactions＋操作（決議已移除） -->
     <div class="pc-panel-root-ctrl">
       <div class="pc-comment-item">
         <div class="pc-ci-body">
@@ -186,11 +162,6 @@
           <div class="pc-ci-actions">
             <button class="pc-ci-action resolve">✓ Resolve</button>
             <button class="pc-ci-action">↩ 回覆</button>
-          </div>
-          <div class="pc-ci-decision">
-            <button class="pc-ci-dec-btn accepted active">✓ 採用</button>
-            <button class="pc-ci-dec-btn rejected">✕ 不採用</button>
-            <button class="pc-ci-dec-btn pending">⋯ 待議</button>
           </div>
         </div>
       </div>

@@ -677,9 +677,9 @@
   <!-- Summary grid -->
   <div class="summary-band">
     <div class="stat-card accent-olive">
-      <div class="stat-num olive">20</div>
+      <div class="stat-num olive">21</div>
       <div class="stat-label">已完成項</div>
-      <div class="stat-sub">A1 A2 A3 A4 A6 A7 #4 B1 B3 B5 B6 B7 B8 B9 B10 C2 C3 C4 e2e-gate F1-F5</div>
+      <div class="stat-sub">A1 A2 A3 A4 A6 A7 #4 B1 B3 B5 B6 B7 B8 B9 B10 B11 C2 C3 C4 e2e-gate F1-F5</div>
     </div>
     <div class="stat-card accent-clay">
       <div class="stat-num clay">3</div>
@@ -876,7 +876,12 @@
 
       <div class="tl-item">
         <div><span class="tl-id">B10</span><span class="tl-done-badge">DONE</span><span class="tl-title">全部留言面板：主留言控制項移到最外層</span></div>
-        <div class="tl-desc">使用者回報「點開後第一個留言出現兩次」（附圖）。修法：<code>renderInlineNoteThread</code> → <code>renderExpandedNote(item, root)</code>——root 控制項（reactions／resolve／回覆／決議）包一層 <code>.pc-panel-root-ctrl</code> 掛到 panel item 本身（最外層），展開區（<code>.pc-panel-inline-thread</code>）只列回覆。item.onclick guard 改 <code>closest('.pc-panel-inline-thread, .pc-panel-root-ctrl')</code> → 點控制項不誤收合。測試：legacy e2e source-check 改鎖新結構（33/0）＋ mock e2e 8/0 ＋ 視覺 regression 加 B10 fixture 樣本、baseline 更新、0px。bundle rebuild + node --check OK。<span style="color:var(--clay)">⚠️ 待 push dist/pc.js + purge jsDelivr 才上 CDN。</span></div>
+        <div class="tl-desc">使用者回報「點開後第一個留言出現兩次」（附圖）。修法：<code>renderInlineNoteThread</code> → <code>renderExpandedNote(item, root)</code>——root 控制項（reactions／resolve／回覆／決議）包一層 <code>.pc-panel-root-ctrl</code> 掛到 panel item 本身（最外層），展開區（<code>.pc-panel-inline-thread</code>）只列回覆。item.onclick guard 改 <code>closest('.pc-panel-inline-thread, .pc-panel-root-ctrl')</code> → 點控制項不誤收合。測試：legacy e2e source-check 改鎖新結構（33/0）＋ mock e2e 8/0 ＋ 視覺 regression 加 B10 fixture 樣本、baseline 更新、0px。bundle rebuild + node --check OK。</div>
+      </div>
+
+      <div class="tl-item">
+        <div><span class="tl-id">B11</span><span class="tl-done-badge">DONE</span><span class="tl-title">留言 overlay 移除決議 UI（採用/不採用/待議）</span></div>
+        <div class="tl-desc">使用者：「留言這邊不需要採用、不採用、待議」（附圖）——只想在留言上單純討論，決議改到 <code>report.html</code> 做。移除 <code>buildCommentItem</code> 的決議 badge＋決議列＋<code>onDecision</code>、三處 caller 接線、<code>DECISION_META</code>/<code>DECISION_ORDER</code> const、<code>.pc-ci-dec-*</code> CSS。保留 <code>decision</code>/<code>decisionNote</code> Firestore 欄位 + <b>report.html 仍可下決議</b>（決議改 report-only）。測試：mock e2e 8→7（移除決議測試）、視覺 fixture 移除決議樣本（0px）、legacy 33/0。rebuild + node --check OK。</div>
       </div>
 
     </div>
