@@ -677,9 +677,9 @@
   <!-- Summary grid -->
   <div class="summary-band">
     <div class="stat-card accent-olive">
-      <div class="stat-num olive">21</div>
+      <div class="stat-num olive">22</div>
       <div class="stat-label">已完成項</div>
-      <div class="stat-sub">A1 A2 A3 A4 A6 A7 #4 B1 B3 B5 B6 B7 B8 B9 B10 B11 C2 C3 C4 e2e-gate F1-F5</div>
+      <div class="stat-sub">A1 A2 A3 A4 A6 A7 #4 B1 B3 B5 B6 B7 B8 B9 B10 B11 C2 C3 C4 C5 e2e-gate F1-F5</div>
     </div>
     <div class="stat-card accent-clay">
       <div class="stat-num clay">3</div>
@@ -937,6 +937,11 @@
       <div class="tl-item done">
         <div><span class="tl-id">C4</span><span class="tl-done-badge">DONE</span><span class="tl-title">ui-flow 右側 info-panel scroll bar</span></div>
         <div class="tl-desc">使用者回報「右邊說明要能滑」。根因：<code>body{min-height:100vh}</code> 非固定高度 → <code>.info-panel</code> 雖 <code>overflow-y:auto</code> 但無有界高度故不出捲軸。修法：桌機 <code>body{height:100vh;overflow:hidden}</code> 鎖高度，三欄各自在有界高度內捲；<code>@media(max-width:767px)</code> 恢復整頁捲。套用 template（master）+ tournament-ui-flow（live）。⚠️ 需 deploy 後實機目視確認。</div>
+      </div>
+
+      <div class="tl-item done">
+        <div><span class="tl-id">C5</span><span class="tl-done-badge">DONE</span><span class="tl-title">pc.js 自動更新（免手動 hot reload）</span></div>
+        <div class="tl-desc">使用者：「每次更新 pc.js 後都要 hot reload」。根因：jsDelivr 給 pc.js <code>cache-control: max-age=604800</code>（瀏覽器快取 7 天）→ 改版後一般重新整理仍吃舊版、得 hard reload。修法：(1) <b>cache-bust import</b> <code>await import(PC_URL+'?t='+Date.now())</code> 每次載入抓最新（jsDelivr 邊緣仍 HIT）；(2) <b>ETag 輪詢自動 reload</b>——每 12s HEAD 比對 ETag（<code>expose-headers:*</code> 可跨域讀），一改版就自動重新整理並用 <code>sessionStorage</code> 還原當前畫面；打字中改顯示「點此重新整理」膠囊不打斷。套用 template + tournament-ui-flow（CDN）+ 03-generate pcInit（本地 ./pc.js）。已部署 jubo design docs。</div>
       </div>
 
       <div class="tl-item done">
