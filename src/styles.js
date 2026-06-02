@@ -351,6 +351,7 @@ export const STYLES = `
 }
 .pc-ci-action:hover { color: #374151; }
 .pc-ci-action.resolve { color: #0FA0A0; }
+.pc-ci-resolved-by { font-size: 10px; color: #9ca3af; align-self: center; }
 
 /* 決議（採用/不採用/待議）UI 已從留言 overlay 移除 → 只在 report.html；此處不再需要 .pc-ci-dec-* */
 

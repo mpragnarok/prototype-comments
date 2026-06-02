@@ -351,14 +351,7 @@ const STYLES = `
 }
 .pc-ci-action:hover { color: #374151; }
 .pc-ci-action.resolve { color: #0FA0A0; }
-.pc-ci-action.resolve-disabled { color: #9ca3af; cursor: not-allowed; opacity: .7; }
-.pc-toast {
-  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-  background: #1f2937; color: #f9fafb; font-size: 13px; font-family: inherit;
-  padding: 8px 18px; border-radius: 8px; opacity: 0; transition: opacity .2s;
-  z-index: 9999; pointer-events: none; white-space: nowrap;
-}
-.pc-toast.show { opacity: 1; }
+.pc-ci-resolved-by { font-size: 10px; color: #9ca3af; align-self: center; }
 
 /* 決議（採用/不採用/待議）UI 已從留言 overlay 移除 → 只在 report.html；此處不再需要 .pc-ci-dec-* */
 
@@ -961,15 +954,6 @@ function el(tag, cls, attrs = {}) {
   if (cls) e.className = cls;
   Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
   return e;
-}
-
-function showToast(msg, ms = 2200) {
-  let t = document.querySelector('.pc-toast');
-  if (!t) { t = document.createElement('div'); t.className = 'pc-toast'; document.body.appendChild(t); }
-  t.textContent = msg;
-  t.classList.add('show');
-  clearTimeout(t._timer);
-  t._timer = setTimeout(() => t.classList.remove('show'), ms);
 }
 
 // ─── Main Init ───────────────────────────────────────────────────────────────
@@ -1612,6 +1596,15 @@ export async function initPrototypeComments(opts = {}) {
     return wrap;
   }
 
+  // Resolve 開放給任何登入者（對齊 GitHub/GitLab：非留言作者限定）。
+  // 寫入歸屬欄位 resolvedBy/resolvedByUid/resolvedAt，取消解決時清空。
+  function resolvePayload(resolved) {
+    return resolved
+      ? { resolved: true, resolvedBy: currentUser?.displayName || currentUser?.email || '',
+          resolvedByUid: currentUser?.uid || '', resolvedAt: fb.serverTimestamp() }
+      : { resolved: false, resolvedBy: '', resolvedByUid: '', resolvedAt: null };
+  }
+
   // Build a single comment item element with edit/delete/resolve actions
   function buildCommentItem(c, isRootComment, { onResolve, onDelete, onDeleteThread, onEdit, onReact, onReply, onUpdated, compact } = {}) {
     const item = el('div', 'pc-comment-item');
@@ -1642,18 +1635,19 @@ export async function initPrototypeComments(opts = {}) {
     const acts = el('div', 'pc-ci-actions');
 
     // Resolve / Unresolve toggle (root comments only) — D1: root 可 resolve 也可 unresolve
-    // 只有作者本人可操作；非作者顯示 disabled + tooltip + toast
     if (isRootComment && onResolve) {
-      const isAuthor = currentUser && currentUser.uid === c.authorUid;
-      const resolveBtn = el('button', `pc-ci-action ${isAuthor ? 'resolve' : 'resolve-disabled'}`);
+      const resolveBtn = el('button', 'pc-ci-action resolve');
       resolveBtn.textContent = c.resolved ? '↩ 取消解決' : '✓ Resolve';
-      if (!isAuthor) resolveBtn.title = `只有 ${c.authorName || '留言者'} 可以標記為已解決`;
       resolveBtn.onclick = async () => {
-        if (!isAuthor) { showToast(`只有 ${c.authorName || '留言者'} 才能標記為已解決`); return; }
         await onResolve(!c.resolved);
         if (onUpdated) onUpdated();
       };
       acts.appendChild(resolveBtn);
+      if (c.resolved && c.resolvedBy) {
+        const by = el('span', 'pc-ci-resolved-by');
+        by.textContent = `由 ${c.resolvedBy} 解決`;
+        acts.appendChild(by);
+      }
     }
 
 
@@ -1757,7 +1751,7 @@ export async function initPrototypeComments(opts = {}) {
     const div = el('div', 'pc-thread');
     threadComments.forEach(c => {
       div.appendChild(buildCommentItem(c, c.id === commentId, {
-        onResolve: resolved => store.update(c.id, { resolved }),
+        onResolve: resolved => store.update(c.id, resolvePayload(resolved)),
         onDelete:  ()       => store.remove(c.id),
         onDeleteThread: ()  => Promise.all(threadComments.map(t => store.remove(t.id))),
         onEdit:    body     => store.update(c.id, { body, edited: true }),
@@ -2041,7 +2035,7 @@ export async function initPrototypeComments(opts = {}) {
     const ctrl = el('div', 'pc-panel-root-ctrl');
     ctrl.appendChild(buildCommentItem(root, true, {
       compact: true,
-      onResolve: r => store.update(root.id, { resolved: r }),
+      onResolve: r => store.update(root.id, resolvePayload(r)),
       onDelete:  () => store.remove(root.id),
       onDeleteThread: () => Promise.all(
         all.filter(x => x.id === root.id || x.parentId === root.id).map(t => store.remove(t.id))),
@@ -2215,7 +2209,8 @@ export async function initPrototypeComments(opts = {}) {
           }
         }
         if (c.resolved) {
-          const rb = el('span', 'pc-panel-resolved-badge'); rb.textContent = '✓ 已解決';
+          const rb = el('span', 'pc-panel-resolved-badge');
+          rb.textContent = c.resolvedBy ? `✓ ${c.resolvedBy} 已解決` : '✓ 已解決';
           topRow.appendChild(rb);
         }
         const at = el('span', 'pc-ci-time'); at.textContent = timeAgo(c.createdAt);

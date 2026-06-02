@@ -706,6 +706,15 @@ export async function initPrototypeComments(opts = {}) {
     return wrap;
   }
 
+  // Resolve 開放給任何登入者（對齊 GitHub/GitLab：非留言作者限定）。
+  // 寫入歸屬欄位 resolvedBy/resolvedByUid/resolvedAt，取消解決時清空。
+  function resolvePayload(resolved) {
+    return resolved
+      ? { resolved: true, resolvedBy: currentUser?.displayName || currentUser?.email || '',
+          resolvedByUid: currentUser?.uid || '', resolvedAt: fb.serverTimestamp() }
+      : { resolved: false, resolvedBy: '', resolvedByUid: '', resolvedAt: null };
+  }
+
   // Build a single comment item element with edit/delete/resolve actions
   function buildCommentItem(c, isRootComment, { onResolve, onDelete, onDeleteThread, onEdit, onReact, onReply, onUpdated, compact } = {}) {
     const item = el('div', 'pc-comment-item');
@@ -744,6 +753,11 @@ export async function initPrototypeComments(opts = {}) {
         if (onUpdated) onUpdated();
       };
       acts.appendChild(resolveBtn);
+      if (c.resolved && c.resolvedBy) {
+        const by = el('span', 'pc-ci-resolved-by');
+        by.textContent = `由 ${c.resolvedBy} 解決`;
+        acts.appendChild(by);
+      }
     }
 
 
@@ -847,7 +861,7 @@ export async function initPrototypeComments(opts = {}) {
     const div = el('div', 'pc-thread');
     threadComments.forEach(c => {
       div.appendChild(buildCommentItem(c, c.id === commentId, {
-        onResolve: resolved => store.update(c.id, { resolved }),
+        onResolve: resolved => store.update(c.id, resolvePayload(resolved)),
         onDelete:  ()       => store.remove(c.id),
         onDeleteThread: ()  => Promise.all(threadComments.map(t => store.remove(t.id))),
         onEdit:    body     => store.update(c.id, { body, edited: true }),
@@ -1131,7 +1145,7 @@ export async function initPrototypeComments(opts = {}) {
     const ctrl = el('div', 'pc-panel-root-ctrl');
     ctrl.appendChild(buildCommentItem(root, true, {
       compact: true,
-      onResolve: r => store.update(root.id, { resolved: r }),
+      onResolve: r => store.update(root.id, resolvePayload(r)),
       onDelete:  () => store.remove(root.id),
       onDeleteThread: () => Promise.all(
         all.filter(x => x.id === root.id || x.parentId === root.id).map(t => store.remove(t.id))),
@@ -1305,7 +1319,8 @@ export async function initPrototypeComments(opts = {}) {
           }
         }
         if (c.resolved) {
-          const rb = el('span', 'pc-panel-resolved-badge'); rb.textContent = '✓ 已解決';
+          const rb = el('span', 'pc-panel-resolved-badge');
+          rb.textContent = c.resolvedBy ? `✓ ${c.resolvedBy} 已解決` : '✓ 已解決';
           topRow.appendChild(rb);
         }
         const at = el('span', 'pc-ci-time'); at.textContent = timeAgo(c.createdAt);
