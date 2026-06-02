@@ -351,6 +351,14 @@ const STYLES = `
 }
 .pc-ci-action:hover { color: #374151; }
 .pc-ci-action.resolve { color: #0FA0A0; }
+.pc-ci-action.resolve-disabled { color: #9ca3af; cursor: not-allowed; opacity: .7; }
+.pc-toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: #1f2937; color: #f9fafb; font-size: 13px; font-family: inherit;
+  padding: 8px 18px; border-radius: 8px; opacity: 0; transition: opacity .2s;
+  z-index: 9999; pointer-events: none; white-space: nowrap;
+}
+.pc-toast.show { opacity: 1; }
 
 /* 決議（採用/不採用/待議）UI 已從留言 overlay 移除 → 只在 report.html；此處不再需要 .pc-ci-dec-* */
 
@@ -955,6 +963,15 @@ function el(tag, cls, attrs = {}) {
   return e;
 }
 
+function showToast(msg, ms = 2200) {
+  let t = document.querySelector('.pc-toast');
+  if (!t) { t = document.createElement('div'); t.className = 'pc-toast'; document.body.appendChild(t); }
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), ms);
+}
+
 // ─── Main Init ───────────────────────────────────────────────────────────────
 export async function initPrototypeComments(opts = {}) {
   const {
@@ -966,6 +983,8 @@ export async function initPrototypeComments(opts = {}) {
     engNoteSelector = '.eng-note-row',
     navigateTo        = null,   // (screenId: string) => void  — consumer provides
     authBarTarget     = null,   // CSS selector for a flex header to inject auth bar into
+    authBarCorner     = 'right', // 浮動 auth bar 貼哪個底角：'right'(預設) | 'left'。bar 仍「浮底」，
+                                 //   只切左右——給「note/內容在右側、bar 會擋到」的版型把 bar 移到左下。
     scrollContainer   = null,   // CSS selector for scrollable body inside the phone frame
     _firebase         = null,   // 測試用：注入 in-memory firebase mock，略過 CDN load + 真 Firebase
   } = opts;
@@ -1165,7 +1184,8 @@ export async function initPrototypeComments(opts = {}) {
       targetEl.appendChild(wrap);
     } else {
       wrap.id = 'pc-auth-mobile-wrap';
-      wrap.style.cssText = 'position:fixed;bottom:64px;right:12px;z-index:9000;background:#fff;border-radius:20px;box-shadow:0 2px 12px rgba(0,0,0,.15);padding:6px 10px;';
+      const side = authBarCorner === 'left' ? 'left:12px' : 'right:12px';
+      wrap.style.cssText = 'position:fixed;bottom:64px;' + side + ';z-index:9000;background:#fff;border-radius:20px;box-shadow:0 2px 12px rgba(0,0,0,.15);padding:6px 10px;';
       document.body.appendChild(wrap);
     }
   }
@@ -1622,10 +1642,14 @@ export async function initPrototypeComments(opts = {}) {
     const acts = el('div', 'pc-ci-actions');
 
     // Resolve / Unresolve toggle (root comments only) — D1: root 可 resolve 也可 unresolve
+    // 只有作者本人可操作；非作者顯示 disabled + tooltip + toast
     if (isRootComment && onResolve) {
-      const resolveBtn = el('button', 'pc-ci-action resolve');
+      const isAuthor = currentUser && currentUser.uid === c.authorUid;
+      const resolveBtn = el('button', `pc-ci-action ${isAuthor ? 'resolve' : 'resolve-disabled'}`);
       resolveBtn.textContent = c.resolved ? '↩ 取消解決' : '✓ Resolve';
+      if (!isAuthor) resolveBtn.title = `只有 ${c.authorName || '留言者'} 可以標記為已解決`;
       resolveBtn.onclick = async () => {
+        if (!isAuthor) { showToast(`只有 ${c.authorName || '留言者'} 才能標記為已解決`); return; }
         await onResolve(!c.resolved);
         if (onUpdated) onUpdated();
       };

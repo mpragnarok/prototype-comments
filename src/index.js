@@ -77,6 +77,8 @@ export async function initPrototypeComments(opts = {}) {
     engNoteSelector = '.eng-note-row',
     navigateTo        = null,   // (screenId: string) => void  — consumer provides
     authBarTarget     = null,   // CSS selector for a flex header to inject auth bar into
+    authBarCorner     = 'right', // 浮動 auth bar 貼哪個底角：'right'(預設) | 'left'。bar 仍「浮底」，
+                                 //   只切左右——給「note/內容在右側、bar 會擋到」的版型把 bar 移到左下。
     scrollContainer   = null,   // CSS selector for scrollable body inside the phone frame
     _firebase         = null,   // 測試用：注入 in-memory firebase mock，略過 CDN load + 真 Firebase
   } = opts;
@@ -276,7 +278,8 @@ export async function initPrototypeComments(opts = {}) {
       targetEl.appendChild(wrap);
     } else {
       wrap.id = 'pc-auth-mobile-wrap';
-      wrap.style.cssText = 'position:fixed;bottom:64px;right:12px;z-index:9000;background:#fff;border-radius:20px;box-shadow:0 2px 12px rgba(0,0,0,.15);padding:6px 10px;';
+      const side = authBarCorner === 'left' ? 'left:12px' : 'right:12px';
+      wrap.style.cssText = 'position:fixed;bottom:64px;' + side + ';z-index:9000;background:#fff;border-radius:20px;box-shadow:0 2px 12px rgba(0,0,0,.15);padding:6px 10px;';
       document.body.appendChild(wrap);
     }
   }

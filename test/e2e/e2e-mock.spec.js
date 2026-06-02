@@ -205,6 +205,33 @@ const seedComment = (over = {}) => ({ type: 'positional', screenId: 's1', x: 50,
 
   // 決議（採用/不採用/待議）已從留言 overlay 移除（改只在 report.html）→ 對應 e2e 一併移除。
 
+  await test('authBarCorner:"left" → 浮動 bar 貼左下；預設貼右下（③ bar 不擋右側 note，仍浮底）', async () => {
+    async function corner(override) {
+      const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+      const p = await ctx.newPage();
+      await p.goto(`http://localhost:${PORT}/test/e2e/harness.html`);
+      await p.waitForFunction(() => window.__pcTest && window.__pcTest.ready);
+      await p.evaluate(({ user, override }) => {
+        const fb = window.__pcTest.createMockFirebase({ user, comments: [] });
+        return window.__pcTest.init(fb, override);
+      }, { user: USER, override });
+      await p.waitForSelector('#pc-auth-mobile-wrap', { timeout: 4000 });
+      // 讀 inline style（非 computed：fixed 定位未設邊會把 auto 解析成 px，會誤判）
+      const css = await p.evaluate(() => {
+        const w = document.getElementById('pc-auth-mobile-wrap');
+        return { left: w.style.left, right: w.style.right, bottom: w.style.bottom };
+      });
+      await ctx.close();
+      return css;
+    }
+    const left = await corner({ authBarCorner: 'left' });
+    const dflt = await corner({});
+    console.log('     authBar left:', JSON.stringify(left), 'default:', JSON.stringify(dflt));
+    assert(left.left === '12px' && left.right === '', `authBarCorner:left 應貼左(left:12px,無 right)，實際 ${JSON.stringify(left)}`);
+    assert(dflt.right === '12px' && dflt.left === '', `預設應貼右(right:12px,無 left)，實際 ${JSON.stringify(dflt)}`);
+    assert(left.bottom === '64px' && dflt.bottom === '64px', `兩者都應浮底 bottom:64px，實際 left=${left.bottom} default=${dflt.bottom}`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
