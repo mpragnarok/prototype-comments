@@ -234,6 +234,8 @@ export const STYLES = `
   width: 260px;
   border: 1px solid #e5e7eb;
 }
+/* 已解決留言：整個對話框轉灰，與灰色 pin 語意一致 */
+.pc-popover.resolved { background: #f3f4f6; }
 .pc-popover-header {
   display: flex;
   align-items: center;

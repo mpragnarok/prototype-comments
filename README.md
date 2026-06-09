@@ -24,14 +24,15 @@ Drop-in Firebase comment overlay for HTML prototypes.
 
 在 Firebase Console → 專案設定 → 你的 app → 複製 `firebaseConfig` 物件。
 
-> ⚠️ **不要把 `firebaseConfig` 提交到公開 repo。** 使用環境變數或 gitignore 的設定檔管理。
+> ℹ️ `firebaseConfig` **不是 secret**（`apiKey` 只是 public identifier），放進公開 repo 沒問題。
+> 真正的防線是 Firestore Rules + Authorized domains（見 [Security](#security)），不是把 config 藏起來。
 
 ### 3. 在 HTML prototype 引入
 
 ```html
 <script type="module">
   import { initPrototypeComments } from
-    'https://cdn.jsdelivr.net/gh/mpragnarok/prototype-comments@main/src/index.js';
+    'https://prototype-comments.netlify.app/src/index.js';   // self-host，no-cache（見 netlify.toml）
 
   initPrototypeComments({
     firebaseConfig: {
@@ -116,27 +117,17 @@ initPrototypeComments({
 > 1. `initPrototypeComments({ authBarTarget: '.my-header' })`
 > 2. header 的最後一個導覽元素加 `margin-left: auto`
 
-### 5. 設定 Firestore Rules
+### 5. Firestore Rules（本 repo 是唯一 SSOT）
 
-在 `firestore.rules` 加上：
+留言規則住在本 repo 的 [`firestore.rules`](firestore.rules)，部署到共用 project `prototype-comments-27106`（已在 `.firebaserc` 釘死 default）。**不要**把這段規則 copy 進各 consumer（vitallink / coshift / badminton）的 firestore.rules — 它們全指向同一個 project，只需這裡這一份。
 
-```
-match /prototype-comments/{projectId}/comments/{commentId} {
-  allow read: if true;
-  allow create: if request.auth != null;
-  allow update: if request.auth != null &&
-    (request.auth.uid == resource.data.authorUid ||
-     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['resolved']));
-  allow delete: if request.auth != null &&
-    request.auth.uid == resource.data.authorUid;
-}
-```
-
-然後 deploy：
+改完規則後一行部署：
 
 ```bash
-firebase deploy --only firestore:rules
+make deploy-rules          # = firebase deploy --only firestore:rules
 ```
+
+> ⚠ `firestore.rules` 的 `update` 白名單必須與 `src/index.js` 的 `resolvePayload()` 寫入欄位同步。pc.js 改了 resolve 寫入哪些欄位，白名單要一起改再 `make deploy-rules`，否則非作者按 resolve 會 `permission-denied`。
 
 ---
 
@@ -178,8 +169,19 @@ Collection path: `prototype-comments/{projectId}/comments/{commentId}`
   authorUid:   'google-uid',
   authorName:  'Mina Huang',
   authorPhoto: 'https://...',
-  resolved:    false,
   createdAt:   serverTimestamp(),
+  edited:      true,          // optional，編輯過才有
+
+  // resolve 狀態（resolvePayload 一次寫這四欄；取消解決時清空為 false/''/null）：
+  resolved:      false,
+  resolvedBy:    'Mina Huang',     // 解決者顯示名
+  resolvedByUid: 'google-uid',
+  resolvedAt:    serverTimestamp(),
+
+  // 協作欄位（皆在 update 白名單內）：
+  reactions:    { '👍': ['uid1', 'uid2'] },  // emoji → 按的人 uid 陣列
+  decision:     'adopt',       // optional，外部 report 工具寫入；pc.js 不再顯示/編輯
+  decisionNote: '...',         // optional，同上
 }
 ```
 
@@ -187,10 +189,14 @@ Collection path: `prototype-comments/{projectId}/comments/{commentId}`
 
 ## Security
 
-- **Firebase config 不含任何 secret**。`apiKey` 是 public identifier，Firestore Rules 控制讀寫權限。
-- 只有登入使用者可以建立留言（`allow create: if request.auth != null`）
-- 只有作者可以刪除自己的留言
-- `resolved` 欄位任何登入使用者都可以更新（design review 中 reviewer 也可以 resolve）
+權威規則見本 repo 的 [`firestore.rules`](firestore.rules)（SSOT，部署到 `prototype-comments-27106`）。重點：
+
+- **Firebase config 不含任何 secret**。`apiKey` 只是 public identifier，安全靠 Rules + Authorized domains，不靠藏 config。
+- **讀取公開**：`allow read: if true`，有分享連結即可看留言。
+- **寫入限公司帳號**：create / update / delete 都需通過 `isJubo()` — 已驗證（`email_verified`）的 `@jubo.health` Google 帳號，擋路人甲灌留言 / 亂 resolve。
+- **更新**：作者本人可改全部欄位；其他同事只能改協作型白名單欄位 `resolved` / `resolvedBy` / `resolvedByUid` / `resolvedAt` / `reactions` / `decision` / `decisionNote`（故 reviewer 也能 resolve / 取消解決）。
+- **刪除**：僅留言作者本人。
+- ⚠ 白名單必須與 `src/index.js` 的 `resolvePayload()`（一次寫 `resolved`+`resolvedBy`/`resolvedByUid`/`resolvedAt`）保持同步。
 
 ---
 

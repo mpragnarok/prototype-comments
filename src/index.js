@@ -236,7 +236,7 @@ export async function initPrototypeComments(opts = {}) {
         <div class="pc-help-body">
           <div class="pc-help-section">
             <div class="pc-help-title">🔑 登入</div>
-            <div class="pc-help-desc">點選「Sign in with Google」登入後，即可使用所有留言功能。</div>
+            <div class="pc-help-desc">以 <strong>@jubo.health</strong> Google 帳號點「Sign in with Google」登入後即可留言；其他帳號只能瀏覽。</div>
           </div>
           <div class="pc-help-section">
             <div class="pc-help-title">📌 新增 Pin 留言</div>
@@ -248,11 +248,19 @@ export async function initPrototypeComments(opts = {}) {
           </div>
           <div class="pc-help-section">
             <div class="pc-help-title">💬 查看與回覆</div>
-            <div class="pc-help-desc">點選 Pin 開啟留言串，可在留言串底部直接回覆。</div>
+            <div class="pc-help-desc">點選 Pin 開啟留言串，可在底部直接回覆；輸入 <kbd>@</kbd> 可標記（提及）其他協作者。</div>
           </div>
           <div class="pc-help-section">
-            <div class="pc-help-title">✓ 標記完成</div>
-            <div class="pc-help-desc">留言處理完後點「✓ Resolve」，Pin 變灰色表示已解決。</div>
+            <div class="pc-help-title">👍 表情回應</div>
+            <div class="pc-help-desc">在留言上點 emoji 快速回應，再點一次取消；可看到誰按了。</div>
+          </div>
+          <div class="pc-help-section">
+            <div class="pc-help-title">✏️ 編輯／刪除</div>
+            <div class="pc-help-desc">自己的留言可「編輯」（會標示「已編輯」）或「刪除」；刪除主留言會一併刪掉整串。</div>
+          </div>
+          <div class="pc-help-section">
+            <div class="pc-help-title">✓ 標記完成／取消</div>
+            <div class="pc-help-desc">留言處理完點「✓ Resolve」，Pin 與對話框變灰表示已解決；任何同事都能再點「↩ 取消解決」還原。</div>
           </div>
           <div class="pc-help-section">
             <div class="pc-help-title">👁 隱藏 Pin</div>
@@ -972,7 +980,8 @@ export async function initPrototypeComments(opts = {}) {
     closeAllPopovers();
     pop.id = commentId;
 
-    const popEl = el('div', 'pc-popover');
+    const rootC = comments.find(c => c.id === commentId);
+    const popEl = el('div', 'pc-popover' + (rootC?.resolved ? ' resolved' : ''));
     pop.el = popEl;
 
     const closeBtn = el('button', 'pc-popover-close');

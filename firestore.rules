@@ -1,0 +1,46 @@
+rules_version = '2';
+
+// ────────────────────────────────────────────────────────────────────────────
+// SSOT for the shared comment Firebase project: prototype-comments-27106
+//
+// 這個 Firebase project 只存「設計審查留言」，由本 repo 的 pc.js 寫入，
+// 被嵌在 vitallink / coshift / badminton 等各 prototype 頁面（全部指向同一個 project）。
+// 留言規則只該住在這裡這一份，不要再 copy 進各 consumer 的 firestore.rules。
+//
+// Deploy（會自動套到 .firebaserc 的 default project = prototype-comments-27106）：
+//   firebase deploy --only firestore:rules
+//   # 或   make deploy-rules
+// ────────────────────────────────────────────────────────────────────────────
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 只有已驗證的 @jubo.health Google 帳號能寫入（擋路人甲灌留言 / 亂 resolve）。
+    // email 用 ^...$ 全字串錨定，避免 evil@jubo.health.attacker.com 這種子字串繞過。
+    function isJubo() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.matches('^[^@]+@jubo[.]health$');
+    }
+
+    // 設計審查留言。Read 公開（分享連結即可看），寫入限公司帳號。
+    // 作者本人可改全部欄位；其他 @jubo.health 同事只能改白名單欄位（協作型、非破壞性）：
+    //   resolved + resolvedBy/resolvedByUid/resolvedAt = 收尾歸屬（pc.js resolve 一次寫這四欄）
+    //   reactions                                       = 表情
+    //   decision / decisionNote                         = 採用 / 不採用決議
+    // reviewer 通常不是留言作者，故放行這些欄位讓任何同事可 resolve / 取消解決。
+    //
+    // ⚠ 白名單必須與 src/index.js 的 resolvePayload() 寫入欄位同步：
+    //   改 pc.js 寫入欄位時，這份白名單要一起改，然後 `make deploy-rules`。
+    match /prototype-comments/{projectId}/comments/{commentId} {
+      allow read: if true;
+      allow create: if isJubo();
+      allow update: if isJubo() &&
+        (request.auth.uid == resource.data.authorUid ||
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['resolved', 'resolvedBy', 'resolvedByUid', 'resolvedAt',
+                     'reactions', 'decision', 'decisionNote']));
+      allow delete: if isJubo() &&
+        request.auth.uid == resource.data.authorUid;
+    }
+  }
+}
