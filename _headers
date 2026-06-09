@@ -1,0 +1,8 @@
+# prototype-comments 公開 widget — 給散落各專案的 prototype 透過 ES module import。
+# src/index.js 會 import ./styles.js ./store.js ./note-comments.js（4 檔 module graph），
+# 所以快取與 CORS 必須蓋整個 /src/*，不能只蓋 index.js。
+/src/*
+  # no-cache = 每次帶 ETag 回源驗證；沒變回 304、一變即拿新版 → 根治 jsDelivr @main 的 stale。
+  Cache-Control: no-cache, must-revalidate
+  # 跨網域 ES module import 必須；漏了別專案 consumer 會 CORS 失敗。
+  Access-Control-Allow-Origin: *

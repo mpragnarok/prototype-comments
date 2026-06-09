@@ -1,0 +1,5 @@
+# 此站只負責把 prototype-comments 原始碼以 no-cache 公開給各專案 import（見 _headers）。
+# publish 設根目錄，consumer import 路徑 /src/index.js 才對得上；無 build step。
+[build]
+  command = ""
+  publish = "."
