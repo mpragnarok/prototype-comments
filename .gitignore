@@ -5,3 +5,6 @@ test-results/
 dist/*
 !dist/pc.js
 
+
+# Local Netlify folder
+.netlify
