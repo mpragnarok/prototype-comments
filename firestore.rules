@@ -14,16 +14,15 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 只有已驗證的 @jubo.health Google 帳號能寫入（擋路人甲灌留言 / 亂 resolve）。
-    // email 用 ^...$ 全字串錨定，避免 evil@jubo.health.attacker.com 這種子字串繞過。
-    function isJubo() {
+    // 任何已登入且 email 已驗證的 Google 帳號都能寫入（不再限 @jubo.health）。
+    // 仍要求登入 + email_verified，擋掉完全匿名灌留言；作者本人才能改/刪自己的留言。
+    function isSignedIn() {
       return request.auth != null
-        && request.auth.token.email_verified == true
-        && request.auth.token.email.matches('^[^@]+@jubo[.]health$');
+        && request.auth.token.email_verified == true;
     }
 
-    // 設計審查留言。Read 公開（分享連結即可看），寫入限公司帳號。
-    // 作者本人可改全部欄位；其他 @jubo.health 同事只能改白名單欄位（協作型、非破壞性）：
+    // 設計審查留言。Read 公開（分享連結即可看），寫入限已登入帳號。
+    // 作者本人可改全部欄位；其他登入同事只能改白名單欄位（協作型、非破壞性）：
     //   resolved + resolvedBy/resolvedByUid/resolvedAt = 收尾歸屬（pc.js resolve 一次寫這四欄）
     //   reactions                                       = 表情
     //   decision / decisionNote                         = 採用 / 不採用決議
@@ -33,13 +32,13 @@ service cloud.firestore {
     //   改 pc.js 寫入欄位時，這份白名單要一起改，然後 `make deploy-rules`。
     match /prototype-comments/{projectId}/comments/{commentId} {
       allow read: if true;
-      allow create: if isJubo();
-      allow update: if isJubo() &&
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() &&
         (request.auth.uid == resource.data.authorUid ||
          request.resource.data.diff(resource.data).affectedKeys()
            .hasOnly(['resolved', 'resolvedBy', 'resolvedByUid', 'resolvedAt',
                      'reactions', 'decision', 'decisionNote']));
-      allow delete: if isJubo() &&
+      allow delete: if isSignedIn() &&
         request.auth.uid == resource.data.authorUid;
     }
   }

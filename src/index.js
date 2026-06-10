@@ -236,7 +236,7 @@ export async function initPrototypeComments(opts = {}) {
         <div class="pc-help-body">
           <div class="pc-help-section">
             <div class="pc-help-title">🔑 登入</div>
-            <div class="pc-help-desc">以 <strong>@jubo.health</strong> Google 帳號點「Sign in with Google」登入後即可留言；其他帳號只能瀏覽。</div>
+            <div class="pc-help-desc">點「Sign in with Google」用 Google 帳號登入後即可留言；未登入則只能瀏覽。</div>
           </div>
           <div class="pc-help-section">
             <div class="pc-help-title">📌 新增 Pin 留言</div>
