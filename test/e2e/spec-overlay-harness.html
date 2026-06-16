@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<!--
+  spec-overlay-harness.html — e2e 載入頁，測 src/spec-overlay.js（vanilla 規格面板）。
+  import 自 /src/（同 prod 服務路徑），spec-overlay.js 內部 import ./index.js（pc.js）。
+  firebase 用 _firebase mock 繞過 CDN。expose window.__specTest 給 spec 注入/操作/斷言。
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>spec-overlay e2e harness</title>
+<style>
+  html, body { margin: 0; }
+  #root { position: relative; width: 100%; height: 700px; }
+  [data-pc-scroll] { height: 700px; overflow-y: auto; }
+</style>
+</head>
+<body>
+<div id="root">
+  <div data-pc-scroll>
+    <div style="height:200px;padding:16px;">harness top</div>
+    <input name="reminder[0].overdueAfter" id="focus-target" style="margin:16px;" />
+    <div style="height:1000px;padding:16px;">filler（讓 scrollIntoView 有得捲）</div>
+  </div>
+</div>
+
+<script type="module">
+  import { initSpecOverlay } from '/src/spec-overlay.js';
+  import { createMockFirebase } from '/test/mock-firebase.js';
+  window.__specTest = { initSpecOverlay, createMockFirebase, ready: true };
+</script>
+</body>
+</html>
