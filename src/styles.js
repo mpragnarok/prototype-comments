@@ -233,6 +233,12 @@ export const STYLES = `
   padding: 12px;
   width: 260px;
   border: 1px solid #e5e7eb;
+  /* [ADD 2026-06-16] 留言串太高時內部捲動，不要溢出視窗（之前在 live app 上 thread 會跑出框外）。
+     box-sizing 確保 260px 含 padding，max-width 防止窄視窗水平溢出。 */
+  box-sizing: border-box;
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
 }
 /* 已解決留言：整個對話框轉灰，與灰色 pin 語意一致 */
 .pc-popover.resolved { background: #f3f4f6; }
