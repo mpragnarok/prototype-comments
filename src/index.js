@@ -1233,8 +1233,9 @@ export async function initPrototypeComments(opts = {}) {
     // Tag filter chips (clickable) + sort button — kept visually separate from status tabs
     const toolbar = el('div', 'pc-panel-toolbar');
     const chipsWrap = el('div', 'pc-panel-tagchips');
-    // Type filter: 設計留言 (positional pins) vs 工程留言 (notes)
-    [['all', '全部項目'], ['design', '🎨 設計'], ['eng', '🔧 工程']].forEach(([t, label]) => {
+    // Type filter: 標註 (positional pins) vs 規格 (note comments)。tag 名稱按「留言貼在哪」命名，
+    //   不綁「誰留的」——positional pin=畫面上隨手標一點(標註)；note=針對規格說明清單某條(規格)。
+    [['all', '全部項目'], ['design', '📍 標註'], ['eng', '📋 規格']].forEach(([t, label]) => {
       const chip = el('button', `pc-panel-tagchip pc-panel-typechip${panel.typeFilter === t ? ' active' : ''}`);
       chip.textContent = label;
       chip.onclick = () => { panel.typeFilter = t; renderPanel(); };
@@ -1320,10 +1321,10 @@ export async function initPrototypeComments(opts = {}) {
         const topRow = el('div', 'pc-panel-top-row');
         const modeChip = el('span', 'pc-panel-chip');
         if (c.type === 'note') {
-          modeChip.textContent = '🔧 工程';
+          modeChip.textContent = '📋 規格';
           modeChip.style.cssText = 'background:rgba(99,102,241,.12);color:#6366f1;';
         } else {
-          modeChip.textContent = '🎨 設計';
+          modeChip.textContent = '📍 標註';
         }
         topRow.appendChild(modeChip);
         if (c.type === 'note' && c.noteTag) {
