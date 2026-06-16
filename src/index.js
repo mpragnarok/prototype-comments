@@ -84,6 +84,11 @@ export async function initPrototypeComments(opts = {}) {
                                    //   （不夾邊緣）。給 live app 用：designTarget 是整個 #root、但實際
                                    //   捲動區只佔視窗一部分，pin 捲出捲動區若不裁切會飄在 header 等處。
                                    //   截圖 flow 維持預設 false（pin 夾在 phone frame 邊緣當指示器）。
+    noteJump          = false,  // [ADD 2026-06-16] 「全部留言」清單點 note(規格)留言的行為：
+                                //   false(預設,截圖版)→ inline 在面板內展開討論串（reliable）。
+                                //   true(live overlay)→ 改成跳到該 note：關面板、(必要時)換頁、捲到
+                                //   對應 .eng-note-row 並開它的討論串。因 note 在 React 抽屜(keepMounted
+                                //   但視覺關閉)，跳轉前先 dispatch `pc:note-jump` 事件讓 consumer 開抽屜。
     _firebase         = null,   // 測試用：注入 in-memory firebase mock，略過 CDN load + 真 Firebase
   } = opts;
 
@@ -1307,10 +1312,12 @@ export async function initPrototypeComments(opts = {}) {
       roots.forEach(c => {
         const item = el('div', `pc-panel-item${c.resolved ? ' resolved' : ''}`);
         if (c.type === 'note') {
-          // Note/eng comment → expand its thread inline in the panel (reliable)
+          // Note/eng comment 點擊行為：noteJump=false(截圖版) → inline 展開討論串(reliable)；
+          //   noteJump=true(live overlay) → 跳到該 note（navigateToComment 會發 pc:note-jump 開抽屜）。
           item.onclick = (e) => {
             // 點最外層控制項(.pc-panel-root-ctrl) 或回覆區(.pc-panel-inline-thread) 內 → 不要 toggle 收合
             if (e.target.closest('.pc-panel-inline-thread, .pc-panel-root-ctrl')) return;
+            if (noteJump) { navigateToComment(c); return; }
             panel.expandedNote = panel.expandedNote === c.noteKey ? null : c.noteKey;
             renderPanel();
           };
@@ -1391,15 +1398,33 @@ export async function initPrototypeComments(opts = {}) {
     await new Promise(r => setTimeout(r, onOtherScreen ? 150 : 0));
 
     if (comment.type === 'note' && comment.noteKey) {
-      for (const row of document.querySelectorAll('[data-pc-injected]')) {
-        if (noteKey(row.dataset.pcTag || '', row.dataset.pcText || '') === comment.noteKey) {
+      // [ADD 2026-06-16] live overlay：note 在 React 抽屜（keepMounted 但視覺關閉）。發事件讓
+      //   consumer 開抽屜，pc.js 再捲到對應 row 並開討論串。截圖版用不到 noteJump（走 inline 展開），
+      //   此分支不會被觸發，故只在 noteJump 時 dispatch。
+      if (noteJump) {
+        document.dispatchEvent(new CustomEvent('pc:note-jump', { detail: {
+          screenId: comment.screenId, noteKey: comment.noteKey,
+          noteTag: comment.noteTag, noteText: comment.noteText,
+        } }));
+      }
+      // 找對應 .eng-note-row。開抽屜 + screen-change 重新注入(💬 按鈕)有時序，按鈕未必馬上在 →
+      // 輪詢（最多 ~660ms）等 row 帶 .pc-note-comment-btn 後再捲動 + 開討論串。
+      const findRow = () => {
+        for (const row of document.querySelectorAll('[data-pc-injected]')) {
+          if (noteKey(row.dataset.pcTag || '', row.dataset.pcText || '') === comment.noteKey) return row;
+        }
+        return null;
+      };
+      for (let i = 0; i < 11; i++) {
+        const row = findRow();
+        if (row && row.querySelector('.pc-note-comment-btn')) {
           row.scrollIntoView({ behavior: 'smooth', block: 'center' });
           const thread = row.nextElementSibling;
-          if (thread?.classList.contains('pc-note-thread') && !thread.classList.contains('open')) {
-            row.querySelector('.pc-note-comment-btn')?.click();
-          }
+          const isOpen = thread?.classList.contains('pc-note-thread') && thread.classList.contains('open');
+          if (!isOpen) row.querySelector('.pc-note-comment-btn')?.click(); // toggle：未開(含尚未建立)就開
           return;
         }
+        await new Promise(r => setTimeout(r, 60));
       }
       return;
     }
