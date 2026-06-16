@@ -80,6 +80,10 @@ export async function initPrototypeComments(opts = {}) {
     authBarCorner     = 'right', // 浮動 auth bar 貼哪個底角：'right'(預設) | 'left'。bar 仍「浮底」，
                                  //   只切左右——給「note/內容在右側、bar 會擋到」的版型把 bar 移到左下。
     scrollContainer   = null,   // CSS selector for scrollable body inside the phone frame
+    clipToScrollContainer = false, // [ADD 2026-06-16] true → pin 捲出 scrollContainer 可視範圍就隱藏
+                                   //   （不夾邊緣）。給 live app 用：designTarget 是整個 #root、但實際
+                                   //   捲動區只佔視窗一部分，pin 捲出捲動區若不裁切會飄在 header 等處。
+                                   //   截圖 flow 維持預設 false（pin 夾在 phone frame 邊緣當指示器）。
     _firebase         = null,   // 測試用：注入 in-memory firebase mock，略過 CDN load + 真 Firebase
   } = opts;
 
@@ -915,9 +919,18 @@ export async function initPrototypeComments(opts = {}) {
       const scrollTop = getScrollTop();
       const overlayH  = overlay.offsetHeight || 1;
       const visualY   = c.y - (scrollTop / overlayH * 100);
+      // [ADD 2026-06-16] clipToScrollContainer：pin 捲出 scrollContainer 可視範圍就整個隱藏（不夾邊緣）。
+      // pin 的視窗 Y = overlay 頂 + visualY% × overlayH；落在 scrollContainer rect 之外（上方被 header
+      // 蓋住、或下方捲出）就 skip 不畫。找留言改用「全部留言」清單跳回。
+      if (clipToScrollContainer && _scrollEl) {
+        const scRect = _scrollEl.getBoundingClientRect();
+        const oRect  = overlay.getBoundingClientRect();
+        const pinWinY = oRect.top + (visualY / 100) * overlayH;
+        if (pinWinY < scRect.top || pinWinY > scRect.bottom) return; // 出可視區 → 不顯示
+      }
       const safeMin   = 14 / overlayH * 100;
       const safeMax   = 100 - safeMin;
-      const isEdge    = visualY < 0 || visualY > 100;
+      const isEdge    = !clipToScrollContainer && (visualY < 0 || visualY > 100);
       const pinVisualY = isEdge ? Math.max(safeMin, Math.min(safeMax, visualY)) : visualY;
       if (isEdge) pinEl.classList.add('pc-pin-edge', visualY < 0 ? 'pc-pin-edge-top' : 'pc-pin-edge-bottom');
       pinEl.style.left = `${c.x}%`;
