@@ -36,6 +36,11 @@ const DEFAULT_TAG_STYLE = {
 // click-outside 時這些元素內的點擊不關抽屜（抽屜本身 + FAB + pc.js 互動 UI）
 const KEEP_OPEN_SEL = '.spec-drawer,.spec-fab,.pc-popover,.pc-note-thread,.pc-emoji-picker,.pc-mention-pop,.pc-auth-bar,.pc-pin';
 
+// 內嵌 MUI 圖示 SVG（vanilla 模組不能 import @mui/icons-material，故直接用其 path）。
+// FAB = StickyNote2Outlined、聚焦 = CenterFocusStrong；fill:currentColor 跟著按鈕文字色。
+const ICON_FAB = '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M19 5v9h-5v5H5V5zm0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h10l6-6V5c0-1.1-.9-2-2-2m-7 11H7v-2h5zm5-4H7V8h10z"/></svg>';
+const ICON_FOCUS = '<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4m-7 7H3v4c0 1.1.9 2 2 2h4v-2H5zM5 5h4V3H5c-1.1 0-2 .9-2 2v4h2zm14-2h-4v2h4v4h2V5c0-1.1-.9-2-2-2m0 16h-4v2h4c1.1 0 2-.9 2-2v-4h-2z"/></svg>';
+
 const STYLES = `
 .spec-fab {
   position: fixed; bottom: 72px; right: 16px; z-index: 1300;
@@ -75,6 +80,7 @@ const STYLES = `
 .spec-note-focus { border: none; background: none; cursor: pointer; color: #0FA0A0;
   font-size: 15px; padding: 2px; line-height: 1; }
 .spec-note-focus:hover { color: #0d8f8f; }
+.spec-fab svg, .spec-note-focus svg { display: block; }
 .spec-note-text { color: #334155; font-size: 12px; line-height: 1.6; }
 .spec-ft { padding: 8px 16px; border-top: 1px solid #eef2f6; background: #fff; }
 .spec-ft-hint { color: #94a3b8; font-size: 10px; line-height: 1.5; }
@@ -138,7 +144,7 @@ export function initSpecOverlay(opts = {}) {
   // ── DOM：FAB + 抽屜（常駐 DOM，靠 transform 開關，等同 keepMounted）─────────────
   const fab = el('button', 'spec-fab');
   fab.title = '規格說明';
-  fab.innerHTML = '🗒';
+  fab.innerHTML = ICON_FAB;
   fab.onclick = () => setOpen(true);
   const drawer = el('div', 'spec-drawer');
   document.body.appendChild(fab);
@@ -187,7 +193,8 @@ export function initSpecOverlay(opts = {}) {
     tag.style.color = style.color;
     top.appendChild(tag);
     if (note.focus) {
-      const f = el('button', 'spec-note-focus', '🔦');
+      const f = el('button', 'spec-note-focus');
+      f.innerHTML = ICON_FOCUS;
       f.title = '聚焦到畫面對應位置';
       f.onclick = () => focusEl(note.focus);
       top.appendChild(f);
