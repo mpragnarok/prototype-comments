@@ -89,10 +89,25 @@ const STYLES = `
 .spec-note-focus:hover { color: #0d8f8f; }
 .spec-fab svg, .spec-note-focus svg { display: block; }
 .spec-note-text { color: #334155; font-size: 12px; line-height: 1.6; }
-.spec-note-spacing { margin-top: 7px; color: #0d8f8f; font-size: 11px; line-height: 1.5;
-  background: rgba(15,160,160,.08); border-radius: 4px; padding: 4px 8px;
-  font-variant-numeric: tabular-nums; }
-.spec-note-spacing b { font-weight: 600; color: #0FA0A0; margin-right: 2px; }
+/* 元件間距：盒模型圖（方案 A）。margin 外圈(琥珀)、padding 內圈(綠)，四邊各標 px。 */
+.spec-bm-wrap { margin-top: 8px; }
+.spec-bm-cap { margin-top: 8px; color: #0d8f8f; font-size: 11px; line-height: 1.5;
+  background: rgba(15,160,160,.08); border-radius: 4px; padding: 4px 8px; display: inline-block; }
+.spec-bm { display: inline-block; font: 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.spec-bm-band { border-radius: 5px; padding: 11px 4px 2px; position: relative; }
+.spec-bm-margin { background: rgba(180,83,9,.10); border: 1px dashed #b45309; }
+.spec-bm-padding { background: rgba(21,128,61,.10); border: 1px dashed #15803d; }
+.spec-bm-label { position: absolute; top: 1px; left: 5px; font-size: 8px; font-weight: 700; letter-spacing: .03em; }
+.spec-bm-margin > .spec-bm-label { color: #b45309; }
+.spec-bm-padding > .spec-bm-label { color: #15803d; }
+.spec-bm-side { text-align: center; padding: 1px 0; }
+.spec-bm-mid { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 1px 0; }
+.spec-bm-v { color: #334155; font-weight: 700; }
+.spec-bm-v.z { color: #cbd5e1; font-weight: 400; }
+.spec-bm-content { background: #334155; color: #e2e8f0; border-radius: 3px; padding: 6px 12px; white-space: nowrap; }
+.spec-bm-gap { margin-top: 6px; display: inline-block; background: rgba(109,40,217,.12); color: #6d28d9;
+  font-size: 10px; font-weight: 700; border-radius: 4px; padding: 2px 7px;
+  font-family: ui-monospace, Menlo, monospace; }
 .spec-ft { padding: 8px 16px; border-top: 1px solid #eef2f6; background: #fff; }
 .spec-ft-hint { color: #94a3b8; font-size: 10px; line-height: 1.5; }
 @keyframes specFocusPulse {
@@ -128,39 +143,78 @@ function focusEl(selector) {
   setTimeout(() => target.classList.remove('spec-focus-flash'), 1600);
 }
 
-// 四向值收斂顯示：四邊相同→單值；上下/左右成對→「↕x ↔y」；否則「上/右/下/左」。
-function fmtBox(top, right, bottom, left) {
-  if (top === right && right === bottom && bottom === left) return top;
-  if (top === bottom && right === left) return `↕${top} ↔${right}`;
-  return `${top} ${right} ${bottom} ${left}`;
+// ── 元件間距：盒模型圖（方案 A，對齊 DevTools / Figma Inspect 心智模型）────────────
+// 把間距畫成巢狀方塊（margin 外圈、padding 內圈），四邊各標 px —— 取代原本看不懂的純文字。
+const pxNum = v => { const n = parseFloat(v); return Number.isFinite(n) ? Math.round(n) : 0; };
+const anySide = s => !!(s && (s.t || s.r || s.b || s.l));
+
+// 把 CSS 值字串解析成四邊 {t,r,b,l}（支援 '24px' / '8px 16px' / '↕4px ↔8px' / 四值）。
+function parseSide(v) {
+  if (typeof v !== 'string') return null;
+  const nums = v.match(/-?\d+(?:\.\d+)?/g);
+  if (!nums) return null;
+  const n = nums.map(x => Math.round(parseFloat(x)));
+  if (v.includes('↕') || v.includes('↔')) return { t: n[0], r: n[1] ?? n[0], b: n[0], l: n[1] ?? n[0] };
+  if (n.length === 1) return { t: n[0], r: n[0], b: n[0], l: n[0] };
+  if (n.length === 2) return { t: n[0], r: n[1], b: n[0], l: n[1] };
+  if (n.length >= 4) return { t: n[0], r: n[1], b: n[2], l: n[3] };
+  return { t: n[0], r: n[0], b: n[0], l: n[0] };
 }
 
-// 從活的 DOM 量元件間距（getComputedStyle）。回傳 { margin?, padding?, gap? }，全 0 則回 null。
-function measureSpacing(selector) {
+// 從活的 DOM 量四邊 margin/padding + gap + 尺寸。
+function measureSpacingSides(selector) {
   const t = document.querySelector(selector);
   if (!t) return null;
   const cs = getComputedStyle(t);
-  const out = {};
-  const nonZero = (...vals) => vals.some(v => v && v !== '0px');
-  if (nonZero(cs.marginTop, cs.marginRight, cs.marginBottom, cs.marginLeft))
-    out.margin = fmtBox(cs.marginTop, cs.marginRight, cs.marginBottom, cs.marginLeft);
-  if (nonZero(cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft))
-    out.padding = fmtBox(cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft);
-  if (cs.gap && cs.gap !== 'normal' && cs.gap !== '0px') out.gap = cs.gap.replace(/ /g, ' / ');
-  return Object.keys(out).length ? out : null;
+  const r = t.getBoundingClientRect();
+  const side = p => ({ t: pxNum(cs[p + 'Top']), r: pxNum(cs[p + 'Right']), b: pxNum(cs[p + 'Bottom']), l: pxNum(cs[p + 'Left']) });
+  const gap = (cs.gap && cs.gap !== 'normal' && cs.gap !== '0px') ? cs.gap.replace(/ /g, ' / ') : null;
+  return { margin: side('margin'), padding: side('padding'), gap, w: Math.round(r.width), h: Math.round(r.height) };
 }
 
-// 把 devNote.spacing（手動，優先）或 focus 元件的即時量測，組成顯示用 HTML 片段；沒有則回 null。
-function spacingHTML(note) {
-  let sp = note.spacing;
-  if (sp == null && note.focus) sp = measureSpacing(note.focus);
-  if (!sp) return null;
-  if (typeof sp === 'string') return sp.trim() ? sp : null;
-  const seg = [];
-  if (sp.margin)  seg.push(`<b>margin</b>${sp.margin}`);
-  if (sp.padding) seg.push(`<b>padding</b>${sp.padding}`);
-  if (sp.gap)     seg.push(`<b>gap</b>${sp.gap}`);
-  return seg.length ? seg.join(' · ') : null;
+function sideVal(v) { const s = el('span', 'spec-bm-v' + (v ? '' : ' z')); s.textContent = String(v); return s; }
+function sideRow(v) { const d = el('div', 'spec-bm-side'); d.appendChild(sideVal(v)); return d; }
+
+// 用 sides 包一層帶四邊數字的 band（margin / padding），把 inner 包在中間。
+function bandSides(kind, sides, inner) {
+  const band = el('div', 'spec-bm-band spec-bm-' + kind);
+  band.appendChild(el('span', 'spec-bm-label', kind));
+  band.appendChild(sideRow(sides.t));
+  const mid = el('div', 'spec-bm-mid');
+  mid.appendChild(sideVal(sides.l));
+  mid.appendChild(inner);
+  mid.appendChild(sideVal(sides.r));
+  band.appendChild(mid);
+  band.appendChild(sideRow(sides.b));
+  return band;
+}
+
+function renderBoxModel(data) {
+  const wrap = el('div', 'spec-bm-wrap');
+  let inner = el('div', 'spec-bm-content', data.w ? `${data.w}×${data.h}px` : '元件');
+  if (anySide(data.padding)) inner = bandSides('padding', data.padding, inner);
+  if (anySide(data.margin))  inner = bandSides('margin', data.margin, inner);
+  const bm = el('div', 'spec-bm'); bm.appendChild(inner); wrap.appendChild(bm);
+  if (data.gap) wrap.appendChild(el('div', 'spec-bm-gap', 'gap ' + data.gap));
+  return wrap;
+}
+
+// 回傳間距顯示 DOM（盒模型圖；手動字串則回可讀 caption）；沒有則回 null。
+//   手動 spacing（物件/字串）優先；否則有 focus 時即時量測 DOM。
+function buildSpacingEl(note) {
+  const sp = note.spacing;
+  if (typeof sp === 'string') {
+    if (!sp.trim()) return null;
+    return el('div', 'spec-bm-cap', '📐 ' + sp);
+  }
+  let data = null;
+  if (sp && typeof sp === 'object') {
+    data = { margin: parseSide(sp.margin), padding: parseSide(sp.padding), gap: sp.gap || null, w: null, h: null };
+  } else if (note.focus) {
+    data = measureSpacingSides(note.focus);
+  }
+  if (!data || (!anySide(data.margin) && !anySide(data.padding) && !data.gap)) return null;
+  return renderBoxModel(data);
 }
 
 export function initSpecOverlay(opts = {}) {
@@ -247,12 +301,8 @@ export function initSpecOverlay(opts = {}) {
     }
     row.appendChild(top);
     row.appendChild(el('div', 'spec-note-text', note.text));
-    const sp = spacingHTML(note);
-    if (sp) {
-      const spRow = el('div', 'spec-note-spacing');
-      spRow.innerHTML = `📐 ${sp}`;
-      row.appendChild(spRow);
-    }
+    const spEl = buildSpacingEl(note);
+    if (spEl) row.appendChild(spEl);
     return row;
   }
 

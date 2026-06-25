@@ -159,6 +159,12 @@ export async function initPrototypeComments(opts = {}) {
   let _scrollEl = null;
   function refreshScrollEl() {
     if (!scrollContainer) return;
+    // 熱路徑防呆：_scrollEl 可能已從 DOM 卸載（demo 導覽/路由重掛捲動容器）→ 視為失效先清掉，
+    // 否則後續會讀到 detached 節點的舊 scrollTop，標註位置就跟著捲動飄走。
+    if (_scrollEl && !document.contains(_scrollEl)) {
+      _scrollEl.removeEventListener('scroll', renderAnnotations);
+      _scrollEl = null;
+    }
     const el = document.querySelector(scrollContainer);
     if (el === _scrollEl) return;
     if (_scrollEl) _scrollEl.removeEventListener('scroll', renderAnnotations);
@@ -1494,6 +1500,14 @@ export async function initPrototypeComments(opts = {}) {
       noteModule.injectAll();
     }, 30);
     subscribe();
+  });
+
+  // ── Demo-end listener ──────────────────────────────────────────────────────
+  // demo 導覽（react-joyride）會 scrollIntoView 捲動容器；關掉 demo 時 consumer dispatch
+  // pc:demo-end → 重抓 scrollEl + 重錨標註，避免標註用到過時 scrollTop 跟著捲動飄走。
+  document.addEventListener('pc:demo-end', () => {
+    refreshScrollEl();
+    renderAnnotations();
   });
 
   const observer = new MutationObserver(() => {

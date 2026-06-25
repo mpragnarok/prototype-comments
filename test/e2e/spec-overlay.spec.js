@@ -89,16 +89,24 @@ const SPEC = {
     assert(r.title === '測試 Protocol', `title 不符: ${r.title}`);
   });
 
-  await test('元件間距：自動量測（focus）＋手動 spacing（字串／物件）渲染為 .spec-note-spacing', async () => {
-    const sp = await page.evaluate(() =>
-      [...document.querySelectorAll('.spec-note-spacing')].map(x => x.textContent));
-    console.log('     spacing rows:', JSON.stringify(sp));
-    // 3 則：focus note 自動量測 DOM + 字串手動 + 物件手動
-    assert(sp.length === 3, `應有 3 則 spacing（1 自動量測 + 2 手動），實際 ${sp.length}`);
-    assert(sp.some(t => t.includes('上下 12px') && t.includes('左右 16px')), '字串 spacing 應原樣顯示');
-    assert(sp.some(t => t.includes('margin') && t.includes('padding') && t.includes('gap')), '物件 spacing 應展開 margin/padding/gap');
-    // 自動量測：focus 的 input 從活 DOM 量到非 0 的 margin/padding（手動 spacing 未提供時才會自動量）
-    assert(sp.filter(t => t.includes('margin')).length >= 2, '應有自動量測 + 物件手動兩則含 margin');
+  await test('元件間距：盒模型圖（方案 A）—— 自動量測+物件→.spec-bm；字串→.spec-bm-cap', async () => {
+    const r = await page.evaluate(() => ({
+      boxModels: document.querySelectorAll('.spec-bm').length,
+      caps: [...document.querySelectorAll('.spec-bm-cap')].map(x => x.textContent),
+      // 物件手動那則應有 margin+padding band + gap badge
+      hasMarginBand: !!document.querySelector('.spec-bm-margin'),
+      hasPaddingBand: !!document.querySelector('.spec-bm-padding'),
+      gaps: [...document.querySelectorAll('.spec-bm-gap')].map(x => x.textContent),
+      // 盒模型四邊數字
+      sideVals: document.querySelectorAll('.spec-bm-v').length,
+    }));
+    console.log('     box-model:', JSON.stringify(r));
+    // focus 自動量測 + 物件手動 → 2 個盒模型；字串手動 → 1 個 caption
+    assert(r.boxModels === 2, `應有 2 個盒模型圖，實際 ${r.boxModels}`);
+    assert(r.caps.some(t => t.includes('上下 12px') && t.includes('左右 16px')), '字串 spacing 應為可讀 caption');
+    assert(r.hasMarginBand && r.hasPaddingBand, '盒模型應有 margin 外圈 + padding 內圈');
+    assert(r.gaps.some(t => t.includes('12px')), '物件 spacing 的 gap 應顯示為 gap badge');
+    assert(r.sideVals >= 8, '盒模型每邊各一數字（margin4 + padding4）');
   });
 
   await test('點 🔦 → 目標元件加 .spec-focus-flash', async () => {
