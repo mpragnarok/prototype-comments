@@ -99,6 +99,8 @@ const SPEC = {
       gaps: [...document.querySelectorAll('.spec-bm-gap')].map(x => x.textContent),
       // 盒模型四邊數字
       sideVals: document.querySelectorAll('.spec-bm-v').length,
+      // 自動量測那則應標出整個元件 border-box 尺寸「元件 W×H」
+      dims: [...document.querySelectorAll('.spec-bm-dim')].map(x => x.textContent),
     }));
     console.log('     box-model:', JSON.stringify(r));
     // focus 自動量測 + 物件手動 → 2 個盒模型；字串手動 → 1 個 caption
@@ -107,6 +109,9 @@ const SPEC = {
     assert(r.hasMarginBand && r.hasPaddingBand, '盒模型應有 margin 外圈 + padding 內圈');
     assert(r.gaps.some(t => t.includes('12px')), '物件 spacing 的 gap 應顯示為 gap badge');
     assert(r.sideVals >= 8, '盒模型每邊各一數字（margin4 + padding4）');
+    // 自動量測那則（focus input）應有「元件 W×H px」整體尺寸標示（解決「寬度不是整個元件」）
+    assert(r.dims.length === 1 && /元件\s+\d+\s+×\s+\d+px/.test(r.dims[0]),
+      `自動量測應標出元件 border-box 尺寸，實際 ${JSON.stringify(r.dims)}`);
   });
 
   await test('點 🔦 → 目標元件加 .spec-focus-flash', async () => {

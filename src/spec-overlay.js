@@ -105,6 +105,8 @@ const STYLES = `
 .spec-bm-v { color: #334155; font-weight: 700; }
 .spec-bm-v.z { color: #cbd5e1; font-weight: 400; }
 .spec-bm-content { background: #334155; color: #e2e8f0; border-radius: 3px; padding: 6px 12px; white-space: nowrap; }
+.spec-bm-dim { margin-top: 6px; color: #0d8f8f; font-weight: 700; font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .spec-bm-gap { margin-top: 6px; display: inline-block; background: rgba(109,40,217,.12); color: #6d28d9;
   font-size: 10px; font-weight: 700; border-radius: 4px; padding: 2px 7px;
   font-family: ui-monospace, Menlo, monospace; }
@@ -161,15 +163,22 @@ function parseSide(v) {
   return { t: n[0], r: n[0], b: n[0], l: n[0] };
 }
 
-// 從活的 DOM 量四邊 margin/padding + gap + 尺寸。
+// 從活的 DOM 量四邊 margin/padding + border + gap + 尺寸。
+//   w/h = border-box（整個元件的渲染寬高）；cw/ch = content-box（= border-box − padding − border）。
+//   盒模型把 w×h 標成「元件」尺寸、cw×ch 放在 content 中心，幾何與 DevTools/Figma 一致。
 function measureSpacingSides(selector) {
   const t = document.querySelector(selector);
   if (!t) return null;
   const cs = getComputedStyle(t);
   const r = t.getBoundingClientRect();
   const side = p => ({ t: pxNum(cs[p + 'Top']), r: pxNum(cs[p + 'Right']), b: pxNum(cs[p + 'Bottom']), l: pxNum(cs[p + 'Left']) });
+  const pad = side('padding');
+  const bd = { t: pxNum(cs.borderTopWidth), r: pxNum(cs.borderRightWidth), b: pxNum(cs.borderBottomWidth), l: pxNum(cs.borderLeftWidth) };
+  const w = Math.round(r.width), h = Math.round(r.height);
   const gap = (cs.gap && cs.gap !== 'normal' && cs.gap !== '0px') ? cs.gap.replace(/ /g, ' / ') : null;
-  return { margin: side('margin'), padding: side('padding'), gap, w: Math.round(r.width), h: Math.round(r.height) };
+  return { margin: side('margin'), padding: pad, gap, w, h,
+    cw: Math.max(0, w - pad.l - pad.r - bd.l - bd.r),
+    ch: Math.max(0, h - pad.t - pad.b - bd.t - bd.b) };
 }
 
 function sideVal(v) { const s = el('span', 'spec-bm-v' + (v ? '' : ' z')); s.textContent = String(v); return s; }
@@ -191,16 +200,21 @@ function bandSides(kind, sides, inner) {
 
 function renderBoxModel(data) {
   const wrap = el('div', 'spec-bm-wrap');
-  let inner = el('div', 'spec-bm-content', data.w ? `${data.w}×${data.h}px` : '元件');
+  // 中心放 content-box（cw×ch）；沒有量測值（手動物件）時放佔位「元件」。
+  const contentTxt = data.cw != null ? `${data.cw}×${data.ch}` : '元件';
+  let inner = el('div', 'spec-bm-content', contentTxt);
   if (anySide(data.padding)) inner = bandSides('padding', data.padding, inner);
   if (anySide(data.margin))  inner = bandSides('margin', data.margin, inner);
   const bm = el('div', 'spec-bm'); bm.appendChild(inner); wrap.appendChild(bm);
+  // 整個元件（border-box）尺寸：明確標成「元件 W×H」，避免被誤讀成只是內容區。
+  if (data.w != null) wrap.appendChild(el('div', 'spec-bm-dim', `元件 ${data.w} × ${data.h}px`));
   if (data.gap) wrap.appendChild(el('div', 'spec-bm-gap', 'gap ' + data.gap));
   return wrap;
 }
 
 // 回傳間距顯示 DOM（盒模型圖；手動字串則回可讀 caption）；沒有則回 null。
-//   手動 spacing（物件/字串）優先；否則有 focus 時即時量測 DOM。
+//   手動 spacing（物件/字串）優先；否則量測 spacingTarget（沒給則 focus）指到的元件。
+//   spacingTarget 用來在 focus 指向「窄的子元件（如 input）」時，改量「整個控制項/列」。
 function buildSpacingEl(note) {
   const sp = note.spacing;
   if (typeof sp === 'string') {
@@ -209,9 +223,9 @@ function buildSpacingEl(note) {
   }
   let data = null;
   if (sp && typeof sp === 'object') {
-    data = { margin: parseSide(sp.margin), padding: parseSide(sp.padding), gap: sp.gap || null, w: null, h: null };
-  } else if (note.focus) {
-    data = measureSpacingSides(note.focus);
+    data = { margin: parseSide(sp.margin), padding: parseSide(sp.padding), gap: sp.gap || null, w: null, h: null, cw: null, ch: null };
+  } else if (note.spacingTarget || note.focus) {
+    data = measureSpacingSides(note.spacingTarget || note.focus);
   }
   if (!data || (!anySide(data.margin) && !anySide(data.padding) && !data.gap)) return null;
   return renderBoxModel(data);
@@ -348,6 +362,14 @@ export function initSpecOverlay(opts = {}) {
 
   // 全部留言點規格留言 → pc.js dispatch pc:note-jump 要我們開抽屜（pc.js 隨後捲到 row + 開串）
   document.addEventListener('pc:note-jump', () => setOpen(true));
+
+  // 視窗縮放 → 元件長寬會變，盒模型量到的尺寸要跟著更新。抽屜開著時 debounce 重畫重新量測。
+  let resizeT = null;
+  window.addEventListener('resize', () => {
+    if (!state.open) return;
+    clearTimeout(resizeT);
+    resizeT = setTimeout(render, 150);
+  });
 
   render();
 
