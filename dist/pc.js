@@ -79,15 +79,15 @@ const STYLES = `
   /* teal circle + white plus; fallback to crosshair */
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='11' fill='%230FA0A0' opacity='.85'/%3E%3Cpath d='M12 7v10M7 12h10' stroke='%23fff' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E") 12 12, crosshair;
 }
-/* Pins inside overlay are always clickable regardless of overlay state */
-.pc-overlay .pc-pin {
+/* Annotations inside overlay are always clickable regardless of overlay state */
+.pc-overlay .pc-annotation {
   pointer-events: all !important;
   cursor: pointer;
 }
 
-/* Comment Pin — 對話泡 bubble (方案 C)
+/* Comment Annotation — 對話泡 bubble (方案 C)
    rounded-rect 比例（寬>高）+ 左下尾巴 → 單一數字也讀得出 speech bubble；不加白圈 */
-.pc-pin {
+.pc-annotation {
   position: absolute;
   display: flex;
   align-items: center;
@@ -104,12 +104,12 @@ const STYLES = `
   cursor: pointer;
   z-index: 210;
   box-shadow: 0 2px 6px rgba(0,0,0,.3);
-  transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1));
+  transform: translate(-50%, -50%) scale(var(--pc-annotation-scale, 1));
   transform-origin: center;
   transition: transform .15s, opacity .15s;
   pointer-events: all;
 }
-.pc-pin::before {                        /* 對話泡尾巴，左下角指向錨點 */
+.pc-annotation::before {                        /* 對話泡尾巴，左下角指向錨點 */
   content: '';
   position: absolute;
   bottom: -5px;
@@ -119,25 +119,25 @@ const STYLES = `
   border-right: 6px solid transparent;
   border-top: 8px solid #BA1A1A;
 }
-.pc-pin:hover { transform: translate(-50%, -50%) scale(calc(var(--pc-pin-scale, 1) * 1.2)); }
-/* 長按計時 / 拖曳中：停用 hover 放大，避免游標脫離 pin 觸發 mouseleave 取消長按 */
-.pc-pin.pressing { transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1)); }
-.pc-pin.moving { transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1)); opacity: .7; cursor: grabbing; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
-.pc-pin.resolved {
+.pc-annotation:hover { transform: translate(-50%, -50%) scale(calc(var(--pc-annotation-scale, 1) * 1.2)); }
+/* 長按計時 / 拖曳中：停用 hover 放大，避免游標脫離 annotation 觸發 mouseleave 取消長按 */
+.pc-annotation.pressing { transform: translate(-50%, -50%) scale(var(--pc-annotation-scale, 1)); }
+.pc-annotation.moving { transform: translate(-50%, -50%) scale(var(--pc-annotation-scale, 1)); opacity: .7; cursor: grabbing; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.pc-annotation.resolved {
   background: #6b7280;                  /* gray-500：白字對比度 ~4.6:1 達 WCAG AA，一眼讀得出 ✓ */
   color: #fff;
   opacity: .80;                          /* 仍保留「已解決=次要、退到背景」語意，但不再糊掉 */
 }
-.pc-pin.resolved::before { border-top-color: #6b7280; }
-.pc-pin.pc-pin-edge::before { display: none; }   /* edge pin 用 ::after 箭頭，不顯示泡泡尾巴 */
-.pc-pin-label { line-height: 1; display: inline-flex; align-items: center; gap: 1px; }
-.pc-pin-ic { flex: 0 0 16px; display: inline-flex; justify-content: center; overflow: hidden; }   /* icon 固定寬框(不縮不漲) → 💬/✓ 同寬，resolved 與未解決 pin 對齊 */
+.pc-annotation.resolved::before { border-top-color: #6b7280; }
+.pc-annotation.pc-annotation-edge::before { display: none; }   /* edge annotation 用 ::after 箭頭，不顯示泡泡尾巴 */
+.pc-annotation-label { line-height: 1; display: inline-flex; align-items: center; gap: 1px; }
+.pc-annotation-ic { flex: 0 0 16px; display: inline-flex; justify-content: center; overflow: hidden; }   /* icon 固定寬框(不縮不漲) → 💬/✓ 同寬，resolved 與未解決 annotation 對齊 */
 
-/* B6: 「全部留言」導向同頁時，pin 閃爍高亮讓留言「跳出來」 */
-.pc-pin.pc-pin-flash { animation: pc-pin-flash .55s ease 2; z-index: 211; }
-@keyframes pc-pin-flash {
-  0%, 100% { transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1)); box-shadow: 0 2px 6px rgba(0,0,0,.3); }
-  50%      { transform: translate(-50%, -50%) scale(calc(var(--pc-pin-scale, 1) * 1.5)); box-shadow: 0 0 0 4px rgba(186,26,26,.35), 0 2px 8px rgba(0,0,0,.35); }
+/* B6: 「全部留言」導向同頁時，annotation 閃爍高亮讓留言「跳出來」 */
+.pc-annotation.pc-annotation-flash { animation: pc-annotation-flash .55s ease 2; z-index: 211; }
+@keyframes pc-annotation-flash {
+  0%, 100% { transform: translate(-50%, -50%) scale(var(--pc-annotation-scale, 1)); box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+  50%      { transform: translate(-50%, -50%) scale(calc(var(--pc-annotation-scale, 1) * 1.5)); box-shadow: 0 0 0 4px rgba(186,26,26,.35), 0 2px 8px rgba(0,0,0,.35); }
 }
 
 /* Emoji reactions */
@@ -233,7 +233,15 @@ const STYLES = `
   padding: 12px;
   width: 260px;
   border: 1px solid #e5e7eb;
+  /* [ADD 2026-06-16] 留言串太高時內部捲動，不要溢出視窗（之前在 live app 上 thread 會跑出框外）。
+     box-sizing 確保 260px 含 padding，max-width 防止窄視窗水平溢出。 */
+  box-sizing: border-box;
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
 }
+/* 已解決留言：整個對話框轉灰，與灰色 annotation 語意一致 */
+.pc-popover.resolved { background: #f3f4f6; }
 .pc-popover-header {
   display: flex;
   align-items: center;
@@ -566,13 +574,13 @@ const STYLES = `
   color: #9ca3af;
 }
 
-/* Pin visibility toggle */
-.pc-pins-hidden .pc-pin { display: none !important; }
+/* Annotation visibility toggle */
+.pc-annotations-hidden .pc-annotation { display: none !important; }
 
-/* Edge-docked pins (off-screen content) */
-.pc-pin.pc-pin-edge { opacity: .75; }
-.pc-pin.pc-pin-edge-top::after,
-.pc-pin.pc-pin-edge-bottom::after {
+/* Edge-docked annotations (off-screen content) */
+.pc-annotation.pc-annotation-edge { opacity: .75; }
+.pc-annotation.pc-annotation-edge-top::after,
+.pc-annotation.pc-annotation-edge-bottom::after {
   content: '';
   position: absolute;
   left: 50%;
@@ -581,11 +589,11 @@ const STYLES = `
   border-left: 4px solid transparent;
   border-right: 4px solid transparent;
 }
-.pc-pin.pc-pin-edge-top::after {
+.pc-annotation.pc-annotation-edge-top::after {
   bottom: calc(100% + 2px);
   border-bottom: 5px solid #0FA0A0;
 }
-.pc-pin.pc-pin-edge-bottom::after {
+.pc-annotation.pc-annotation-edge-bottom::after {
   top: calc(100% + 2px);
   border-top: 5px solid #0FA0A0;
 }
@@ -663,13 +671,13 @@ const STYLES = `
   font-family: monospace;
 }
 
-/* Pin relocation — drag state */
-@keyframes pc-pin-pulse {
+/* Annotation relocation — drag state */
+@keyframes pc-annotation-pulse {
   from { box-shadow: 0 2px 8px rgba(15,160,160,.5), 0 0 0 3px #0FA0A0; }
   to   { box-shadow: 0 2px 8px rgba(15,160,160,.8), 0 0 0 6px rgba(15,160,160,.3); }
 }
-.pc-pin.moving {
-  animation: pc-pin-pulse .6s ease-in-out infinite alternate;
+.pc-annotation.moving {
+  animation: pc-annotation-pulse .6s ease-in-out infinite alternate;
   z-index: 220;
   transition: none !important;
 }
@@ -956,11 +964,29 @@ function el(tag, cls, attrs = {}) {
   return e;
 }
 
+// 設定錯誤（如缺 projectId）時，除了 console 也在畫面右下角顯示明顯紅色 badge，
+// 讓「忘了設定」在接上去當下就被看見，而不是事後才發現留言沒存。inline 樣式自帶（不靠 injectStyles）。
+function showInitError(text) {
+  const render = () => {
+    if (document.getElementById('pc-init-error')) return;
+    const b = document.createElement('div');
+    b.id = 'pc-init-error';
+    b.setAttribute('role', 'alert');
+    b.textContent = '⚠ pc.js — ' + text;
+    b.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;'
+      + 'background:#BA1A1A;color:#fff;font:600 12px/1.45 system-ui,-apple-system,sans-serif;'
+      + 'padding:8px 12px;border-radius:6px;box-shadow:0 2px 10px rgba(0,0,0,.35);max-width:280px;';
+    (document.body || document.documentElement).appendChild(b);
+  };
+  if (document.body) render();
+  else document.addEventListener('DOMContentLoaded', render, { once: true });
+}
+
 // ─── Main Init ───────────────────────────────────────────────────────────────
 export async function initPrototypeComments(opts = {}) {
   const {
     firebaseConfig,
-    projectId       = 'default',
+    projectId,                  // 必填：每個原型專案一個唯一 id；留言依此分區（不再 fallback 到 'default'）
     getScreenId     = () => 'unknown',
     getMode         = () => 'design',
     designTarget    = '#phone',
@@ -970,11 +996,26 @@ export async function initPrototypeComments(opts = {}) {
     authBarCorner     = 'right', // 浮動 auth bar 貼哪個底角：'right'(預設) | 'left'。bar 仍「浮底」，
                                  //   只切左右——給「note/內容在右側、bar 會擋到」的版型把 bar 移到左下。
     scrollContainer   = null,   // CSS selector for scrollable body inside the phone frame
+    clipToScrollContainer = false, // [ADD 2026-06-16] true → annotation 捲出 scrollContainer 可視範圍就隱藏
+                                   //   （不夾邊緣）。給 live app 用：designTarget 是整個 #root、但實際
+                                   //   捲動區只佔視窗一部分，annotation 捲出捲動區若不裁切會飄在 header 等處。
+                                   //   截圖 flow 維持預設 false（annotation 夾在 phone frame 邊緣當指示器）。
+    noteJump          = false,  // [ADD 2026-06-16] 「全部留言」清單點 note(規格)留言的行為：
+                                //   false(預設,截圖版)→ inline 在面板內展開討論串（reliable）。
+                                //   true(live overlay)→ 改成跳到該 note：關面板、(必要時)換頁、捲到
+                                //   對應 .eng-note-row 並開它的討論串。因 note 在 React 抽屜(keepMounted
+                                //   但視覺關閉)，跳轉前先 dispatch `pc:note-jump` 事件讓 consumer 開抽屜。
     _firebase         = null,   // 測試用：注入 in-memory firebase mock，略過 CDN load + 真 Firebase
   } = opts;
 
   if (!firebaseConfig && !_firebase) {
     console.error('[prototype-comments] firebaseConfig is required');
+    return;
+  }
+
+  if (!projectId) {
+    console.error('[prototype-comments] projectId is required — 每個原型專案需指定唯一 projectId（標註/留言依此分區，不再 fallback 到 default）');
+    showInitError('缺少 projectId：留言系統未啟動（每個原型專案需指定唯一 projectId）');
     return;
   }
 
@@ -997,15 +1038,15 @@ export async function initPrototypeComments(opts = {}) {
   // ── State ──────────────────────────────────────────────────────────────────
   let currentUser = null;
   let commentMode  = false;
-  let pinsVisible  = true;
+  let annotationsVisible  = true;
   let unsub        = null;
 
-  function togglePinsVisible() {
-    pinsVisible = !pinsVisible;
+  function toggleAnnotationsVisible() {
+    annotationsVisible = !annotationsVisible;
     const overlay = document.getElementById('pc-overlay');
-    if (overlay) overlay.classList.toggle('pc-pins-hidden', !pinsVisible);
-    const btn = document.getElementById('pc-toggle-pins');
-    if (btn) btn.style.opacity = pinsVisible ? '1' : '0.4';
+    if (overlay) overlay.classList.toggle('pc-annotations-hidden', !annotationsVisible);
+    const btn = document.getElementById('pc-toggle-annotations');
+    if (btn) btn.style.opacity = annotationsVisible ? '1' : '0.4';
   }
 
   // data state
@@ -1018,18 +1059,18 @@ export async function initPrototypeComments(opts = {}) {
     if (!scrollContainer) return;
     const el = document.querySelector(scrollContainer);
     if (el === _scrollEl) return;
-    if (_scrollEl) _scrollEl.removeEventListener('scroll', renderPins);
+    if (_scrollEl) _scrollEl.removeEventListener('scroll', renderAnnotations);
     _scrollEl = el;
-    if (_scrollEl) _scrollEl.addEventListener('scroll', renderPins, { passive: true });
+    if (_scrollEl) _scrollEl.addEventListener('scroll', renderAnnotations, { passive: true });
   }
   const getScrollTop = () => _scrollEl?.scrollTop ?? 0;
 
   // interaction state (UI lifecycle)
-  const pin   = { current: null };          // pendingPin
+  const annotation   = { current: null };          // pendingAnnotation
   const pop   = { id: null, el: null };     // openPopoverId + popoverEl
-  let movingPinId = null;                   // id of pin currently being relocated
+  let movingAnnotationId = null;                   // id of annotation currently being relocated
   let isDragging  = false;                  // true while drag is in progress
-  let dragPinEl   = null;                   // DOM element being dragged
+  let dragAnnotationEl   = null;                   // DOM element being dragged
   let justDragged = false;                  // suppress post-drag click event
   let lastDragX   = 0;                      // last cursor x during drag
   let lastDragY   = 0;                      // last cursor y during drag
@@ -1082,13 +1123,13 @@ export async function initPrototypeComments(opts = {}) {
     toggle.onclick = () => setCommentMode(!commentMode);
     bar.appendChild(toggle);
 
-    const togglePinBtn = el('button', 'pc-comment-toggle');
-    togglePinBtn.id = 'pc-toggle-pins';
-    togglePinBtn.title = '隱藏留言 pin';
-    togglePinBtn.style.padding = '6px 8px';
-    togglePinBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
-    togglePinBtn.onclick = togglePinsVisible;
-    bar.appendChild(togglePinBtn);
+    const toggleAnnotationBtn = el('button', 'pc-comment-toggle');
+    toggleAnnotationBtn.id = 'pc-toggle-annotations';
+    toggleAnnotationBtn.title = '隱藏標註';
+    toggleAnnotationBtn.style.padding = '6px 8px';
+    toggleAnnotationBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+    toggleAnnotationBtn.onclick = toggleAnnotationsVisible;
+    bar.appendChild(toggleAnnotationBtn);
 
     const panelBtn = el('button', 'pc-sign-in-btn');
     panelBtn.id = 'pc-panel-btn';
@@ -1126,27 +1167,35 @@ export async function initPrototypeComments(opts = {}) {
         <div class="pc-help-body">
           <div class="pc-help-section">
             <div class="pc-help-title">🔑 登入</div>
-            <div class="pc-help-desc">點選「Sign in with Google」登入後，即可使用所有留言功能。</div>
+            <div class="pc-help-desc">點「Sign in with Google」用 Google 帳號登入後即可留言；未登入則只能瀏覽。</div>
           </div>
           <div class="pc-help-section">
-            <div class="pc-help-title">📌 新增 Pin 留言</div>
-            <div class="pc-help-desc">點選「💬 留言模式」後，在畫面任意位置點一下放置 Pin，輸入留言後送出。</div>
+            <div class="pc-help-title">📌 新增標註</div>
+            <div class="pc-help-desc">點選「💬 留言模式」後，在畫面任意位置點一下放置標註，輸入留言後送出。</div>
           </div>
           <div class="pc-help-section">
-            <div class="pc-help-title">↕️ 移動 Pin</div>
-            <div class="pc-help-desc"><strong>長按 Pin 約 0.5 秒</strong>進入拖曳模式，拖曳至新位置後放開即儲存。按 <kbd>ESC</kbd> 取消。超出畫面的 Pin 會停靠在邊緣，同樣可長按拖曳。</div>
+            <div class="pc-help-title">↕️ 移動標註</div>
+            <div class="pc-help-desc"><strong>長按標註約 0.5 秒</strong>進入拖曳模式，拖曳至新位置後放開即儲存。按 <kbd>ESC</kbd> 取消。超出畫面的標註會停靠在邊緣，同樣可長按拖曳。</div>
           </div>
           <div class="pc-help-section">
             <div class="pc-help-title">💬 查看與回覆</div>
-            <div class="pc-help-desc">點選 Pin 開啟留言串，可在留言串底部直接回覆。</div>
+            <div class="pc-help-desc">點選標註開啟留言串，可在底部直接回覆；輸入 <kbd>@</kbd> 可標記（提及）其他協作者。</div>
           </div>
           <div class="pc-help-section">
-            <div class="pc-help-title">✓ 標記完成</div>
-            <div class="pc-help-desc">留言處理完後點「✓ Resolve」，Pin 變灰色表示已解決。</div>
+            <div class="pc-help-title">👍 表情回應</div>
+            <div class="pc-help-desc">在留言上點 emoji 快速回應，再點一次取消；可看到誰按了。</div>
           </div>
           <div class="pc-help-section">
-            <div class="pc-help-title">👁 隱藏 Pin</div>
-            <div class="pc-help-desc">點選眼睛圖示切換所有 Pin 的顯示狀態。</div>
+            <div class="pc-help-title">✏️ 編輯／刪除</div>
+            <div class="pc-help-desc">自己的留言可「編輯」（會標示「已編輯」）或「刪除」；刪除主留言會一併刪掉整串。</div>
+          </div>
+          <div class="pc-help-section">
+            <div class="pc-help-title">✓ 標記完成／取消</div>
+            <div class="pc-help-desc">留言處理完點「✓ Resolve」，標註與對話框變灰表示已解決；任何同事都能再點「↩ 取消解決」還原。</div>
+          </div>
+          <div class="pc-help-section">
+            <div class="pc-help-title">👁 隱藏標註</div>
+            <div class="pc-help-desc">點選眼睛圖示切換所有標註的顯示狀態。</div>
           </div>
           <div class="pc-help-section">
             <div class="pc-help-title">📋 全部留言</div>
@@ -1174,7 +1223,7 @@ export async function initPrototypeComments(opts = {}) {
     }
   }
 
-  // ── Overlay & Positional Pins ──────────────────────────────────────────────
+  // ── Overlay & Positional Annotations ──────────────────────────────────────────────
   function getDesignTarget() {
     return document.querySelector(designTarget);
   }
@@ -1199,8 +1248,8 @@ export async function initPrototypeComments(opts = {}) {
       const x = parseFloat(((e.clientX - rect.left) / rect.width * 100).toFixed(2));
       const y = parseFloat(((e.clientY - rect.top + scrollTop) / rect.height * 100).toFixed(2));
       closeAllPopovers();
-      pin.current = { x, y };
-      console.log('[pc] overlay click → pin.current set to', pin.current);
+      annotation.current = { x, y };
+      console.log('[pc] overlay click → annotation.current set to', annotation.current);
       showInputPopover(e.clientX, e.clientY, null);
     });
   }
@@ -1211,33 +1260,33 @@ export async function initPrototypeComments(opts = {}) {
     if (overlay) overlay.classList.toggle('active', active);
     const toggle = document.getElementById('pc-comment-toggle');
     if (toggle) toggle.classList.toggle('active', active);
-    if (!active) { pin.current = null; closeAllPopovers(); }
+    if (!active) { annotation.current = null; closeAllPopovers(); }
   }
 
-  // ── Pin Relocation (long-press + drag) ───────────────────────────────────
-  async function finishMovingPin(x, y) {
-    if (!movingPinId) return;
-    const id = movingPinId;
-    movingPinId = null;
-    dragPinEl = null;
+  // ── Annotation Relocation (long-press + drag) ───────────────────────────────────
+  async function finishMovingAnnotation(x, y) {
+    if (!movingAnnotationId) return;
+    const id = movingAnnotationId;
+    movingAnnotationId = null;
+    dragAnnotationEl = null;
     justDragged = true;
     setTimeout(() => { justDragged = false; }, 0);
     document.body.classList.remove('pc-dragging');
-    // Optimistic update: apply x/y locally so any renderPins() calls while
-    // awaiting the Firestore round-trip show the pin at the new position.
+    // Optimistic update: apply x/y locally so any renderAnnotations() calls while
+    // awaiting the Firestore round-trip show the annotation at the new position.
     const idx = comments.findIndex(c => c.id === id);
-    if (idx !== -1) { comments[idx] = { ...comments[idx], x, y }; renderPins(); }
+    if (idx !== -1) { comments[idx] = { ...comments[idx], x, y }; renderAnnotations(); }
     await store.update(id, { x, y });
   }
 
-  function cancelMovingPin() {
-    if (!movingPinId && !isDragging) return;
-    movingPinId = null;
+  function cancelMovingAnnotation() {
+    if (!movingAnnotationId && !isDragging) return;
+    movingAnnotationId = null;
     isDragging = false;
-    dragPinEl = null;
+    dragAnnotationEl = null;
     document.body.classList.remove('pc-dragging');
     removeDragListeners();
-    renderPins();
+    renderAnnotations();
   }
 
   function addDragListeners() {
@@ -1253,8 +1302,8 @@ export async function initPrototypeComments(opts = {}) {
     clearAutoScroll();
   }
 
-  function movePinVisually(clientX, clientY) {
-    if (!dragPinEl) return;
+  function moveAnnotationVisually(clientX, clientY) {
+    if (!dragAnnotationEl) return;
     const overlay = document.getElementById('pc-overlay');
     if (!overlay) return;
     const rect = overlay.getBoundingClientRect();
@@ -1263,8 +1312,8 @@ export async function initPrototypeComments(opts = {}) {
     const x = (clientX - rect.left) / rect.width * 100;
     const y = (clientY - rect.top + scrollTop) / overlayH * 100;
     const visualY = y - (scrollTop / overlayH * 100);
-    dragPinEl.style.left = `${x}%`;
-    dragPinEl.style.top  = `${visualY}%`;
+    dragAnnotationEl.style.left = `${x}%`;
+    dragAnnotationEl.style.top  = `${visualY}%`;
   }
 
   function checkAutoScroll(clientY) {
@@ -1290,7 +1339,7 @@ export async function initPrototypeComments(opts = {}) {
     autoScrollTimer = setInterval(() => {
       if (!_scrollEl) { clearAutoScroll(); return; }
       _scrollEl.scrollTop += dir * 8;
-      movePinVisually(lastDragX, lastDragY);
+      moveAnnotationVisually(lastDragX, lastDragY);
     }, 16);
   }
 
@@ -1302,14 +1351,14 @@ export async function initPrototypeComments(opts = {}) {
   function onDragMove(e) {
     if (!isDragging) return;
     lastDragX = e.clientX; lastDragY = e.clientY;
-    movePinVisually(e.clientX, e.clientY);
+    moveAnnotationVisually(e.clientX, e.clientY);
     checkAutoScroll(e.clientY);
   }
   function onDragMoveTouch(e) {
     if (!isDragging || !e.touches.length) return;
     e.preventDefault();
     lastDragX = e.touches[0].clientX; lastDragY = e.touches[0].clientY;
-    movePinVisually(e.touches[0].clientX, e.touches[0].clientY);
+    moveAnnotationVisually(e.touches[0].clientX, e.touches[0].clientY);
     checkAutoScroll(e.touches[0].clientY);
   }
 
@@ -1318,7 +1367,7 @@ export async function initPrototypeComments(opts = {}) {
     isDragging = false;
     removeDragListeners();
     const overlay = document.getElementById('pc-overlay');
-    if (!overlay || !movingPinId) { movingPinId = null; dragPinEl = null; document.body.classList.remove('pc-dragging'); return; }
+    if (!overlay || !movingAnnotationId) { movingAnnotationId = null; dragAnnotationEl = null; document.body.classList.remove('pc-dragging'); return; }
     const rect = overlay.getBoundingClientRect();
     const scrollTop = getScrollTop();
     const overlayH = overlay.offsetHeight || 1;
@@ -1326,7 +1375,7 @@ export async function initPrototypeComments(opts = {}) {
     // y is not capped at 100 — when the phone body is scrolled, the stored y can
     // legitimately exceed 100% to represent content positions below the initial fold.
     const y = parseFloat((Math.max(0, (e.clientY - rect.top + scrollTop) / overlayH * 100)).toFixed(2));
-    finishMovingPin(x, y);
+    finishMovingAnnotation(x, y);
   }
 
   function onDragEndTouch(e) {
@@ -1335,13 +1384,13 @@ export async function initPrototypeComments(opts = {}) {
     removeDragListeners();
     const t = e.changedTouches[0];
     const overlay = document.getElementById('pc-overlay');
-    if (!overlay || !movingPinId) { movingPinId = null; dragPinEl = null; document.body.classList.remove('pc-dragging'); return; }
+    if (!overlay || !movingAnnotationId) { movingAnnotationId = null; dragAnnotationEl = null; document.body.classList.remove('pc-dragging'); return; }
     const rect = overlay.getBoundingClientRect();
     const scrollTop = getScrollTop();
     const overlayH = overlay.offsetHeight || 1;
     const x = parseFloat((Math.max(0, Math.min(100, (t.clientX - rect.left) / rect.width * 100))).toFixed(2));
     const y = parseFloat((Math.max(0, (t.clientY - rect.top + scrollTop) / overlayH * 100)).toFixed(2));
-    finishMovingPin(x, y);
+    finishMovingAnnotation(x, y);
   }
 
   // ── Popover (input / thread) ───────────────────────────────────────────────
@@ -1367,7 +1416,7 @@ export async function initPrototypeComments(opts = {}) {
     hdr.appendChild(author);
     const closeBtn = el('button', 'pc-popover-close');
     closeBtn.textContent = '✕';
-    closeBtn.onclick = () => { pin.current = null; closeAllPopovers(); };
+    closeBtn.onclick = () => { annotation.current = null; closeAllPopovers(); };
     hdr.appendChild(closeBtn);
     popEl.appendChild(hdr);
 
@@ -1384,7 +1433,7 @@ export async function initPrototypeComments(opts = {}) {
     const actions = el('div', 'pc-popover-actions');
     const cancelBtn = el('button', 'pc-btn-cancel');
     cancelBtn.textContent = '取消';
-    cancelBtn.onclick = () => { pin.current = null; closeAllPopovers(); };
+    cancelBtn.onclick = () => { annotation.current = null; closeAllPopovers(); };
     const submitBtn = el('button', 'pc-btn-submit', { disabled: '' });
     submitBtn.textContent = '送出';
 
@@ -1400,8 +1449,8 @@ export async function initPrototypeComments(opts = {}) {
       const data = {
         type: 'positional',
         screenId: getScreenId(),
-        x: pin.current ? pin.current.x : null,
-        y: pin.current ? pin.current.y : null,
+        x: annotation.current ? annotation.current.x : null,
+        y: annotation.current ? annotation.current.y : null,
         body,
         authorUid: currentUser.uid,
         authorName: currentUser.displayName || currentUser.email,
@@ -1418,14 +1467,14 @@ export async function initPrototypeComments(opts = {}) {
         }
       }
 
-      console.log('[pc] save x=', data.x, 'y=', data.y, 'screenId=', data.screenId, 'pin=', pin.current);
+      console.log('[pc] save x=', data.x, 'y=', data.y, 'screenId=', data.screenId, 'annotation=', annotation.current);
       try {
         await store.save(data);
         console.log('[pc] save success');
       } catch(e) {
         console.error('[pc] save FAILED:', e.message, e.code);
       }
-      pin.current = null;
+      annotation.current = null;
       closeAllPopovers();
     };
 
@@ -1774,87 +1823,96 @@ export async function initPrototypeComments(opts = {}) {
     popEl.style.top  = `${top}px`;
   }
 
-  // ── Render Pins ───────────────────────────────────────────────────────────
-  function renderPins() {
+  // ── Render Annotations ───────────────────────────────────────────────────────────
+  function renderAnnotations() {
     const overlay = document.getElementById('pc-overlay');
-    if (!overlay) { console.warn('[pc] renderPins: overlay not found'); return; }
+    if (!overlay) { console.warn('[pc] renderAnnotations: overlay not found'); return; }
     refreshScrollEl();
 
-    overlay.querySelectorAll('.pc-pin').forEach(p => p.remove());
+    overlay.querySelectorAll('.pc-annotation').forEach(p => p.remove());
     const screenId = getScreenId();
     const positional = comments.filter(
       c => c.type === 'positional' && c.screenId === screenId && !c.parentId
         && c.x != null && c.y != null
     );
-    console.log('[pc] renderPins screenId=', screenId, 'total comments=', comments.length, 'positional this screen=', positional.length);
+    console.log('[pc] renderAnnotations screenId=', screenId, 'total comments=', comments.length, 'positional this screen=', positional.length);
 
     positional.forEach((c) => {
       const threadCount = 1 + comments.filter(r => r.parentId === c.id).length;
       const scale = Math.min(1 + Math.log2(threadCount) * 0.3, 2.2).toFixed(2);
 
-      const pinEl = el('div', `pc-pin${c.resolved ? ' resolved' : ''}`);
-      pinEl.dataset.commentId = c.id;
+      const annotationEl = el('div', `pc-annotation${c.resolved ? ' resolved' : ''}`);
+      annotationEl.dataset.commentId = c.id;
       const scrollTop = getScrollTop();
       const overlayH  = overlay.offsetHeight || 1;
       const visualY   = c.y - (scrollTop / overlayH * 100);
+      // [ADD 2026-06-16] clipToScrollContainer：annotation 捲出 scrollContainer 可視範圍就整個隱藏（不夾邊緣）。
+      // annotation 的視窗 Y = overlay 頂 + visualY% × overlayH；落在 scrollContainer rect 之外（上方被 header
+      // 蓋住、或下方捲出）就 skip 不畫。找留言改用「全部留言」清單跳回。
+      if (clipToScrollContainer && _scrollEl) {
+        const scRect = _scrollEl.getBoundingClientRect();
+        const oRect  = overlay.getBoundingClientRect();
+        const annotationWinY = oRect.top + (visualY / 100) * overlayH;
+        if (annotationWinY < scRect.top || annotationWinY > scRect.bottom) return; // 出可視區 → 不顯示
+      }
       const safeMin   = 14 / overlayH * 100;
       const safeMax   = 100 - safeMin;
-      const isEdge    = visualY < 0 || visualY > 100;
-      const pinVisualY = isEdge ? Math.max(safeMin, Math.min(safeMax, visualY)) : visualY;
-      if (isEdge) pinEl.classList.add('pc-pin-edge', visualY < 0 ? 'pc-pin-edge-top' : 'pc-pin-edge-bottom');
-      pinEl.style.left = `${c.x}%`;
-      pinEl.style.top  = `${pinVisualY}%`;
-      pinEl.style.setProperty('--pc-pin-scale', scale);
-      const label = el('span', 'pc-pin-label');
-      // 方案 C 對話泡：icon 放固定寬度框 → 💬(未解決)/✓(已解決) 同寬，兩種 pin 尺寸一致
-      label.innerHTML = '<span class="pc-pin-ic">' + (c.resolved ? '✓' : '💬') + '</span>' + threadCount;
-      pinEl.appendChild(label);
+      const isEdge    = !clipToScrollContainer && (visualY < 0 || visualY > 100);
+      const annotationVisualY = isEdge ? Math.max(safeMin, Math.min(safeMax, visualY)) : visualY;
+      if (isEdge) annotationEl.classList.add('pc-annotation-edge', visualY < 0 ? 'pc-annotation-edge-top' : 'pc-annotation-edge-bottom');
+      annotationEl.style.left = `${c.x}%`;
+      annotationEl.style.top  = `${annotationVisualY}%`;
+      annotationEl.style.setProperty('--pc-annotation-scale', scale);
+      const label = el('span', 'pc-annotation-label');
+      // 方案 C 對話泡：icon 放固定寬度框 → 💬(未解決)/✓(已解決) 同寬，兩種 annotation 尺寸一致
+      label.innerHTML = '<span class="pc-annotation-ic">' + (c.resolved ? '✓' : '💬') + '</span>' + threadCount;
+      annotationEl.appendChild(label);
 
-      pinEl.addEventListener('click', e => {
+      annotationEl.addEventListener('click', e => {
         e.stopPropagation();
         if (justDragged) return;
         if (pop.id === c.id) { closeAllPopovers(); return; }
         showThreadPopover(e.clientX, e.clientY, c.id);
       });
 
-      // Long-press (500 ms) to enter drag mode — own unresolved pins only.
-      // 用 Pointer Events + setPointerCapture：游標脫離 pin（hover 放大造成）也抓得住，
+      // Long-press (500 ms) to enter drag mode — own unresolved annotations only.
+      // 用 Pointer Events + setPointerCapture：游標脫離 annotation（hover 放大造成）也抓得住，
       // 不再因 mouseleave 取消長按。press 期間加 .pressing 停用 hover 放大穩住游標。
       if (currentUser && c.authorUid === currentUser.uid && !c.resolved) {
         let pressTimer = null;
         const startPress = () => {
-          pinEl.classList.add('pressing');
+          annotationEl.classList.add('pressing');
           pressTimer = setTimeout(() => {
             pressTimer = null;
-            movingPinId = c.id;
+            movingAnnotationId = c.id;
             isDragging = true;
-            dragPinEl = pinEl;
+            dragAnnotationEl = annotationEl;
             closeAllPopovers();
-            pinEl.classList.remove('pressing');
-            pinEl.classList.add('moving');
+            annotationEl.classList.remove('pressing');
+            annotationEl.classList.add('moving');
             document.body.classList.add('pc-dragging');
             addDragListeners();
           }, 500);
         };
         const cancelPress = () => {
           if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-          pinEl.classList.remove('pressing');
+          annotationEl.classList.remove('pressing');
         };
-        pinEl.addEventListener('pointerdown', e => {
+        annotationEl.addEventListener('pointerdown', e => {
           if (e.button != null && e.button > 0) return;   // 僅主鍵 / 觸控
           e.preventDefault();
-          try { pinEl.setPointerCapture(e.pointerId); } catch (_) {}
+          try { annotationEl.setPointerCapture(e.pointerId); } catch (_) {}
           startPress();
         });
-        pinEl.addEventListener('pointerup', cancelPress);
-        pinEl.addEventListener('pointercancel', cancelPress);
+        annotationEl.addEventListener('pointerup', cancelPress);
+        annotationEl.addEventListener('pointercancel', cancelPress);
         // press 階段（尚未進 drag）明顯移動 → 視為滑動，取消長按
-        pinEl.addEventListener('pointermove', e => {
+        annotationEl.addEventListener('pointermove', e => {
           if (pressTimer && (Math.abs(e.movementX) > 4 || Math.abs(e.movementY) > 4)) cancelPress();
         });
       }
 
-      overlay.appendChild(pinEl);
+      overlay.appendChild(annotationEl);
     });
   }
 
@@ -1862,7 +1920,8 @@ export async function initPrototypeComments(opts = {}) {
     closeAllPopovers();
     pop.id = commentId;
 
-    const popEl = el('div', 'pc-popover');
+    const rootC = comments.find(c => c.id === commentId);
+    const popEl = el('div', 'pc-popover' + (rootC?.resolved ? ' resolved' : ''));
     pop.el = popEl;
 
     const closeBtn = el('button', 'pc-popover-close');
@@ -1960,7 +2019,7 @@ export async function initPrototypeComments(opts = {}) {
         ];
       }
 
-      renderPins();
+      renderAnnotations();
       noteModule.refresh({ updateThreads: true });
 
       if (pop.id && pop.el) {
@@ -2101,8 +2160,9 @@ export async function initPrototypeComments(opts = {}) {
     // Tag filter chips (clickable) + sort button — kept visually separate from status tabs
     const toolbar = el('div', 'pc-panel-toolbar');
     const chipsWrap = el('div', 'pc-panel-tagchips');
-    // Type filter: 設計留言 (positional pins) vs 工程留言 (notes)
-    [['all', '全部項目'], ['design', '🎨 設計'], ['eng', '🔧 工程']].forEach(([t, label]) => {
+    // Type filter: 標註 (positional annotations) vs 規格 (note comments)。tag 名稱按「留言貼在哪」命名，
+    //   不綁「誰留的」——positional annotation=畫面上隨手標一點(標註)；note=針對規格說明清單某條(規格)。
+    [['all', '全部項目'], ['design', '📍 標註'], ['eng', '📋 規格']].forEach(([t, label]) => {
       const chip = el('button', `pc-panel-tagchip pc-panel-typechip${panel.typeFilter === t ? ' active' : ''}`);
       chip.textContent = label;
       chip.onclick = () => { panel.typeFilter = t; renderPanel(); };
@@ -2135,13 +2195,13 @@ export async function initPrototypeComments(opts = {}) {
     if (!list) return;
     list.innerHTML = '';
 
-    const pinNums = {};
+    const annotationNums = {};
     [...allComments]
       .filter(c => !c.parentId && c.type === 'positional')
       .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0))
       .forEach(c => {
-        if (!pinNums[c.screenId]) pinNums[c.screenId] = {};
-        pinNums[c.screenId][c.id] = Object.keys(pinNums[c.screenId]).length + 1;
+        if (!annotationNums[c.screenId]) annotationNums[c.screenId] = {};
+        annotationNums[c.screenId][c.id] = Object.keys(annotationNums[c.screenId]).length + 1;
       });
 
     const q = (panel.search || '').trim().toLowerCase();
@@ -2174,10 +2234,12 @@ export async function initPrototypeComments(opts = {}) {
       roots.forEach(c => {
         const item = el('div', `pc-panel-item${c.resolved ? ' resolved' : ''}`);
         if (c.type === 'note') {
-          // Note/eng comment → expand its thread inline in the panel (reliable)
+          // Note/eng comment 點擊行為：noteJump=false(截圖版) → inline 展開討論串(reliable)；
+          //   noteJump=true(live overlay) → 跳到該 note（navigateToComment 會發 pc:note-jump 開抽屜）。
           item.onclick = (e) => {
             // 點最外層控制項(.pc-panel-root-ctrl) 或回覆區(.pc-panel-inline-thread) 內 → 不要 toggle 收合
             if (e.target.closest('.pc-panel-inline-thread, .pc-panel-root-ctrl')) return;
+            if (noteJump) { navigateToComment(c); return; }
             panel.expandedNote = panel.expandedNote === c.noteKey ? null : c.noteKey;
             renderPanel();
           };
@@ -2188,10 +2250,10 @@ export async function initPrototypeComments(opts = {}) {
         const topRow = el('div', 'pc-panel-top-row');
         const modeChip = el('span', 'pc-panel-chip');
         if (c.type === 'note') {
-          modeChip.textContent = '🔧 工程';
+          modeChip.textContent = '📋 規格';
           modeChip.style.cssText = 'background:rgba(99,102,241,.12);color:#6366f1;';
         } else {
-          modeChip.textContent = '🎨 設計';
+          modeChip.textContent = '📍 標註';
         }
         topRow.appendChild(modeChip);
         if (c.type === 'note' && c.noteTag) {
@@ -2202,9 +2264,9 @@ export async function initPrototypeComments(opts = {}) {
             const chip = el('span', 'pc-panel-chip'); chip.textContent = c.screenId;
             topRow.appendChild(chip);
           }
-          if (pinNums[c.screenId]?.[c.id]) {
+          if (annotationNums[c.screenId]?.[c.id]) {
             const num = el('span', 'pc-panel-num');
-            num.textContent = `#${pinNums[c.screenId][c.id]}`;
+            num.textContent = `#${annotationNums[c.screenId][c.id]}`;
             topRow.appendChild(num);
           }
         }
@@ -2258,28 +2320,46 @@ export async function initPrototypeComments(opts = {}) {
     await new Promise(r => setTimeout(r, onOtherScreen ? 150 : 0));
 
     if (comment.type === 'note' && comment.noteKey) {
-      for (const row of document.querySelectorAll('[data-pc-injected]')) {
-        if (noteKey(row.dataset.pcTag || '', row.dataset.pcText || '') === comment.noteKey) {
+      // [ADD 2026-06-16] live overlay：note 在 React 抽屜（keepMounted 但視覺關閉）。發事件讓
+      //   consumer 開抽屜，pc.js 再捲到對應 row 並開討論串。截圖版用不到 noteJump（走 inline 展開），
+      //   此分支不會被觸發，故只在 noteJump 時 dispatch。
+      if (noteJump) {
+        document.dispatchEvent(new CustomEvent('pc:note-jump', { detail: {
+          screenId: comment.screenId, noteKey: comment.noteKey,
+          noteTag: comment.noteTag, noteText: comment.noteText,
+        } }));
+      }
+      // 找對應 .eng-note-row。開抽屜 + screen-change 重新注入(💬 按鈕)有時序，按鈕未必馬上在 →
+      // 輪詢（最多 ~660ms）等 row 帶 .pc-note-comment-btn 後再捲動 + 開討論串。
+      const findRow = () => {
+        for (const row of document.querySelectorAll('[data-pc-injected]')) {
+          if (noteKey(row.dataset.pcTag || '', row.dataset.pcText || '') === comment.noteKey) return row;
+        }
+        return null;
+      };
+      for (let i = 0; i < 11; i++) {
+        const row = findRow();
+        if (row && row.querySelector('.pc-note-comment-btn')) {
           row.scrollIntoView({ behavior: 'smooth', block: 'center' });
           const thread = row.nextElementSibling;
-          if (thread?.classList.contains('pc-note-thread') && !thread.classList.contains('open')) {
-            row.querySelector('.pc-note-comment-btn')?.click();
-          }
+          const isOpen = thread?.classList.contains('pc-note-thread') && thread.classList.contains('open');
+          if (!isOpen) row.querySelector('.pc-note-comment-btn')?.click(); // toggle：未開(含尚未建立)就開
           return;
         }
+        await new Promise(r => setTimeout(r, 60));
       }
       return;
     }
 
     const overlay = document.getElementById('pc-overlay');
     if (overlay && comment.x != null) {
-      // B6: 高亮該 pin 讓留言「跳出來」（同頁無換頁動畫時的視覺回饋）
-      const pinEl = overlay.querySelector(`.pc-pin[data-comment-id="${comment.id}"]`);
-      if (pinEl) {
-        pinEl.classList.remove('pc-pin-flash');
-        void pinEl.offsetWidth;            // reflow → 重新觸發 animation
-        pinEl.classList.add('pc-pin-flash');
-        setTimeout(() => pinEl.classList.remove('pc-pin-flash'), 1300);
+      // B6: 高亮該 annotation 讓留言「跳出來」（同頁無換頁動畫時的視覺回饋）
+      const annotationEl = overlay.querySelector(`.pc-annotation[data-comment-id="${comment.id}"]`);
+      if (annotationEl) {
+        annotationEl.classList.remove('pc-annotation-flash');
+        void annotationEl.offsetWidth;            // reflow → 重新觸發 animation
+        annotationEl.classList.add('pc-annotation-flash');
+        setTimeout(() => annotationEl.classList.remove('pc-annotation-flash'), 1300);
       }
       const rect = overlay.getBoundingClientRect();
       const cx = rect.left + (comment.x / 100) * rect.width;
@@ -2308,7 +2388,7 @@ export async function initPrototypeComments(opts = {}) {
     closeAllPopovers();
     setTimeout(() => {
       mountOverlay();
-      renderPins();
+      renderAnnotations();
       noteModule.injectAll();
     }, 30);
     subscribe();
@@ -2336,7 +2416,7 @@ export async function initPrototypeComments(opts = {}) {
       comments    = [];
       allComments = [];
       closePanel();
-      renderPins();
+      renderAnnotations();
     }
   });
 
@@ -2350,13 +2430,13 @@ export async function initPrototypeComments(opts = {}) {
 
   document.addEventListener('click', e => {
     if (pop.el && !pop.el.contains(e.target)) {
-      const isPin = e.target.closest('.pc-pin');
-      if (!isPin) { pin.current = null; closeAllPopovers(); }
+      const isAnnotation = e.target.closest('.pc-annotation');
+      if (!isAnnotation) { annotation.current = null; closeAllPopovers(); }
     }
   });
 
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && (movingPinId || isDragging)) cancelMovingPin();
+    if (e.key === 'Escape' && (movingAnnotationId || isDragging)) cancelMovingAnnotation();
   });
 
   return {

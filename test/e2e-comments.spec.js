@@ -8,8 +8,8 @@
  *   1. Module loads without JS errors
  *   2. Auth bar (sign-in button) is injected into the page
  *   3. Comment overlay is mounted inside #phone
- *   4. After simulating auth, clicking overlay sets pendingPin with correct coords
- *   5. Pins rendered from Firestore appear at correct % positions
+ *   4. After simulating auth, clicking overlay sets pendingAnnotation with correct coords
+ *   5. Annotations rendered from Firestore appear at correct % positions
  */
 
 import { chromium } from 'playwright';
@@ -101,25 +101,25 @@ await test('pc-overlay is mounted inside #phone (designTarget)', async () => {
   });
 });
 
-// ── Test 4: pendingPin coordinate math (no auth required) ────────────────────
+// ── Test 4: pendingAnnotation coordinate math (no auth required) ────────────────────
 // Inject a minimal auth state bypass so we can test the overlay click flow
-await test('Overlay click sets pendingPin with correct % coords (no real auth)', async () => {
+await test('Overlay click sets pendingAnnotation with correct % coords (no real auth)', async () => {
   // Inject a mock currentUser into the package's closure via a console hack:
   // We expose window.__pcTest hook by patching initPrototypeComments result
   await page.evaluate(() => {
     // Simulate comment mode active: set the overlay to active and expose a
-    // way to read pendingPin via window.__pcPendingPin
+    // way to read pendingAnnotation via window.__pcPendingAnnotation
     const overlay = document.getElementById('pc-overlay');
     if (!overlay) throw new Error('overlay not found');
 
     // Temporarily patch: listen to console.log for [pc] overlay click line
     const origLog = console.log.bind(console);
-    window.__pcPinLogs = [];
+    window.__pcAnnotationLogs = [];
     console.log = (...args) => {
       origLog(...args);
       const msg = args.join(' ');
-      if (msg.includes('[pc] overlay click') || msg.includes('pendingPin set to')) {
-        window.__pcPinLogs.push(msg);
+      if (msg.includes('[pc] overlay click') || msg.includes('pendingAnnotation set to')) {
+        window.__pcAnnotationLogs.push(msg);
       }
     };
   });
@@ -140,48 +140,48 @@ await test('Overlay click sets pendingPin with correct % coords (no real auth)',
     const x = parseFloat(((clientX - rect.left) / rect.width  * 100).toFixed(2));
     const y = parseFloat(((clientY - rect.top)  / rect.height * 100).toFixed(2));
 
-    // Pin rendered back to viewport coords should equal click coords
-    const pinVpX = rect.left + (x / 100) * rect.width;
-    const pinVpY = rect.top  + (y / 100) * rect.height;
+    // Annotation rendered back to viewport coords should equal click coords
+    const annotationVpX = rect.left + (x / 100) * rect.width;
+    const annotationVpY = rect.top  + (y / 100) * rect.height;
 
-    return { x, y, clientX, clientY, pinVpX, pinVpY,
-             deltaX: Math.abs(pinVpX - clientX),
-             deltaY: Math.abs(pinVpY - clientY) };
+    return { x, y, clientX, clientY, annotationVpX, annotationVpY,
+             deltaX: Math.abs(annotationVpX - clientX),
+             deltaY: Math.abs(annotationVpY - clientY) };
   });
 
   assert.ok(!result.error, result.error);
   assert.ok(Math.abs(result.x - 50) < 0.1, `x should be ~50%, got ${result.x}`);
   assert.ok(Math.abs(result.y - 50) < 0.1, `y should be ~50%, got ${result.y}`);
-  assert.ok(result.deltaX < 1, `pin x off by ${result.deltaX}px`);
-  assert.ok(result.deltaY < 1, `pin y off by ${result.deltaY}px`);
+  assert.ok(result.deltaX < 1, `annotation x off by ${result.deltaX}px`);
+  assert.ok(result.deltaY < 1, `annotation y off by ${result.deltaY}px`);
 });
 
-// ── Test 5: closeAllPopovers does NOT clear pendingPin ────────────────────────
-await test('closeAllPopovers() does NOT clear pendingPin (root bug fix verification)', async () => {
+// ── Test 5: closeAllPopovers does NOT clear pendingAnnotation ────────────────────────
+await test('closeAllPopovers() does NOT clear pendingAnnotation (root bug fix verification)', async () => {
   const result = await page.evaluate(() => {
     // Re-implement the relevant logic to verify the fix
     // (same logic as what runs in the module)
-    let pendingPin = null;
+    let pendingAnnotation = null;
 
     function closeAllPopovers_fixed() {
-      // Fixed version: does NOT reset pendingPin
+      // Fixed version: does NOT reset pendingAnnotation
       // (mirrors the fix we applied to index.js)
     }
 
     // Simulate overlay click flow
     const coords = { x: 42.5, y: 67.3 };
     closeAllPopovers_fixed();
-    pendingPin = coords;  // set after close
+    pendingAnnotation = coords;  // set after close
 
     // Simulate showInputPopover calling closeAllPopovers again
-    closeAllPopovers_fixed();  // should NOT wipe pendingPin
+    closeAllPopovers_fixed();  // should NOT wipe pendingAnnotation
 
-    return { pendingPin };
+    return { pendingAnnotation };
   });
 
-  assert.ok(result.pendingPin !== null, 'pendingPin should survive closeAllPopovers');
-  assert.strictEqual(result.pendingPin.x, 42.5, `x should be 42.5, got ${result.pendingPin?.x}`);
-  assert.strictEqual(result.pendingPin.y, 67.3, `y should be 67.3, got ${result.pendingPin?.y}`);
+  assert.ok(result.pendingAnnotation !== null, 'pendingAnnotation should survive closeAllPopovers');
+  assert.strictEqual(result.pendingAnnotation.x, 42.5, `x should be 42.5, got ${result.pendingAnnotation?.x}`);
+  assert.strictEqual(result.pendingAnnotation.y, 67.3, `y should be 67.3, got ${result.pendingAnnotation?.y}`);
 });
 
 // ── Test 6: Sign-in button is clickable (touch target ≥ 44px) ────────────────
@@ -390,18 +390,18 @@ await test('index.js: pc:screen-change resets commentMode to false', async () =>
     'setCommentMode(false) not called in pc:screen-change handler — commentMode persists across mode switches');
 });
 
-// ── Test 18: Pin label uses threadCount + CSS scale — source check ────────────
-await test('index.js + styles.js: pin label shows thread count, scales by Math.log2', async () => {
+// ── Test 18: Annotation label uses threadCount + CSS scale — source check ────────────
+await test('index.js + styles.js: annotation label shows thread count, scales by Math.log2', async () => {
   const indexSrc  = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
   const stylesSrc = readFileSync(join(__dirname, '../src/styles.js'), 'utf8');
   assert.ok(indexSrc.includes('threadCount'),
-    'threadCount variable not found — pin still shows sequential number');
+    'threadCount variable not found — annotation still shows sequential number');
   assert.ok(indexSrc.includes('Math.log2(threadCount)'),
-    'Math.log2(threadCount) not found — pin does not scale by comment count');
-  assert.ok(indexSrc.includes('--pc-pin-scale'),
-    '--pc-pin-scale custom property not set — CSS scale not applied');
-  assert.ok(stylesSrc.includes('var(--pc-pin-scale'),
-    'styles.js missing var(--pc-pin-scale) — CSS custom property not consumed');
+    'Math.log2(threadCount) not found — annotation does not scale by comment count');
+  assert.ok(indexSrc.includes('--pc-annotation-scale'),
+    '--pc-annotation-scale custom property not set — CSS scale not applied');
+  assert.ok(stylesSrc.includes('var(--pc-annotation-scale'),
+    'styles.js missing var(--pc-annotation-scale) — CSS custom property not consumed');
 });
 
 // ── Test 19: scrollContainer option — source check ───────────────────────────
@@ -413,9 +413,9 @@ await test('index.js: scrollContainer option adjusts y coord with scrollTop on c
     'getScrollTop helper not found — scroll offset not read');
   assert.ok(src.includes('refreshScrollEl'),
     'refreshScrollEl not found — scroll listener not lazily re-attached after goto()');
-  // Click y should add scrollTop so pins are stored at content position
+  // Click y should add scrollTop so annotations are stored at content position
   assert.ok(src.includes('rect.top + scrollTop'),
-    'y calculation does not add scrollTop — pins stored at frame coords, not content coords');
+    'y calculation does not add scrollTop — annotations stored at frame coords, not content coords');
 });
 
 // ── Test 20: scrollContainer in tournament-ui-flow.html ──────────────────────
@@ -436,88 +436,88 @@ await test('tournament-ui-flow.html passes scrollContainer: ".body" to initProto
     'scrollContainer not set to .body selector');
 });
 
-// ── Test 21: Pin relocation — drag source check ───────────────────────────────
-await test('index.js: long-press drag relocation implemented (isDragging, addDragListeners, finishMovingPin)', async () => {
+// ── Test 21: Annotation relocation — drag source check ───────────────────────────────
+await test('index.js: long-press drag relocation implemented (isDragging, addDragListeners, finishMovingAnnotation)', async () => {
   const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
   assert.ok(src.includes('isDragging'),
     'isDragging state not found — drag relocation not implemented');
-  assert.ok(src.includes('dragPinEl'),
-    'dragPinEl state not found — dragged pin element not tracked');
+  assert.ok(src.includes('dragAnnotationEl'),
+    'dragAnnotationEl state not found — dragged annotation element not tracked');
   assert.ok(src.includes('justDragged'),
     'justDragged flag not found — post-drag click suppression missing');
   assert.ok(src.includes('addDragListeners'),
     'addDragListeners function not found');
   assert.ok(src.includes('removeDragListeners'),
     'removeDragListeners function not found');
-  assert.ok(src.includes('finishMovingPin'),
-    'finishMovingPin function not found');
-  assert.ok(src.includes('cancelMovingPin'),
-    'cancelMovingPin function not found — ESC cancel not implemented');
-  assert.ok(src.includes('movePinVisually'),
-    'movePinVisually function not found — live drag preview not implemented');
+  assert.ok(src.includes('finishMovingAnnotation'),
+    'finishMovingAnnotation function not found');
+  assert.ok(src.includes('cancelMovingAnnotation'),
+    'cancelMovingAnnotation function not found — ESC cancel not implemented');
+  assert.ok(src.includes('moveAnnotationVisually'),
+    'moveAnnotationVisually function not found — live drag preview not implemented');
   assert.ok(src.includes('onDragEnd'),
     'onDragEnd handler not found');
   assert.ok(src.includes('onDragMove'),
     'onDragMove handler not found');
 });
 
-// ── Test 22: Pin relocation — long-press gating on own pins ───────────────────
-await test('index.js: long-press drag available only on own non-resolved pins', async () => {
+// ── Test 22: Annotation relocation — long-press gating on own annotations ───────────────────
+await test('index.js: long-press drag available only on own non-resolved annotations', async () => {
   const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
   // Long-press logic must check currentUser.uid against c.authorUid
   const pressIdx = src.indexOf('startPress');
-  assert.ok(pressIdx !== -1, 'startPress inner function not found in renderPins');
+  assert.ok(pressIdx !== -1, 'startPress inner function not found in renderAnnotations');
   const pressSection = src.slice(pressIdx - 300, pressIdx + 100);
   assert.ok(pressSection.includes('authorUid') && pressSection.includes('currentUser.uid'),
-    'Long-press missing authorUid === currentUser.uid guard — anyone could drag any pin');
+    'Long-press missing authorUid === currentUser.uid guard — anyone could drag any annotation');
   assert.ok(pressSection.includes('c.resolved'),
-    'Long-press missing !c.resolved guard — resolved pins should not be draggable');
+    'Long-press missing !c.resolved guard — resolved annotations should not be draggable');
   // No "移動" button (old mechanism removed)
-  assert.ok(!src.includes('pc-move-pin-btn'),
-    'Old "移動" button (pc-move-pin-btn) still present — should be removed in favour of long-press drag');
-  assert.ok(!src.includes('startMovingPin'),
-    'startMovingPin still present — should be removed in favour of drag');
+  assert.ok(!src.includes('pc-move-annotation-btn'),
+    'Old "移動" button (pc-move-annotation-btn) still present — should be removed in favour of long-press drag');
+  assert.ok(!src.includes('startMovingAnnotation'),
+    'startMovingAnnotation still present — should be removed in favour of drag');
   // Body dragging cursor class
   assert.ok(src.includes('pc-dragging'),
     'pc-dragging class not applied — global grabbing cursor during drag missing');
 });
 
 // ── Test 23: styles.js — drag CSS ─────────────────────────────────────────────
-await test('styles.js: .pc-pin.moving animation and body.pc-dragging cursor defined', async () => {
+await test('styles.js: .pc-annotation.moving animation and body.pc-dragging cursor defined', async () => {
   const stylesSrc = readFileSync(join(__dirname, '../src/styles.js'), 'utf8');
-  assert.ok(stylesSrc.includes('.pc-pin.moving'),
-    '.pc-pin.moving CSS rule not found');
-  assert.ok(stylesSrc.includes('pc-pin-pulse'),
-    'pc-pin-pulse keyframe animation not found');
+  assert.ok(stylesSrc.includes('.pc-annotation.moving'),
+    '.pc-annotation.moving CSS rule not found');
+  assert.ok(stylesSrc.includes('pc-annotation-pulse'),
+    'pc-annotation-pulse keyframe animation not found');
   assert.ok(stylesSrc.includes('pc-dragging'),
     'body.pc-dragging cursor CSS not found');
   assert.ok(stylesSrc.includes('grabbing'),
     'cursor: grabbing not defined for drag state');
 });
 
-// ── Test 24: renderPins sets data-comment-id on live page ────────────────────
-await test('Live page: rendered pc-pin elements have data-comment-id attribute', async () => {
-  // Switch back to design mode to see pins
+// ── Test 24: renderAnnotations sets data-comment-id on live page ────────────────────
+await test('Live page: rendered pc-annotation elements have data-comment-id attribute', async () => {
+  // Switch back to design mode to see annotations
   await page.evaluate(() => { if (typeof switchMode === 'function') switchMode('design'); });
   await page.evaluate(() => window.goto?.('m3'));
   await page.waitForTimeout(2000);
 
   await page.waitForFunction(() =>
-    document.querySelectorAll('.pc-pin').length > 0, { timeout: 8000 }
+    document.querySelectorAll('.pc-annotation').length > 0, { timeout: 8000 }
   ).catch(() => null);
 
   const result = await page.evaluate(() => {
-    const pins = [...document.querySelectorAll('.pc-pin')];
-    if (pins.length === 0) return { count: 0, hasIds: true }; // no pins on this screen — ok
-    const allHaveId = pins.every(p => !!p.dataset.commentId);
-    return { count: pins.length, hasIds: allHaveId, sample: pins[0]?.dataset.commentId };
+    const annotations = [...document.querySelectorAll('.pc-annotation')];
+    if (annotations.length === 0) return { count: 0, hasIds: true }; // no annotations on this screen — ok
+    const allHaveId = annotations.every(p => !!p.dataset.commentId);
+    return { count: annotations.length, hasIds: allHaveId, sample: annotations[0]?.dataset.commentId };
   });
   assert.ok(result.hasIds,
-    `${result.count} pins found but some missing data-comment-id`);
+    `${result.count} annotations found but some missing data-comment-id`);
 });
 
-// ── Test 25: scroll tracking — pins follow body scroll on live page ────────────
-await test('Live page: pin viewport position shifts by ~bodyScrollTop after body scroll', async () => {
+// ── Test 25: scroll tracking — annotations follow body scroll on live page ────────────
+await test('Live page: annotation viewport position shifts by ~bodyScrollTop after body scroll', async () => {
   await page.evaluate(() => window.goto?.('m3'));
   await page.waitForTimeout(2000);
 
@@ -529,13 +529,13 @@ await test('Live page: pin viewport position shifts by ~bodyScrollTop after body
   await page.waitForTimeout(300);
 
   const before = await page.evaluate(() => {
-    const pins = [...document.querySelectorAll('.pc-pin')];
+    const annotations = [...document.querySelectorAll('.pc-annotation')];
     const body = document.querySelector('.body');
-    return { scrollable: body && body.scrollHeight > body.clientHeight, pins: pins.map(p => ({ top: Math.round(p.getBoundingClientRect().top) })) };
+    return { scrollable: body && body.scrollHeight > body.clientHeight, annotations: annotations.map(p => ({ top: Math.round(p.getBoundingClientRect().top) })) };
   });
 
-  if (!before.scrollable || before.pins.length === 0) {
-    console.log('    (skip — no scrollable body or no pins on this screen)');
+  if (!before.scrollable || before.annotations.length === 0) {
+    console.log('    (skip — no scrollable body or no annotations on this screen)');
     passed++;
     return;
   }
@@ -545,33 +545,33 @@ await test('Live page: pin viewport position shifts by ~bodyScrollTop after body
   await page.waitForTimeout(300);
 
   const after = await page.evaluate(() => {
-    const pins = [...document.querySelectorAll('.pc-pin')];
+    const annotations = [...document.querySelectorAll('.pc-annotation')];
     const body = document.querySelector('.body');
-    return { scrollTop: body?.scrollTop, pins: pins.map(p => ({ top: Math.round(p.getBoundingClientRect().top) })) };
+    return { scrollTop: body?.scrollTop, annotations: annotations.map(p => ({ top: Math.round(p.getBoundingClientRect().top) })) };
   });
 
   const expectedShift = scrollAmt;
-  const actualShift = before.pins[0].top - after.pins[0].top;
+  const actualShift = before.annotations[0].top - after.annotations[0].top;
   // Allow ±10px tolerance
   assert.ok(Math.abs(actualShift - expectedShift) <= 10,
-    `Pin 1 shifted ${actualShift}px expected ~${expectedShift}px — scroll tracking not working`);
+    `Annotation 1 shifted ${actualShift}px expected ~${expectedShift}px — scroll tracking not working`);
 });
 
-// ── Test 26: edge-dock pins — source check ────────────────────────────────────
-await test('index.js: off-screen pins clamped to overlay edge (pc-pin-edge-top / bottom)', async () => {
+// ── Test 26: edge-dock annotations — source check ────────────────────────────────────
+await test('index.js: off-screen annotations clamped to overlay edge (pc-annotation-edge-top / bottom)', async () => {
   const src = readFileSync(join(__dirname, '../src/index.js'), 'utf8');
-  assert.ok(src.includes('pc-pin-edge-top') && src.includes('pc-pin-edge-bottom'),
-    'Edge-dock classes (pc-pin-edge-top / pc-pin-edge-bottom) not found');
+  assert.ok(src.includes('pc-annotation-edge-top') && src.includes('pc-annotation-edge-bottom'),
+    'Edge-dock classes (pc-annotation-edge-top / pc-annotation-edge-bottom) not found');
   assert.ok(src.includes('safeMin') && src.includes('safeMax'),
-    'safeMin/safeMax clamping logic not found — off-screen pins may be unclickable');
+    'safeMin/safeMax clamping logic not found — off-screen annotations may be unclickable');
   assert.ok(src.includes('isEdge'),
     'isEdge detection not found');
 });
 
 // ── Test 27: edge-dock CSS — styles check ─────────────────────────────────────
-await test('styles.js: edge-dock pin CSS defined (arrow indicators)', async () => {
+await test('styles.js: edge-dock annotation CSS defined (arrow indicators)', async () => {
   const stylesSrc = readFileSync(join(__dirname, '../src/styles.js'), 'utf8');
-  assert.ok(stylesSrc.includes('pc-pin-edge-top') && stylesSrc.includes('pc-pin-edge-bottom'),
+  assert.ok(stylesSrc.includes('pc-annotation-edge-top') && stylesSrc.includes('pc-annotation-edge-bottom'),
     'Edge-dock CSS not found in styles.js');
   assert.ok(stylesSrc.includes('border-bottom') || stylesSrc.includes('border-top'),
     'Arrow triangle CSS not found for edge-dock indicators');
@@ -589,7 +589,7 @@ await test('index.js: autoscroll during drag implemented (checkAutoScroll, setAu
   assert.ok(src.includes('autoScrollTimer'),
     'autoScrollTimer state not found');
   assert.ok(src.includes('lastDragX') && src.includes('lastDragY'),
-    'lastDragX/Y not tracked — pin position during autoscroll will not update');
+    'lastDragX/Y not tracked — annotation position during autoscroll will not update');
   // clearAutoScroll must be called in removeDragListeners
   const removeIdx = src.indexOf('function removeDragListeners');
   const removeBody = src.slice(removeIdx, removeIdx + 300);

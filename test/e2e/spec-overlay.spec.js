@@ -36,8 +36,8 @@ const SPEC = {
   desc: '測試用 spec',
   devNotes: [
     { tag: '新增', text: '有聚焦目標的 note', focus: 'input[name="reminder[0].overdueAfter"]' },
-    { tag: '修改', text: '沒有聚焦目標的 note' },
-    { tag: '注意事項', text: '第三則' },
+    { tag: '修改', text: '沒有聚焦目標的 note', spacing: '上下 12px · 左右 16px' },
+    { tag: '注意事項', text: '第三則', spacing: { margin: '8px', padding: '↕4px ↔8px', gap: '12px' } },
   ],
 };
 
@@ -60,7 +60,7 @@ const SPEC = {
         getPath: () => '/test',
         subscribe: () => () => {},
         navigateTo: () => {},
-        firebaseConfig: {}, _firebase: fb,
+        firebaseConfig: {}, projectId: 'test-spec-overlay', _firebase: fb,
       });
     }, { user: USER, spec: SPEC });
     await page.waitForSelector('.spec-fab', { timeout: 4000 });
@@ -87,6 +87,18 @@ const SPEC = {
     assert(r.texts, '每 row 應有 data-text');
     assert(r.focusBtns === 1, `只有 1 則有 focus，實際 ${r.focusBtns}`);
     assert(r.title === '測試 Protocol', `title 不符: ${r.title}`);
+  });
+
+  await test('元件間距：自動量測（focus）＋手動 spacing（字串／物件）渲染為 .spec-note-spacing', async () => {
+    const sp = await page.evaluate(() =>
+      [...document.querySelectorAll('.spec-note-spacing')].map(x => x.textContent));
+    console.log('     spacing rows:', JSON.stringify(sp));
+    // 3 則：focus note 自動量測 DOM + 字串手動 + 物件手動
+    assert(sp.length === 3, `應有 3 則 spacing（1 自動量測 + 2 手動），實際 ${sp.length}`);
+    assert(sp.some(t => t.includes('上下 12px') && t.includes('左右 16px')), '字串 spacing 應原樣顯示');
+    assert(sp.some(t => t.includes('margin') && t.includes('padding') && t.includes('gap')), '物件 spacing 應展開 margin/padding/gap');
+    // 自動量測：focus 的 input 從活 DOM 量到非 0 的 margin/padding（手動 spacing 未提供時才會自動量）
+    assert(sp.filter(t => t.includes('margin')).length >= 2, '應有自動量測 + 物件手動兩則含 margin');
   });
 
   await test('點 🔦 → 目標元件加 .spec-focus-flash', async () => {

@@ -2,7 +2,7 @@
 
 Drop-in Firebase comment overlay for HTML prototypes.
 
-- **設計模式**：在任何 `designTarget` 容器上點擊留下帶編號的 pin（Figma 風格）
+- **設計模式**：在任何 `designTarget` 容器上點擊留下帶編號的標註（annotation，Figma 風格）
 - **工程模式**：在 dev note 行右側留 inline comment
 - 兩種模式的 note 留言**互通**：同一條 note 在設計模式 info panel 和工程模式 eng-note-row 共用同一批留言
 - 以 Firebase Firestore 持久化，Google Auth 辨識作者
@@ -43,10 +43,10 @@ Drop-in Firebase comment overlay for HTML prototypes.
       messagingSenderId: '...',
       appId:             '...',
     },
-    projectId:       'my-prototype',       // Firestore namespace（多個 prototype 共用一個 Firebase 專案時用來隔離）
+    projectId:       'my-prototype',       // 必填：Firestore namespace（一個 prototype 專案 = 一個 projectId，本地 resolve 與線上必須共用同一個 id）
     getScreenId:     () => window.currentScreen,
     getMode:         () => window.currentMode,
-    designTarget:    '#phone',             // positional pin 的容器（需有 position: relative）
+    designTarget:    '#phone',             // positional 標註（annotation）的容器（需有 position: relative）
     engNoteSelector: '.eng-note-row',      // 工程模式 note 行的 CSS selector
   });
 </script>
@@ -88,6 +88,9 @@ function switchMode(mode) {
 <!-- 工程模式 -->
 <div class="eng-note-row" data-tag="API" data-text="此 API 尚未確認">...</div>
 ```
+
+> 📐 **元件間距（spacing）**：規格面板可直接顯示元件間距 — 來自手動標註的 `devNote.spacing`，
+> 或在 live 模式下自動量測真實 DOM（live DOM measurement）得出。免另寫間距規格文字。
 
 **④ 使用 `authBarTarget` 讓 auth bar 整合進 header（推薦）**
 
@@ -136,10 +139,12 @@ make deploy-rules          # = firebase deploy --only firestore:rules
 ```ts
 initPrototypeComments(opts: {
   firebaseConfig:   object;          // Firebase app config（必填）
-  projectId?:       string;          // Firestore namespace，預設 'default'
+  projectId:        string;          // 必填：Firestore namespace（一個 prototype 專案 = 一個 projectId）。
+                                     // 缺少時直接報錯；已移除 'default' fallback —
+                                     // 因為本地 resolve 與線上必須指向同一個 id 才看得到同一批留言。
   getScreenId?:     () => string;    // 當前 screen id，預設 () => 'unknown'
   getMode?:         () => string;    // 'design' | 'eng'，預設 () => 'design'
-  designTarget?:    string;          // CSS selector for pin container，預設 '#phone'
+  designTarget?:    string;          // CSS selector for annotation container，預設 '#phone'
   engNoteSelector?: string;          // CSS selector for eng note rows，預設 '.eng-note-row'
   authBarTarget?:   string;          // CSS selector for flex header to inject auth bar into
                                      // 未設定時 fallback 到 position:fixed;top:12px;right:16px

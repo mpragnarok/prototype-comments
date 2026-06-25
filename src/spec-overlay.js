@@ -18,7 +18,14 @@
  *     // 以下都有預設：scrollContainer/clipToScrollContainer/authBarCorner/noteJump/designTarget/tagStyle
  *   });
  *
- * RouteSpec = { title, desc?, devNotes: [{ tag, text, focus? }] }
+ * RouteSpec = { title, desc?, devNotes: [{ tag, text, focus?, spacing? }] }
+ *
+ * spacing（元件間距）有兩種來源，spec 面板會直接顯示：
+ *   1. 手動：devNote.spacing 給字串（如 '上下 12px · 左右 16px'）或物件
+ *      { margin?, padding?, gap? }（值為任意字串）。
+ *   2. 自動：devNote 有 focus（CSS selector）且沒給手動 spacing 時，從活的 DOM
+ *      用 getComputedStyle 量該元件的 margin/padding/gap 即時顯示。
+ *   手動 spacing 一律優先於自動量測。
  */
 
 import { initPrototypeComments } from './index.js';
@@ -34,7 +41,7 @@ const DEFAULT_TAG_STYLE = {
 };
 
 // click-outside 時這些元素內的點擊不關抽屜（抽屜本身 + FAB + pc.js 互動 UI）
-const KEEP_OPEN_SEL = '.spec-drawer,.spec-fab,.pc-popover,.pc-note-thread,.pc-emoji-picker,.pc-mention-pop,.pc-auth-bar,.pc-pin';
+const KEEP_OPEN_SEL = '.spec-drawer,.spec-fab,.pc-popover,.pc-note-thread,.pc-emoji-picker,.pc-mention-pop,.pc-auth-bar,.pc-annotation';
 
 // 內嵌 MUI 圖示 SVG（vanilla 模組不能 import @mui/icons-material，故直接用其 path）。
 // FAB = StickyNote2Outlined、聚焦 = CenterFocusStrong；fill:currentColor 跟著按鈕文字色。
@@ -82,6 +89,10 @@ const STYLES = `
 .spec-note-focus:hover { color: #0d8f8f; }
 .spec-fab svg, .spec-note-focus svg { display: block; }
 .spec-note-text { color: #334155; font-size: 12px; line-height: 1.6; }
+.spec-note-spacing { margin-top: 7px; color: #0d8f8f; font-size: 11px; line-height: 1.5;
+  background: rgba(15,160,160,.08); border-radius: 4px; padding: 4px 8px;
+  font-variant-numeric: tabular-nums; }
+.spec-note-spacing b { font-weight: 600; color: #0FA0A0; margin-right: 2px; }
 .spec-ft { padding: 8px 16px; border-top: 1px solid #eef2f6; background: #fff; }
 .spec-ft-hint { color: #94a3b8; font-size: 10px; line-height: 1.5; }
 @keyframes specFocusPulse {
@@ -117,6 +128,41 @@ function focusEl(selector) {
   setTimeout(() => target.classList.remove('spec-focus-flash'), 1600);
 }
 
+// 四向值收斂顯示：四邊相同→單值；上下/左右成對→「↕x ↔y」；否則「上/右/下/左」。
+function fmtBox(top, right, bottom, left) {
+  if (top === right && right === bottom && bottom === left) return top;
+  if (top === bottom && right === left) return `↕${top} ↔${right}`;
+  return `${top} ${right} ${bottom} ${left}`;
+}
+
+// 從活的 DOM 量元件間距（getComputedStyle）。回傳 { margin?, padding?, gap? }，全 0 則回 null。
+function measureSpacing(selector) {
+  const t = document.querySelector(selector);
+  if (!t) return null;
+  const cs = getComputedStyle(t);
+  const out = {};
+  const nonZero = (...vals) => vals.some(v => v && v !== '0px');
+  if (nonZero(cs.marginTop, cs.marginRight, cs.marginBottom, cs.marginLeft))
+    out.margin = fmtBox(cs.marginTop, cs.marginRight, cs.marginBottom, cs.marginLeft);
+  if (nonZero(cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft))
+    out.padding = fmtBox(cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft);
+  if (cs.gap && cs.gap !== 'normal' && cs.gap !== '0px') out.gap = cs.gap.replace(/ /g, ' / ');
+  return Object.keys(out).length ? out : null;
+}
+
+// 把 devNote.spacing（手動，優先）或 focus 元件的即時量測，組成顯示用 HTML 片段；沒有則回 null。
+function spacingHTML(note) {
+  let sp = note.spacing;
+  if (sp == null && note.focus) sp = measureSpacing(note.focus);
+  if (!sp) return null;
+  if (typeof sp === 'string') return sp.trim() ? sp : null;
+  const seg = [];
+  if (sp.margin)  seg.push(`<b>margin</b>${sp.margin}`);
+  if (sp.padding) seg.push(`<b>padding</b>${sp.padding}`);
+  if (sp.gap)     seg.push(`<b>gap</b>${sp.gap}`);
+  return seg.length ? seg.join(' · ') : null;
+}
+
 export function initSpecOverlay(opts = {}) {
   const {
     getNotesForPath = () => null,
@@ -124,7 +170,7 @@ export function initSpecOverlay(opts = {}) {
     subscribe = () => () => {},
     navigateTo = null,
     firebaseConfig = null,
-    projectId = 'default',
+    projectId,                  // 必填：傳給 pc.js（每個原型專案一個唯一 id，留言依此分區）
     scrollContainer = '[data-pc-scroll]',
     clipToScrollContainer = true,
     authBarCorner = 'left',
@@ -201,6 +247,12 @@ export function initSpecOverlay(opts = {}) {
     }
     row.appendChild(top);
     row.appendChild(el('div', 'spec-note-text', note.text));
+    const sp = spacingHTML(note);
+    if (sp) {
+      const spRow = el('div', 'spec-note-spacing');
+      spRow.innerHTML = `📐 ${sp}`;
+      row.appendChild(spRow);
+    }
     return row;
   }
 
@@ -231,7 +283,7 @@ export function initSpecOverlay(opts = {}) {
     drawer.appendChild(list);
     const ft = el('div', 'spec-ft');
     ft.appendChild(el('div', 'spec-ft-hint',
-      '🔦 點規格右上角聚焦到畫面 · 💬 每則下方可留言 · 左下角登入 Google 後也可在畫面上釘 pin'));
+      '🔦 點規格右上角聚焦到畫面 · 📐 顯示元件間距 · 💬 每則下方可留言 · 左下角登入 Google 後也可在畫面上加標註'));
     drawer.appendChild(ft);
     drawer.classList.toggle('open', state.open);
   }
@@ -253,7 +305,7 @@ export function initSpecOverlay(opts = {}) {
   initPrototypeComments({
     firebaseConfig, projectId, _firebase,
     getScreenId: () => state.lastPath,
-    getMode: () => 'design', // 依 screenId 訂閱：同時載 pin + note 留言，不需模式切換
+    getMode: () => 'design', // 依 screenId 訂閱：同時載 annotation + note 留言，不需模式切換
     designTarget,
     scrollContainer, clipToScrollContainer, authBarCorner, noteJump,
     navigateTo,

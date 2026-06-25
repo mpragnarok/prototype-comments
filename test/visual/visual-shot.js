@@ -25,7 +25,7 @@ const BASE_DIR = path.join(HERE, 'baselines');
 
 // pixelmatch 每像素差異門檻（0–1，越低越敏感）；整圖允許差異比例（容忍 subpixel 抗鋸齒噪訊）
 const PIXEL_THRESHOLD = 0.1;
-const MAX_DIFF_RATIO = 0.002;   // 0.2% 像素，足以擋住「pin 顏色/形狀變了」這類真退化，又不被 AA 噪訊誤判
+const MAX_DIFF_RATIO = 0.002;   // 0.2% 像素，足以擋住「annotation 顏色/形狀變了」這類真退化，又不被 AA 噪訊誤判
 
 const VIEWPORTS = [
   ['desktop', { width: 1440, height: 900 }],
@@ -61,7 +61,7 @@ function comparePng(basePath, outPath, diffPath) {
   for (const [name, vp] of VIEWPORTS) {
     const page = await browser.newPage({ viewport: vp, deviceScaleFactor: 2 });
     await page.goto(FIXTURE, { waitUntil: 'networkidle' });
-    await page.addStyleTag({ content: STYLES });   // ← 真實 pin/元件 CSS 注入
+    await page.addStyleTag({ content: STYLES });   // ← 真實 annotation/元件 CSS 注入
     // 停用動畫/transition → 消除截圖非確定性（flash 2× .55s、moving pulse 無限循環會讓
     // 每次截到不同 frame，造成大量假 pixel diff）。regression 驗的是靜態樣式，不是動畫中間態。
     await page.addStyleTag({ content: '*,*::before,*::after{animation:none !important;transition:none !important;animation-duration:0s !important;}' });

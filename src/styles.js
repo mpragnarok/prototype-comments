@@ -79,15 +79,15 @@ export const STYLES = `
   /* teal circle + white plus; fallback to crosshair */
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='11' fill='%230FA0A0' opacity='.85'/%3E%3Cpath d='M12 7v10M7 12h10' stroke='%23fff' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E") 12 12, crosshair;
 }
-/* Pins inside overlay are always clickable regardless of overlay state */
-.pc-overlay .pc-pin {
+/* Annotations inside overlay are always clickable regardless of overlay state */
+.pc-overlay .pc-annotation {
   pointer-events: all !important;
   cursor: pointer;
 }
 
-/* Comment Pin — 對話泡 bubble (方案 C)
+/* Comment Annotation — 對話泡 bubble (方案 C)
    rounded-rect 比例（寬>高）+ 左下尾巴 → 單一數字也讀得出 speech bubble；不加白圈 */
-.pc-pin {
+.pc-annotation {
   position: absolute;
   display: flex;
   align-items: center;
@@ -104,12 +104,12 @@ export const STYLES = `
   cursor: pointer;
   z-index: 210;
   box-shadow: 0 2px 6px rgba(0,0,0,.3);
-  transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1));
+  transform: translate(-50%, -50%) scale(var(--pc-annotation-scale, 1));
   transform-origin: center;
   transition: transform .15s, opacity .15s;
   pointer-events: all;
 }
-.pc-pin::before {                        /* 對話泡尾巴，左下角指向錨點 */
+.pc-annotation::before {                        /* 對話泡尾巴，左下角指向錨點 */
   content: '';
   position: absolute;
   bottom: -5px;
@@ -119,25 +119,25 @@ export const STYLES = `
   border-right: 6px solid transparent;
   border-top: 8px solid #BA1A1A;
 }
-.pc-pin:hover { transform: translate(-50%, -50%) scale(calc(var(--pc-pin-scale, 1) * 1.2)); }
-/* 長按計時 / 拖曳中：停用 hover 放大，避免游標脫離 pin 觸發 mouseleave 取消長按 */
-.pc-pin.pressing { transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1)); }
-.pc-pin.moving { transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1)); opacity: .7; cursor: grabbing; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
-.pc-pin.resolved {
+.pc-annotation:hover { transform: translate(-50%, -50%) scale(calc(var(--pc-annotation-scale, 1) * 1.2)); }
+/* 長按計時 / 拖曳中：停用 hover 放大，避免游標脫離 annotation 觸發 mouseleave 取消長按 */
+.pc-annotation.pressing { transform: translate(-50%, -50%) scale(var(--pc-annotation-scale, 1)); }
+.pc-annotation.moving { transform: translate(-50%, -50%) scale(var(--pc-annotation-scale, 1)); opacity: .7; cursor: grabbing; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.pc-annotation.resolved {
   background: #6b7280;                  /* gray-500：白字對比度 ~4.6:1 達 WCAG AA，一眼讀得出 ✓ */
   color: #fff;
   opacity: .80;                          /* 仍保留「已解決=次要、退到背景」語意，但不再糊掉 */
 }
-.pc-pin.resolved::before { border-top-color: #6b7280; }
-.pc-pin.pc-pin-edge::before { display: none; }   /* edge pin 用 ::after 箭頭，不顯示泡泡尾巴 */
-.pc-pin-label { line-height: 1; display: inline-flex; align-items: center; gap: 1px; }
-.pc-pin-ic { flex: 0 0 16px; display: inline-flex; justify-content: center; overflow: hidden; }   /* icon 固定寬框(不縮不漲) → 💬/✓ 同寬，resolved 與未解決 pin 對齊 */
+.pc-annotation.resolved::before { border-top-color: #6b7280; }
+.pc-annotation.pc-annotation-edge::before { display: none; }   /* edge annotation 用 ::after 箭頭，不顯示泡泡尾巴 */
+.pc-annotation-label { line-height: 1; display: inline-flex; align-items: center; gap: 1px; }
+.pc-annotation-ic { flex: 0 0 16px; display: inline-flex; justify-content: center; overflow: hidden; }   /* icon 固定寬框(不縮不漲) → 💬/✓ 同寬，resolved 與未解決 annotation 對齊 */
 
-/* B6: 「全部留言」導向同頁時，pin 閃爍高亮讓留言「跳出來」 */
-.pc-pin.pc-pin-flash { animation: pc-pin-flash .55s ease 2; z-index: 211; }
-@keyframes pc-pin-flash {
-  0%, 100% { transform: translate(-50%, -50%) scale(var(--pc-pin-scale, 1)); box-shadow: 0 2px 6px rgba(0,0,0,.3); }
-  50%      { transform: translate(-50%, -50%) scale(calc(var(--pc-pin-scale, 1) * 1.5)); box-shadow: 0 0 0 4px rgba(186,26,26,.35), 0 2px 8px rgba(0,0,0,.35); }
+/* B6: 「全部留言」導向同頁時，annotation 閃爍高亮讓留言「跳出來」 */
+.pc-annotation.pc-annotation-flash { animation: pc-annotation-flash .55s ease 2; z-index: 211; }
+@keyframes pc-annotation-flash {
+  0%, 100% { transform: translate(-50%, -50%) scale(var(--pc-annotation-scale, 1)); box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+  50%      { transform: translate(-50%, -50%) scale(calc(var(--pc-annotation-scale, 1) * 1.5)); box-shadow: 0 0 0 4px rgba(186,26,26,.35), 0 2px 8px rgba(0,0,0,.35); }
 }
 
 /* Emoji reactions */
@@ -240,7 +240,7 @@ export const STYLES = `
   max-height: calc(100vh - 24px);
   overflow-y: auto;
 }
-/* 已解決留言：整個對話框轉灰，與灰色 pin 語意一致 */
+/* 已解決留言：整個對話框轉灰，與灰色 annotation 語意一致 */
 .pc-popover.resolved { background: #f3f4f6; }
 .pc-popover-header {
   display: flex;
@@ -574,13 +574,13 @@ export const STYLES = `
   color: #9ca3af;
 }
 
-/* Pin visibility toggle */
-.pc-pins-hidden .pc-pin { display: none !important; }
+/* Annotation visibility toggle */
+.pc-annotations-hidden .pc-annotation { display: none !important; }
 
-/* Edge-docked pins (off-screen content) */
-.pc-pin.pc-pin-edge { opacity: .75; }
-.pc-pin.pc-pin-edge-top::after,
-.pc-pin.pc-pin-edge-bottom::after {
+/* Edge-docked annotations (off-screen content) */
+.pc-annotation.pc-annotation-edge { opacity: .75; }
+.pc-annotation.pc-annotation-edge-top::after,
+.pc-annotation.pc-annotation-edge-bottom::after {
   content: '';
   position: absolute;
   left: 50%;
@@ -589,11 +589,11 @@ export const STYLES = `
   border-left: 4px solid transparent;
   border-right: 4px solid transparent;
 }
-.pc-pin.pc-pin-edge-top::after {
+.pc-annotation.pc-annotation-edge-top::after {
   bottom: calc(100% + 2px);
   border-bottom: 5px solid #0FA0A0;
 }
-.pc-pin.pc-pin-edge-bottom::after {
+.pc-annotation.pc-annotation-edge-bottom::after {
   top: calc(100% + 2px);
   border-top: 5px solid #0FA0A0;
 }
@@ -671,13 +671,13 @@ export const STYLES = `
   font-family: monospace;
 }
 
-/* Pin relocation — drag state */
-@keyframes pc-pin-pulse {
+/* Annotation relocation — drag state */
+@keyframes pc-annotation-pulse {
   from { box-shadow: 0 2px 8px rgba(15,160,160,.5), 0 0 0 3px #0FA0A0; }
   to   { box-shadow: 0 2px 8px rgba(15,160,160,.8), 0 0 0 6px rgba(15,160,160,.3); }
 }
-.pc-pin.moving {
-  animation: pc-pin-pulse .6s ease-in-out infinite alternate;
+.pc-annotation.moving {
+  animation: pc-annotation-pulse .6s ease-in-out infinite alternate;
   z-index: 220;
   transition: none !important;
 }

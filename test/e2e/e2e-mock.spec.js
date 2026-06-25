@@ -43,53 +43,74 @@ const seedComment = (over = {}) => ({ type: 'positional', screenId: 's1', x: 50,
 
   console.log('e2e (mock firebase):');
 
-  await test('seeded comment → pin renders with 💬 label', async () => {
+  await test('缺 projectId → 顯示紅色錯誤 badge、不初始化 overlay', async () => {
+    const p2 = await browser.newPage({ viewport: { width: 375, height: 700 } });
+    await p2.goto(`http://localhost:${PORT}/test/e2e/harness.html`);
+    await p2.waitForFunction(() => window.__pcTest && window.__pcTest.ready);
+    await p2.evaluate(() => {
+      const fb = window.__pcTest.createMockFirebase({ user: { uid: 'u1' }, comments: [] });
+      return window.__pcTest.init(fb, { projectId: undefined });
+    });
+    await p2.waitForTimeout(200);
+    const r = await p2.evaluate(() => ({
+      badge: !!document.getElementById('pc-init-error'),
+      badgeText: document.getElementById('pc-init-error')?.textContent || '',
+      overlay: !!document.getElementById('pc-overlay'),
+    }));
+    await p2.close();
+    console.log('     missing-projectId:', JSON.stringify(r));
+    assert(r.badge, '缺 projectId 應顯示 #pc-init-error badge');
+    assert(r.badgeText.includes('projectId'), 'badge 文字應提到 projectId');
+    assert(!r.overlay, '缺 projectId 不應初始化 overlay');
+  });
+
+  await test('seeded comment → annotation renders with 💬 label', async () => {
     await page.evaluate(({ user, comment }) => {
       const fb = window.__pcTest.createMockFirebase({ user, comments: [comment] });
       window.__fb = fb;
       return window.__pcTest.init(fb);
     }, { user: USER, comment: seedComment() });
-    // 模擬消費端畫面載入：觸發 overlay mount + renderPins（mock onSnapshot 已同步餵入資料）
+    // 模擬消費端畫面載入：觸發 overlay mount + renderAnnotations（mock onSnapshot 已同步餵入資料）
     await page.evaluate(() => document.dispatchEvent(new CustomEvent('pc:screen-change', { detail: {} })));
     await page.waitForTimeout(600);
     const diag = await page.evaluate(() => ({
       overlay: !!document.getElementById('pc-overlay'),
-      pins: document.querySelectorAll('.pc-pin').length,
+      annotations: document.querySelectorAll('.pc-annotation').length,
       fbDocs: window.__fb && window.__fb.__docs(),
       phone: !!document.querySelector('#phone'),
     }));
     console.log('     DIAG', JSON.stringify(diag));
-    await page.waitForSelector('.pc-pin', { timeout: 4000 });
-    const label = await page.locator('.pc-pin .pc-pin-label').first().textContent();
-    assert(/💬/.test(label), `expected 💬 in pin label, got "${label}"`);
+    await page.waitForSelector('.pc-annotation', { timeout: 4000 });
+    const label = await page.locator('.pc-annotation .pc-annotation-label').first().textContent();
+    assert(/💬/.test(label), `expected 💬 in annotation label, got "${label}"`);
   });
 
-  await test('resolved pin → 深灰底白字 #6b7280（A7 對比度修正 + #3 跑版重現）', async () => {
+  await test('resolved annotation → 深灰底白字 #6b7280（A7 對比度修正 + #3 跑版重現）', async () => {
     await page.evaluate(() => {
       window.__fb.__seed({ type: 'positional', screenId: 's1', x: 30, y: 30, body: '已完成', authorUid: 'u1', authorName: '設計師 A', resolved: true, parentId: null });
       document.dispatchEvent(new CustomEvent('pc:screen-change', { detail: {} }));
     });
     await page.waitForTimeout(300);
     const info = await page.evaluate(() => {
-      const r = [...document.querySelectorAll('.pc-pin')].find(p => p.classList.contains('resolved'));
+      const r = [...document.querySelectorAll('.pc-annotation')].find(p => p.classList.contains('resolved'));
       if (!r) return { found: false };
       const cs = getComputedStyle(r);
       const tail = getComputedStyle(r, '::before');
       return { found: true, label: r.textContent, bg: cs.backgroundColor, color: cs.color, tailColor: tail.borderTopColor };
     });
-    console.log('     resolved pin:', JSON.stringify(info));
-    assert(info.found, 'resolved pin not rendered');
+    console.log('     resolved annotation:', JSON.stringify(info));
+    assert(info.found, 'resolved annotation not rendered');
     // A7：對比度修正 — 深灰底 #6b7280 + 白字（取代舊 #d1d5db 灰字，對比僅 2.5:1 看不清）。
     // 紅=rgb(186,26,26) 即重現 #3 跑版（resolved 沒套到灰）。
-    assert(info.bg === 'rgb(107, 114, 128)', `resolved pin 泡泡應深灰 #6b7280，實際 ${info.bg}（紅=rgb(186,26,26) 即重現跑版）`);
-    assert(info.color === 'rgb(255, 255, 255)', `resolved pin 文字應白色（對比度達 AA），實際 ${info.color}`);
-    assert(info.tailColor === 'rgb(107, 114, 128)', `resolved pin 尾巴應同深灰 #6b7280，實際 ${info.tailColor}`);
+    assert(info.bg === 'rgb(107, 114, 128)', `resolved annotation 泡泡應深灰 #6b7280，實際 ${info.bg}（紅=rgb(186,26,26) 即重現跑版）`);
+    assert(info.color === 'rgb(255, 255, 255)', `resolved annotation 文字應白色（對比度達 AA），實際 ${info.color}`);
+    assert(info.tailColor === 'rgb(107, 114, 128)', `resolved annotation 尾巴應同深灰 #6b7280，實際 ${info.tailColor}`);
   });
 
-  await test('long-press drag → 自己未解決 pin 位置更新 (#6 drag 收尾)', async () => {
-    const pin = page.locator('.pc-pin:not(.resolved)').first();
-    const box = await pin.boundingBox();
-    assert(box, 'unresolved pin not found');
+  await test('long-press drag → 自己未解決 annotation 位置更新 (#6 drag 收尾)', async () => {
+    const annotation = page.locator('.pc-annotation:not(.resolved)').first();
+    const box = await annotation.boundingBox();
+    assert(box, 'unresolved annotation not found');
     const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
     await page.mouse.move(cx, cy);
     await page.mouse.down();
@@ -99,27 +120,27 @@ const seedComment = (over = {}) => ({ type: 'positional', screenId: 's1', x: 50,
     await page.waitForTimeout(250);
     const c = await page.evaluate(() => window.__fb.__docs().find(d => d.type === 'positional' && !d.parentId && !d.resolved));
     console.log('     dragged pos:', JSON.stringify({ x: c.x, y: c.y }));
-    assert(c.x !== 50 || c.y !== 50, `pin 應已移動（原 x:50,y:50），實際 ${JSON.stringify({ x: c.x, y: c.y })}`);
+    assert(c.x !== 50 || c.y !== 50, `annotation 應已移動（原 x:50,y:50），實際 ${JSON.stringify({ x: c.x, y: c.y })}`);
   });
 
-  await test('resolved pin 與未解決 pin 同寬（對齊，icon 固定寬）', async () => {
+  await test('resolved annotation 與未解決 annotation 同寬（對齊，icon 固定寬）', async () => {
     await page.mouse.move(2, 2);          // 移開游標，避免 :hover scale(1.2) 干擾寬度量測
     await page.waitForTimeout(120);
     const w = await page.evaluate(() => {
-      const un = document.querySelector('.pc-pin:not(.resolved)');
-      const re = document.querySelector('.pc-pin.resolved');
+      const un = document.querySelector('.pc-annotation:not(.resolved)');
+      const re = document.querySelector('.pc-annotation.resolved');
       return { un: un && un.getBoundingClientRect().width, re: re && re.getBoundingClientRect().width };
     });
-    console.log('     pin widths 💬/✓:', JSON.stringify(w));
-    assert(w.un && w.re, 'both pins required');
+    console.log('     annotation widths 💬/✓:', JSON.stringify(w));
+    assert(w.un && w.re, 'both annotations required');
     assert(Math.abs(w.un - w.re) < 2, `resolved 應與未解決同寬，💬=${w.un} ✓=${w.re}`);
   });
 
   await test('回覆 thread popover 送出後 popover 不關閉、回覆即時出現 (#4)', async () => {
     await page.mouse.move(2, 2);                       // 避開 hover
     await page.waitForTimeout(120);
-    const pin = page.locator('.pc-pin:not(.resolved)').first();
-    await pin.click();                                 // 點 pin 開 thread popover
+    const annotation = page.locator('.pc-annotation:not(.resolved)').first();
+    await annotation.click();                                 // 點 annotation 開 thread popover
     await page.waitForSelector('.pc-popover .pc-textarea', { timeout: 3000 });
     await page.fill('.pc-popover .pc-textarea', '我是一則回覆 #4');
     await page.click('.pc-popover .pc-btn-submit');    // 送出回覆
@@ -138,7 +159,7 @@ const seedComment = (over = {}) => ({ type: 'positional', screenId: 's1', x: 50,
   await test('B5 桌機 hover chip → 名單 popover；click → toggle (#5)', async () => {
     const cid = await page.evaluate(() => window.__fb.__seed({ type: 'positional', screenId: 's1', x: 80, y: 15, body: '有反應的留言', authorUid: 'u2', authorName: '設計師 B', resolved: false, parentId: null, reactions: { '👍': [{ uid: 'u2', name: '設計師 B' }] } }));
     await page.waitForTimeout(200);
-    await page.click(`.pc-pin[data-comment-id="${cid}"]`);
+    await page.click(`.pc-annotation[data-comment-id="${cid}"]`);
     await page.waitForSelector('.pc-popover .pc-reaction-chip', { timeout: 3000 });
     await page.hover('.pc-popover .pc-reaction-chip');
     await page.waitForTimeout(150);
@@ -177,7 +198,7 @@ const seedComment = (over = {}) => ({ type: 'positional', screenId: 's1', x: 50,
     }, { user: USER });
     await mp.evaluate(() => document.dispatchEvent(new CustomEvent('pc:screen-change', { detail: {} })));
     await mp.waitForTimeout(400);
-    await mp.click(`.pc-pin[data-comment-id="${cid}"]`);
+    await mp.click(`.pc-annotation[data-comment-id="${cid}"]`);
     await mp.waitForSelector('.pc-popover .pc-reaction-chip', { timeout: 3000 });
     // 長按 ≥400ms → 名單 popover
     await mp.evaluate(() => document.querySelector('.pc-popover .pc-reaction-chip').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));

@@ -47,7 +47,7 @@ CI：GitHub Actions 應在 push / PR 跑 `test:e2e` + 視覺 regression（見 `.
 
 設計規則的**唯一來源（SSOT）**是設計規範文件，不在 doctrine 檔案重複：
 
-- **設計規範**：[`jubo/docs/design/prototype-comments-design-spec.html`](../jubo-line-badminton-check-in-system/docs/design/prototype-comments-design-spec.html) — 色彩系統、pin/overlay token、功能規格、不可變條款（teal 主色、紅只給 pin、bar 浮底、單層回覆、精選 emoji、resolved pin 樣式…）。
+- **設計規範**：[`jubo/docs/design/prototype-comments-design-spec.html`](../jubo-line-badminton-check-in-system/docs/design/prototype-comments-design-spec.html) — 色彩系統、標註（annotation）/overlay token、功能規格、不可變條款（teal 主色、紅只給標註、bar 浮底、單層回覆、精選 emoji、resolved 標註樣式…）。
 - **進度 / 決策**：`docs/2026-05-30-comment-system-and-uiflow-roadmap.md`
 - **各功能規格**：`docs/{date}-{feat|fix}-{slug}.md`
 

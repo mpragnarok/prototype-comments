@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-  render-test.html  —  tests pin rendering WITHOUT Firebase/auth
+  render-test.html  —  tests annotation rendering WITHOUT Firebase/auth
   Opens in browser. Run: open render-test.html
   All tests auto-run; pass/fail shown in the UI.
 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>pin render tests (no Firebase)</title>
+<title>annotation render tests (no Firebase)</title>
 <style>
   body { font: 14px/1.6 monospace; padding: 24px; background:#f9fafb; }
   h2 { font-size:13px; color:#6b7280; margin:20px 0 6px; text-transform:uppercase; letter-spacing:1px; }
@@ -26,7 +26,7 @@
     position: absolute; inset: 0; z-index: 200;
     pointer-events: none;
   }
-  .pc-pin {
+  .pc-annotation {
     position: absolute;
     width: 24px; height: 24px; border-radius: 50%;
     background: #0FA0A0; color: #fff;
@@ -59,11 +59,11 @@
 <div id="unit-results" class="section"></div>
 
 <h2>Visual test — click the blue box</h2>
-<p style="font-size:12px;color:#6b7280;">Red dot = click position • Teal circle = rendered pin. Should overlap exactly.</p>
+<p style="font-size:12px;color:#6b7280;">Red dot = click position • Teal circle = rendered annotation. Should overlap exactly.</p>
 <div id="mock-phone">
   <div id="mock-overlay"></div>
 </div>
-<div id="visual-log">Click anywhere in the blue box to place a pin.</div>
+<div id="visual-log">Click anywhere in the blue box to place a annotation.</div>
 
 <div id="manual-section">
   <strong style="font-size:13px;">📋 Checklist for live site debugging</strong>
@@ -77,7 +77,7 @@
     <li>Type a comment and submit</li>
     <li>Check console: should see <code>[pc] addDoc x=XX y=XX</code></li>
     <li>Check console: should see <code>[pc] snapshot N comments</code></li>
-    <li>Check console: should see <code>[pc] renderPins N pins</code></li>
+    <li>Check console: should see <code>[pc] renderAnnotations N annotations</code></li>
   </ol>
   <p style="font-size:12px;color:#dc2626;margin-top:8px;">If any step is missing from console, that's where the bug is.</p>
 </div>
@@ -138,70 +138,70 @@ it('round-trip: calc → render → same viewport pos', () => {
   const r = { left:100, top:200, width:360, height:480 };
   const clickX = 220, clickY = 350;
   const { x, y } = calcCoords(r, clickX, clickY);
-  // Rendered pin center = overlayLeft + x%*overlayWidth
-  const pinX = r.left + (x/100) * r.width;
-  const pinY = r.top  + (y/100) * r.height;
-  assertClose(pinX, clickX, 0.5, `pinX=${pinX} vs clickX=${clickX}`);
-  assertClose(pinY, clickY, 0.5, `pinY=${pinY} vs clickY=${clickY}`);
+  // Rendered annotation center = overlayLeft + x%*overlayWidth
+  const annotationX = r.left + (x/100) * r.width;
+  const annotationY = r.top  + (y/100) * r.height;
+  assertClose(annotationX, clickX, 0.5, `annotationX=${annotationX} vs clickX=${clickX}`);
+  assertClose(annotationY, clickY, 0.5, `annotationY=${annotationY} vs clickY=${clickY}`);
 });
 
-// ── Bug: pendingPin must survive closeAllPopovers ─────────────────────────────
-it('BUG CONFIRMED: pendingPin is null after buggy closeAllPopovers', () => {
-  let pendingPin = null;
-  pendingPin = { x: 42, y: 67 };
-  // buggy: closeAllPopovers resets pendingPin
-  pendingPin = null; // simulate buggy closeAllPopovers
-  assert(pendingPin === null, 'should be null (bug confirmed)');
+// ── Bug: pendingAnnotation must survive closeAllPopovers ─────────────────────────────
+it('BUG CONFIRMED: pendingAnnotation is null after buggy closeAllPopovers', () => {
+  let pendingAnnotation = null;
+  pendingAnnotation = { x: 42, y: 67 };
+  // buggy: closeAllPopovers resets pendingAnnotation
+  pendingAnnotation = null; // simulate buggy closeAllPopovers
+  assert(pendingAnnotation === null, 'should be null (bug confirmed)');
 });
 
-it('FIX: pendingPin survives fixed flow', () => {
-  let pendingPin = null;
+it('FIX: pendingAnnotation survives fixed flow', () => {
+  let pendingAnnotation = null;
   const coords = { x: 42, y: 67 };
-  pendingPin = null; // closeAllPopovers
-  pendingPin = coords; // fixed: restore after close
-  assert(pendingPin?.x === 42, `x=${pendingPin?.x}`);
-  assert(pendingPin?.y === 67, `y=${pendingPin?.y}`);
+  pendingAnnotation = null; // closeAllPopovers
+  pendingAnnotation = coords; // fixed: restore after close
+  assert(pendingAnnotation?.x === 42, `x=${pendingAnnotation?.x}`);
+  assert(pendingAnnotation?.y === 67, `y=${pendingAnnotation?.y}`);
 });
 
-// ── DOM: pin inside overlay aligns with click ─────────────────────────────────
-it('DOM: pin inside overlay appears at correct position', () => {
+// ── DOM: annotation inside overlay aligns with click ─────────────────────────────────
+it('DOM: annotation inside overlay appears at correct position', () => {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'position:relative;width:360px;height:480px;position:fixed;left:-9999px;top:-9999px;';
   const ov = document.createElement('div');
   ov.style.cssText = 'position:absolute;inset:0;';
-  const pin = document.createElement('div');
-  pin.style.cssText = 'position:absolute;width:24px;height:24px;transform:translate(-50%,-50%);';
-  pin.style.left = '50%';
-  pin.style.top  = '33%';
-  ov.appendChild(pin);
+  const annotation = document.createElement('div');
+  annotation.style.cssText = 'position:absolute;width:24px;height:24px;transform:translate(-50%,-50%);';
+  annotation.style.left = '50%';
+  annotation.style.top  = '33%';
+  ov.appendChild(annotation);
   wrap.appendChild(ov);
   document.body.appendChild(wrap);
 
   const wr = wrap.getBoundingClientRect();
-  const pr = pin.getBoundingClientRect();
-  const pinCx = pr.left + pr.width/2;
-  const pinCy = pr.top  + pr.height/2;
+  const pr = annotation.getBoundingClientRect();
+  const annotationCx = pr.left + pr.width/2;
+  const annotationCy = pr.top  + pr.height/2;
   const expX  = wr.left + wr.width  * 0.50;
   const expY  = wr.top  + wr.height * 0.33;
 
   wrap.remove();
-  assertClose(pinCx, expX, 1, `pinCx=${pinCx.toFixed(1)} expX=${expX.toFixed(1)}`);
-  assertClose(pinCy, expY, 1, `pinCy=${pinCy.toFixed(1)} expY=${expY.toFixed(1)}`);
+  assertClose(annotationCx, expX, 1, `annotationCx=${annotationCx.toFixed(1)} expX=${expX.toFixed(1)}`);
+  assertClose(annotationCy, expY, 1, `annotationCy=${annotationCy.toFixed(1)} expY=${expY.toFixed(1)}`);
 });
 
-it('overflow:hidden on parent does NOT hide pin inside overlay', () => {
+it('overflow:hidden on parent does NOT hide annotation inside overlay', () => {
   const phone = document.createElement('div');
   phone.style.cssText = 'position:relative;width:360px;height:480px;overflow:hidden;position:fixed;left:-9999px;top:-9999px;';
   const ov = document.createElement('div');
   ov.style.cssText = 'position:absolute;inset:0;';
-  const pin = document.createElement('div');
-  pin.style.cssText = 'position:absolute;left:50%;top:50%;width:24px;height:24px;transform:translate(-50%,-50%);background:teal;';
-  ov.appendChild(pin);
+  const annotation = document.createElement('div');
+  annotation.style.cssText = 'position:absolute;left:50%;top:50%;width:24px;height:24px;transform:translate(-50%,-50%);background:teal;';
+  ov.appendChild(annotation);
   phone.appendChild(ov);
   document.body.appendChild(phone);
-  const vis = pin.getBoundingClientRect().width > 0;
+  const vis = annotation.getBoundingClientRect().width > 0;
   phone.remove();
-  assert(vis, 'pin should have non-zero size (visible)');
+  assert(vis, 'annotation should have non-zero size (visible)');
 });
 
 // ── Run & display ─────────────────────────────────────────────────────────────
@@ -221,7 +221,7 @@ results.forEach(({ ok, desc, err }) => {
 // ── Visual interactive test ──────────────────────────────────────────────────
 const overlay = document.getElementById('mock-overlay');
 const vlog    = document.getElementById('visual-log');
-let pinCount  = 0;
+let annotationCount  = 0;
 
 overlay.style.pointerEvents = 'all';
 overlay.style.cursor = 'crosshair';
@@ -238,16 +238,16 @@ overlay.addEventListener('click', e => {
   dot.style.top  = y + '%';
   overlay.appendChild(dot);
 
-  // Teal pin = rendered position
-  const pin = document.createElement('div');
-  pin.className = 'pc-pin';
-  pin.style.left = x + '%';
-  pin.style.top  = y + '%';
-  pin.textContent = ++pinCount;
-  overlay.appendChild(pin);
+  // Teal annotation = rendered position
+  const annotation = document.createElement('div');
+  annotation.className = 'pc-annotation';
+  annotation.style.left = x + '%';
+  annotation.style.top  = y + '%';
+  annotation.textContent = ++annotationCount;
+  overlay.appendChild(annotation);
 
   vlog.innerHTML =
-    `Pin #${pinCount} at <strong>x=${x}%, y=${y}%</strong> — red dot and teal circle should overlap`;
+    `Annotation #${annotationCount} at <strong>x=${x}%, y=${y}%</strong> — red dot and teal circle should overlap`;
 });
 </script>
 </body>
