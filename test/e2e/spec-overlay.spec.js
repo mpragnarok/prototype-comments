@@ -114,11 +114,29 @@ const SPEC = {
       `自動量測應標出元件 border-box 尺寸，實際 ${JSON.stringify(r.dims)}`);
   });
 
-  await test('點 🔦 → 目標元件加 .spec-focus-flash', async () => {
+  await test('點 🔦 → 目標元件加 .spec-focus-flash + 畫面 redline（方案 B）', async () => {
     await page.click('.spec-note-focus');
     await page.waitForTimeout(80);
-    const flashed = await page.evaluate(() => document.getElementById('focus-target').classList.contains('spec-focus-flash'));
-    assert(flashed, '聚焦目標應加上 spec-focus-flash');
+    const r = await page.evaluate(() => ({
+      flashed: document.getElementById('focus-target').classList.contains('spec-focus-flash'),
+      layer: !!document.querySelector('.spec-rl-layer'),
+      box: !!document.querySelector('.spec-rl-box'),
+      badges: document.querySelectorAll('.spec-rl-badge').length, // 寬 + 高
+    }));
+    console.log('     redline:', JSON.stringify(r));
+    assert(r.flashed, '聚焦目標應加上 spec-focus-flash');
+    assert(r.layer && r.box, '聚焦應畫出 redline 量測層 + 外框');
+    assert(r.badges >= 2, 'redline 應有寬、高 badge');
+  });
+
+  await test('關抽屜 → redline 量測層清除', async () => {
+    await page.mouse.click(200, 400);
+    await page.waitForTimeout(120);
+    const gone = await page.evaluate(() => !document.querySelector('.spec-rl-layer'));
+    assert(gone, '關抽屜應清掉 redline 層');
+    // 重開抽屜給後續測試用
+    await page.click('.spec-fab');
+    await page.waitForTimeout(120);
   });
 
   await test('點側欄外 → 抽屜關閉、FAB 復現', async () => {

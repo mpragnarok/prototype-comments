@@ -117,6 +117,18 @@ const STYLES = `
   70%  { box-shadow: 0 0 0 10px rgba(15,160,160,0); }
   100% { box-shadow: 0 0 0 0 rgba(15,160,160,0); }
 }
+/* 方案 B：畫面 redline 量測層（疊在真實元件上） */
+.spec-rl-layer { position: fixed; inset: 0; pointer-events: none; z-index: 1290; }
+.spec-rl-layer > div { position: absolute; }
+.spec-rl-box { border: 1.5px solid #0FA0A0; box-sizing: border-box; border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.55); }
+.spec-rl-pad { background: rgba(21,128,61,.20); }
+.spec-rl-plabel { transform: translate(-50%,-50%); color: #15803d; background: rgba(255,255,255,.88);
+  font: 700 9px/1 ui-monospace, Menlo, monospace; padding: 1px 3px; border-radius: 2px; white-space: nowrap; }
+.spec-rl-badge { background: #0FA0A0; color: #fff; font: 700 10px/1 ui-monospace, Menlo, monospace;
+  padding: 2px 5px; border-radius: 3px; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.spec-rl-w { transform: translateX(-50%); }
+.spec-rl-h { transform: translateY(-50%); }
 .spec-focus-flash { outline: 2px solid #0FA0A0 !important; outline-offset: 2px;
   border-radius: 4px; animation: specFocusPulse 1.4s ease-out 2; }
 `;
@@ -136,13 +148,78 @@ function injectStyles() {
   document.head.appendChild(s);
 }
 
-// 點 note 🔦 → 捲到對應元件 + 閃高亮
+// 點 note 🔦 → 捲到對應元件 + 閃高亮 + 畫面 redline 量測（方案 B）
 function focusEl(selector) {
   const target = document.querySelector(selector);
   if (!target) return;
   target.scrollIntoView({ block: 'center', behavior: 'smooth' });
   target.classList.add('spec-focus-flash');
   setTimeout(() => target.classList.remove('spec-focus-flash'), 1600);
+  drawRedline(selector);
+}
+
+// ── 方案 B：畫面 redline 量測（Figma Alt-hover 風）─────────────────────────────────
+// 聚焦元件時把「外框 + 長寬 badge + padding 內襯」疊在真實元件上。position:fixed 跟著
+// getBoundingClientRect 走，捲動/縮放即時重定位；元件離開 DOM 或下次聚焦/關抽屜即清掉。
+let _rlLayer = null, _rlTarget = null, _rlReposition = null;
+function clearRedline() {
+  if (_rlLayer) { _rlLayer.remove(); _rlLayer = null; }
+  if (_rlReposition) {
+    window.removeEventListener('scroll', _rlReposition, true);
+    window.removeEventListener('resize', _rlReposition);
+    _rlReposition = null;
+  }
+  _rlTarget = null;
+}
+function boxAt(cls, b) {
+  const e = el('div', cls);
+  e.style.left = b.left + 'px'; e.style.top = b.top + 'px';
+  e.style.width = b.width + 'px'; e.style.height = b.height + 'px';
+  return e;
+}
+function positionRedline() {
+  if (!_rlLayer || !_rlTarget) return;
+  if (!document.contains(_rlTarget)) { clearRedline(); return; }
+  const r = _rlTarget.getBoundingClientRect();
+  const cs = getComputedStyle(_rlTarget);
+  const pad = { t: pxNum(cs.paddingTop), r: pxNum(cs.paddingRight), b: pxNum(cs.paddingBottom), l: pxNum(cs.paddingLeft) };
+  _rlLayer.innerHTML = '';
+  _rlLayer.appendChild(boxAt('spec-rl-box', r));
+  // padding 內襯（綠色半透明）+ px 標籤
+  const bands = {
+    t: { left: r.left, top: r.top, width: r.width, height: pad.t },
+    b: { left: r.left, top: r.bottom - pad.b, width: r.width, height: pad.b },
+    l: { left: r.left, top: r.top, width: pad.l, height: r.height },
+    r: { left: r.right - pad.r, top: r.top, width: pad.r, height: r.height },
+  };
+  ['t', 'r', 'b', 'l'].forEach(s => {
+    if (!pad[s]) return;
+    const b = bands[s];
+    _rlLayer.appendChild(boxAt('spec-rl-pad', b));
+    const lab = el('div', 'spec-rl-plabel', String(pad[s]));
+    lab.style.left = (b.left + b.width / 2) + 'px';
+    lab.style.top = (b.top + b.height / 2) + 'px';
+    _rlLayer.appendChild(lab);
+  });
+  // 寬度 badge（下方置中）/ 高度 badge（右側置中）
+  const wb = el('div', 'spec-rl-badge spec-rl-w', String(Math.round(r.width)));
+  wb.style.left = (r.left + r.width / 2) + 'px'; wb.style.top = (r.bottom + 5) + 'px';
+  _rlLayer.appendChild(wb);
+  const hb = el('div', 'spec-rl-badge spec-rl-h', String(Math.round(r.height)));
+  hb.style.left = (r.right + 5) + 'px'; hb.style.top = (r.top + r.height / 2) + 'px';
+  _rlLayer.appendChild(hb);
+}
+function drawRedline(selector) {
+  clearRedline();
+  const t = document.querySelector(selector);
+  if (!t) return;
+  _rlTarget = t;
+  _rlLayer = el('div', 'spec-rl-layer');
+  document.body.appendChild(_rlLayer);
+  positionRedline();
+  _rlReposition = () => positionRedline();
+  window.addEventListener('scroll', _rlReposition, true); // capture：抓內層捲動容器的捲動
+  window.addEventListener('resize', _rlReposition);
 }
 
 // ── 元件間距：盒模型圖（方案 A，對齊 DevTools / Figma Inspect 心智模型）────────────
@@ -292,6 +369,7 @@ export function initSpecOverlay(opts = {}) {
       attachClickOutside();
     } else {
       detachClickOutside();
+      clearRedline(); // 關抽屜時收掉畫面上的 redline 量測
     }
   }
 
