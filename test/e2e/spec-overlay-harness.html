@@ -19,7 +19,10 @@
 <div id="root">
   <div data-pc-scroll>
     <div style="height:200px;padding:16px;">harness top</div>
-    <input name="reminder[0].overdueAfter" id="focus-target" style="margin:16px;" />
+    <div class="field" id="overdue-field" style="margin:16px;padding:8px;width:320px;background:#fafafa;">
+      <label style="display:block;margin-bottom:4px;font-size:12px;">Appears overdue after</label>
+      <input name="reminder[0].overdueAfter" id="focus-target" style="width:120px;" />
+    </div>
     <div style="height:1000px;padding:16px;">filler（讓 scrollIntoView 有得捲）</div>
   </div>
 </div>

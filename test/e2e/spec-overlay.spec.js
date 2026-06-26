@@ -114,19 +114,30 @@ const SPEC = {
       `自動量測應標出元件 border-box 尺寸，實際 ${JSON.stringify(r.dims)}`);
   });
 
-  await test('點 🔦 → 目標元件加 .spec-focus-flash + 畫面 redline（方案 B）', async () => {
+  await test('點 🔦 → redline 自動 widen 到整個欄位容器（量完整元件，非只 input）', async () => {
     await page.click('.spec-note-focus');
     await page.waitForTimeout(80);
-    const r = await page.evaluate(() => ({
-      flashed: document.getElementById('focus-target').classList.contains('spec-focus-flash'),
-      layer: !!document.querySelector('.spec-rl-layer'),
-      box: !!document.querySelector('.spec-rl-box'),
-      badges: document.querySelectorAll('.spec-rl-badge').length, // 寬 + 高
-    }));
+    const r = await page.evaluate(() => {
+      const fieldR = document.getElementById('overdue-field').getBoundingClientRect();
+      const inputR = document.getElementById('focus-target').getBoundingClientRect();
+      const boxR = document.querySelector('.spec-rl-box')?.getBoundingClientRect();
+      return {
+        flashedField: document.getElementById('overdue-field').classList.contains('spec-focus-flash'),
+        flashedInput: document.getElementById('focus-target').classList.contains('spec-focus-flash'),
+        layer: !!document.querySelector('.spec-rl-layer'),
+        box: !!document.querySelector('.spec-rl-box'),
+        badges: document.querySelectorAll('.spec-rl-badge').length, // 寬 + 高
+        fieldW: Math.round(fieldR.width), inputW: Math.round(inputR.width),
+        boxW: boxR ? Math.round(boxR.width) : 0,
+      };
+    });
     console.log('     redline:', JSON.stringify(r));
-    assert(r.flashed, '聚焦目標應加上 spec-focus-flash');
     assert(r.layer && r.box, '聚焦應畫出 redline 量測層 + 外框');
     assert(r.badges >= 2, 'redline 應有寬、高 badge');
+    // widen 核心：flash/量測落在整個欄位容器，input 本身不再被當量測目標
+    assert(r.flashedField && !r.flashedInput, 'widen：應 flash 整個欄位容器，而非只有 input');
+    assert(r.fieldW > r.inputW, `sanity：欄位容器(${r.fieldW}) 應比 input(${r.inputW}) 寬`);
+    assert(Math.abs(r.boxW - r.fieldW) <= 4, `redline 框寬應等於整個欄位(${r.fieldW})，實際 ${r.boxW}`);
   });
 
   await test('關抽屜 → redline 量測層清除', async () => {

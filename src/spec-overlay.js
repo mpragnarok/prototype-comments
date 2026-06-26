@@ -148,14 +148,38 @@ function injectStyles() {
   document.head.appendChild(s);
 }
 
+// ── 量測對象解析（讓規格框「整個欄位元件」而非只有 input）──────────────────────────
+// focus 常指向葉節點控制項（input/select/textarea），只量它 → 規格只框到輸入框本身。
+// 這裡自動往上找「整個欄位容器」再量，量出來才是完整元件。spacingTarget 明確指定時不 widen。
+const LEAF_CTRL = /^(INPUT|SELECT|TEXTAREA)$/;
+const FIELD_SEL = '[class*=field i],[class*=form i],[class*=control i],[class*=input i],label';
+function widenToField(elx) {
+  if (!elx || !LEAF_CTRL.test(elx.tagName)) return elx;
+  const a = elx.getBoundingClientRect();
+  // 防呆：容器不可比輸入框寬太多/高太多，否則會抓到整個版面/面板。
+  const within = c => { if (!c) return false; const b = c.getBoundingClientRect();
+    return b.width > 0 && b.width <= a.width * 3 + 80 && b.height <= a.height * 6 + 80; };
+  const byClass = elx.parentElement && elx.parentElement.closest(FIELD_SEL);
+  if (within(byClass)) return byClass;                       // 1) 最近的「欄位類」容器
+  const p = elx.parentElement;                               // 2) 沒 class 命中：父層含 <label> 也算整個欄位
+  if (p && p.querySelector('label') && within(p)) return p;
+  return elx;
+}
+// 回傳「要量測/畫 redline 的元素」：spacingTarget 優先（不 widen）；否則 focus 自動 widen 到欄位。
+function resolveTargetEl(note) {
+  if (note.spacingTarget) return document.querySelector(note.spacingTarget);
+  if (note.focus) return widenToField(document.querySelector(note.focus));
+  return null;
+}
+
 // 點 note 🔦 → 捲到對應元件 + 閃高亮 + 畫面 redline 量測（方案 B）
-function focusEl(selector) {
-  const target = document.querySelector(selector);
+function focusEl(note) {
+  const target = resolveTargetEl(note);
   if (!target) return;
   target.scrollIntoView({ block: 'center', behavior: 'smooth' });
   target.classList.add('spec-focus-flash');
   setTimeout(() => target.classList.remove('spec-focus-flash'), 1600);
-  drawRedline(selector);
+  drawRedline(target);
 }
 
 // ── 方案 B：畫面 redline 量測（Figma Alt-hover 風）─────────────────────────────────
@@ -209,9 +233,9 @@ function positionRedline() {
   hb.style.left = (r.right + 5) + 'px'; hb.style.top = (r.top + r.height / 2) + 'px';
   _rlLayer.appendChild(hb);
 }
-function drawRedline(selector) {
+function drawRedline(target) {
   clearRedline();
-  const t = document.querySelector(selector);
+  const t = typeof target === 'string' ? document.querySelector(target) : target;
   if (!t) return;
   _rlTarget = t;
   _rlLayer = el('div', 'spec-rl-layer');
@@ -243,8 +267,8 @@ function parseSide(v) {
 // 從活的 DOM 量四邊 margin/padding + border + gap + 尺寸。
 //   w/h = border-box（整個元件的渲染寬高）；cw/ch = content-box（= border-box − padding − border）。
 //   盒模型把 w×h 標成「元件」尺寸、cw×ch 放在 content 中心，幾何與 DevTools/Figma 一致。
-function measureSpacingSides(selector) {
-  const t = document.querySelector(selector);
+function measureSpacingSides(target) {
+  const t = typeof target === 'string' ? document.querySelector(target) : target;
   if (!t) return null;
   const cs = getComputedStyle(t);
   const r = t.getBoundingClientRect();
@@ -290,8 +314,8 @@ function renderBoxModel(data) {
 }
 
 // 回傳間距顯示 DOM（盒模型圖；手動字串則回可讀 caption）；沒有則回 null。
-//   手動 spacing（物件/字串）優先；否則量測 spacingTarget（沒給則 focus）指到的元件。
-//   spacingTarget 用來在 focus 指向「窄的子元件（如 input）」時，改量「整個控制項/列」。
+//   手動 spacing（物件/字串）優先；否則量 resolveTargetEl(note)：focus 自動 widen 到整個欄位
+//   容器（量完整元件，非只 input）。spacingTarget 用來覆寫 widen 結果、明確指定要量哪個元素。
 function buildSpacingEl(note) {
   const sp = note.spacing;
   if (typeof sp === 'string') {
@@ -302,7 +326,7 @@ function buildSpacingEl(note) {
   if (sp && typeof sp === 'object') {
     data = { margin: parseSide(sp.margin), padding: parseSide(sp.padding), gap: sp.gap || null, w: null, h: null, cw: null, ch: null };
   } else if (note.spacingTarget || note.focus) {
-    data = measureSpacingSides(note.spacingTarget || note.focus);
+    data = measureSpacingSides(resolveTargetEl(note));
   }
   if (!data || (!anySide(data.margin) && !anySide(data.padding) && !data.gap)) return null;
   return renderBoxModel(data);
@@ -388,7 +412,7 @@ export function initSpecOverlay(opts = {}) {
       const f = el('button', 'spec-note-focus');
       f.innerHTML = ICON_FOCUS;
       f.title = '聚焦到畫面對應位置';
-      f.onclick = () => focusEl(note.focus);
+      f.onclick = () => focusEl(note);
       top.appendChild(f);
     }
     row.appendChild(top);
