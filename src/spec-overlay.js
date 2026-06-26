@@ -41,7 +41,7 @@ const DEFAULT_TAG_STYLE = {
 };
 
 // click-outside 時這些元素內的點擊不關抽屜（抽屜本身 + FAB + pc.js 互動 UI）
-const KEEP_OPEN_SEL = '.spec-drawer,.spec-fab,.pc-popover,.pc-note-thread,.pc-emoji-picker,.pc-mention-pop,.pc-auth-bar,.pc-annotation';
+const KEEP_OPEN_SEL = '.spec-drawer,.spec-fab,.spec-restore,.pc-popover,.pc-note-thread,.pc-emoji-picker,.pc-mention-pop,.pc-auth-bar,.pc-annotation';
 
 // 內嵌 MUI 圖示 SVG（vanilla 模組不能 import @mui/icons-material，故直接用其 path）。
 // FAB = StickyNote2Outlined、聚焦 = CenterFocusStrong；fill:currentColor 跟著按鈕文字色。
@@ -131,6 +131,21 @@ const STYLES = `
 .spec-rl-h { transform: translateY(-50%); }
 .spec-focus-flash { outline: 2px solid #0FA0A0 !important; outline-offset: 2px;
   border-radius: 4px; animation: specFocusPulse 1.4s ease-out 2; }
+/* 聚焦時抽屜收合 → 右緣細條（喚回抽屜）+ 元件旁浮動小卡（顯示該 note，避免被抽屜擋住） */
+.spec-restore {
+  position: fixed; top: 50%; right: 0; transform: translateY(-50%); z-index: 1301;
+  display: none; border: none; cursor: pointer; background: #0FA0A0; color: #fff;
+  padding: 14px 7px; border-radius: 8px 0 0 8px; box-shadow: -2px 0 10px rgba(0,0,0,.18);
+  writing-mode: vertical-rl; font-size: 12px; font-weight: 700; letter-spacing: 3px;
+}
+.spec-restore:hover { background: #0d8f8f; }
+.spec-restore.show { display: block; }
+.spec-focus-chip {
+  position: fixed; z-index: 1291; pointer-events: none; max-width: 280px;
+  background: #111827; color: #fff; font-size: 12px; line-height: 1.45;
+  padding: 6px 10px; border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,.3);
+}
+.spec-focus-chip b { color: #5eead4; font-weight: 700; }
 `;
 
 function el(tag, cls, text) {
@@ -179,13 +194,13 @@ function focusEl(note) {
   target.scrollIntoView({ block: 'center', behavior: 'smooth' });
   target.classList.add('spec-focus-flash');
   setTimeout(() => target.classList.remove('spec-focus-flash'), 1600);
-  drawRedline(target);
+  drawRedline(target, note);
 }
 
 // ── 方案 B：畫面 redline 量測（Figma Alt-hover 風）─────────────────────────────────
 // 聚焦元件時把「外框 + 長寬 badge + padding 內襯」疊在真實元件上。position:fixed 跟著
 // getBoundingClientRect 走，捲動/縮放即時重定位；元件離開 DOM 或下次聚焦/關抽屜即清掉。
-let _rlLayer = null, _rlTarget = null, _rlReposition = null;
+let _rlLayer = null, _rlTarget = null, _rlReposition = null, _rlNote = null;
 function clearRedline() {
   if (_rlLayer) { _rlLayer.remove(); _rlLayer = null; }
   if (_rlReposition) {
@@ -194,6 +209,7 @@ function clearRedline() {
     _rlReposition = null;
   }
   _rlTarget = null;
+  _rlNote = null;
 }
 function boxAt(cls, b) {
   const e = el('div', cls);
@@ -232,12 +248,25 @@ function positionRedline() {
   const hb = el('div', 'spec-rl-badge spec-rl-h', String(Math.round(r.height)));
   hb.style.left = (r.right + 5) + 'px'; hb.style.top = (r.top + r.height / 2) + 'px';
   _rlLayer.appendChild(hb);
+  // 抽屜收合後，元件旁浮一張小卡顯示該 note（tag + 文字），避免規格資訊不見。
+  if (_rlNote) {
+    const chip = el('div', 'spec-focus-chip');
+    if (_rlNote.tag) { const tg = el('b'); tg.textContent = _rlNote.tag + ' '; chip.appendChild(tg); }
+    chip.appendChild(document.createTextNode(_rlNote.text || ''));
+    _rlLayer.appendChild(chip);
+    const cb = chip.getBoundingClientRect();
+    let cy = r.top - cb.height - 8;
+    if (cy < 4) cy = r.bottom + 8;                                  // 上方沒空間 → 放下方
+    const cx = Math.max(4, Math.min(r.left, window.innerWidth - cb.width - 4));
+    chip.style.left = cx + 'px'; chip.style.top = cy + 'px';
+  }
 }
-function drawRedline(target) {
+function drawRedline(target, note) {
   clearRedline();
   const t = typeof target === 'string' ? document.querySelector(target) : target;
   if (!t) return;
   _rlTarget = t;
+  _rlNote = note || null;
   _rlLayer = el('div', 'spec-rl-layer');
   document.body.appendChild(_rlLayer);
   positionRedline();
@@ -353,7 +382,7 @@ export function initSpecOverlay(opts = {}) {
   window.__specOverlayInit = true;
   injectStyles();
 
-  const state = { open: false, spec: null, lastPath: getPath() };
+  const state = { open: false, collapsed: false, spec: null, lastPath: getPath() };
   state.spec = getNotesForPath(state.lastPath);
 
   // ── DOM：FAB + 抽屜（常駐 DOM，靠 transform 開關，等同 keepMounted）─────────────
@@ -362,8 +391,29 @@ export function initSpecOverlay(opts = {}) {
   fab.innerHTML = ICON_FAB;
   fab.onclick = () => setOpen(true);
   const drawer = el('div', 'spec-drawer');
+  // 聚焦時抽屜收合 → 右緣這條細條把抽屜喚回（展開）
+  const restoreTab = el('button', 'spec-restore', '規格 ◂');
+  restoreTab.title = '展開規格面板';
+  restoreTab.onclick = exitFocusMode;
   document.body.appendChild(fab);
   document.body.appendChild(drawer);
+  document.body.appendChild(restoreTab);
+
+  // 點 🔦 → 收合抽屜（露出元件 + redline），redline 由 focusEl 畫。
+  function enterFocusMode() {
+    if (!state.open) return;
+    state.collapsed = true;
+    detachClickOutside();   // 收合期間點畫面不關抽屜，方便看元件
+    render();
+  }
+  // 點細條 → 展開抽屜、收掉 redline，恢復 click-outside。
+  function exitFocusMode() {
+    if (!state.collapsed) return;
+    state.collapsed = false;
+    clearRedline();
+    render();
+    attachClickOutside();
+  }
 
   function dispatchScreenChange() {
     document.dispatchEvent(new CustomEvent('pc:screen-change', { detail: { screenId: state.lastPath } }));
@@ -392,6 +442,7 @@ export function initSpecOverlay(opts = {}) {
       setTimeout(dispatchScreenChange, 60); // notes 重畫後讓 pc.js 重注入 💬
       attachClickOutside();
     } else {
+      state.collapsed = false; // 完全關閉 → 退出聚焦收合狀態
       detachClickOutside();
       clearRedline(); // 關抽屜時收掉畫面上的 redline 量測
     }
@@ -412,7 +463,7 @@ export function initSpecOverlay(opts = {}) {
       const f = el('button', 'spec-note-focus');
       f.innerHTML = ICON_FOCUS;
       f.title = '聚焦到畫面對應位置';
-      f.onclick = () => focusEl(note);
+      f.onclick = () => { enterFocusMode(); focusEl(note); };
       top.appendChild(f);
     }
     row.appendChild(top);
@@ -441,6 +492,7 @@ export function initSpecOverlay(opts = {}) {
   function render() {
     const spec = state.spec;
     fab.hidden = !spec || state.open;
+    restoreTab.classList.toggle('show', !!spec && state.open && state.collapsed);
     if (!spec) { drawer.classList.remove('open'); drawer.innerHTML = ''; return; }
     drawer.innerHTML = '';
     drawer.appendChild(buildHeader(spec));
@@ -451,7 +503,7 @@ export function initSpecOverlay(opts = {}) {
     ft.appendChild(el('div', 'spec-ft-hint',
       '🔦 點規格右上角聚焦到畫面 · 📐 顯示元件間距 · 💬 每則下方可留言 · 左下角登入 Google 後也可在畫面上加標註'));
     drawer.appendChild(ft);
-    drawer.classList.toggle('open', state.open);
+    drawer.classList.toggle('open', state.open && !state.collapsed);
   }
 
   // 路由變更 → 更新 path、通知 pc.js、重算 spec、重畫

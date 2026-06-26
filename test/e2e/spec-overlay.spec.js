@@ -114,40 +114,53 @@ const SPEC = {
       `自動量測應標出元件 border-box 尺寸，實際 ${JSON.stringify(r.dims)}`);
   });
 
-  await test('點 🔦 → redline 自動 widen 到整個欄位容器（量完整元件，非只 input）', async () => {
+  await test('點 🔦 → 抽屜收合 + redline widen + 浮動小卡（解決 spec 面板擋住標註）', async () => {
     await page.click('.spec-note-focus');
-    await page.waitForTimeout(80);
+    await page.waitForTimeout(120);
     const r = await page.evaluate(() => {
       const fieldR = document.getElementById('overdue-field').getBoundingClientRect();
       const inputR = document.getElementById('focus-target').getBoundingClientRect();
       const boxR = document.querySelector('.spec-rl-box')?.getBoundingClientRect();
+      const chip = document.querySelector('.spec-focus-chip');
       return {
-        flashedField: document.getElementById('overdue-field').classList.contains('spec-focus-flash'),
-        flashedInput: document.getElementById('focus-target').classList.contains('spec-focus-flash'),
         layer: !!document.querySelector('.spec-rl-layer'),
         box: !!document.querySelector('.spec-rl-box'),
         badges: document.querySelectorAll('.spec-rl-badge').length, // 寬 + 高
+        flashedField: document.getElementById('overdue-field').classList.contains('spec-focus-flash'),
+        flashedInput: document.getElementById('focus-target').classList.contains('spec-focus-flash'),
         fieldW: Math.round(fieldR.width), inputW: Math.round(inputR.width),
         boxW: boxR ? Math.round(boxR.width) : 0,
+        drawerOpen: document.querySelector('.spec-drawer').classList.contains('open'),
+        restoreShown: document.querySelector('.spec-restore')?.classList.contains('show'),
+        chipText: chip ? chip.textContent : null,
       };
     });
-    console.log('     redline:', JSON.stringify(r));
+    console.log('     redline+collapse:', JSON.stringify(r));
     assert(r.layer && r.box, '聚焦應畫出 redline 量測層 + 外框');
     assert(r.badges >= 2, 'redline 應有寬、高 badge');
     // widen 核心：flash/量測落在整個欄位容器，input 本身不再被當量測目標
     assert(r.flashedField && !r.flashedInput, 'widen：應 flash 整個欄位容器，而非只有 input');
     assert(r.fieldW > r.inputW, `sanity：欄位容器(${r.fieldW}) 應比 input(${r.inputW}) 寬`);
     assert(Math.abs(r.boxW - r.fieldW) <= 4, `redline 框寬應等於整個欄位(${r.fieldW})，實際 ${r.boxW}`);
+    // 收合：抽屜縮起、右緣細條出現、元件旁浮動小卡帶 note 文字（規格資訊不被擋住）
+    assert(!r.drawerOpen, '點 🔦 後抽屜應收合（不再 .open）');
+    assert(r.restoreShown, '收合後應出現「規格」細條');
+    assert(r.chipText && r.chipText.includes('有聚焦目標'), `浮動小卡應顯示該 note 文字，實際 ${r.chipText}`);
   });
 
-  await test('關抽屜 → redline 量測層清除', async () => {
-    await page.mouse.click(200, 400);
+  await test('點「規格」細條 → 抽屜展開、redline + 小卡清除', async () => {
+    await page.click('.spec-restore');
     await page.waitForTimeout(120);
-    const gone = await page.evaluate(() => !document.querySelector('.spec-rl-layer'));
-    assert(gone, '關抽屜應清掉 redline 層');
-    // 重開抽屜給後續測試用
-    await page.click('.spec-fab');
-    await page.waitForTimeout(120);
+    const r = await page.evaluate(() => ({
+      drawerOpen: document.querySelector('.spec-drawer').classList.contains('open'),
+      restoreShown: document.querySelector('.spec-restore')?.classList.contains('show'),
+      layerGone: !document.querySelector('.spec-rl-layer'),
+      chipGone: !document.querySelector('.spec-focus-chip'),
+    }));
+    assert(r.drawerOpen, '點細條應展開抽屜');
+    assert(!r.restoreShown, '展開後細條應隱藏');
+    assert(r.layerGone, '展開應清掉 redline 層');
+    assert(r.chipGone, '展開應清掉浮動小卡');
   });
 
   await test('點側欄外 → 抽屜關閉、FAB 復現', async () => {
