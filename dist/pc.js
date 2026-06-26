@@ -2408,6 +2408,18 @@ export async function initPrototypeComments(opts = {}) {
     renderAnnotations();
   });
 
+  // ── 全域捲動防呆（不需 consumer 配合，純 pc.js 自癒）──────────────────────────
+  // 用 capture 階段攔「任何元件」的捲動（含 demo 的 scrollIntoView、demo 關閉後捲動容器被
+  // 換掉的情況）→ rAF throttle 後重算標註位置。renderAnnotations 內會 refreshScrollEl，
+  // 偵測到舊 _scrollEl 已脫離 DOM 就重綁到新容器 → 標註不會在 demo 跑完關掉後跟著捲動飄走，
+  // 即使 app 端沒 dispatch pc:demo-end（舊版 DemoMode）也能自動修正。
+  let _scrollRaf = false;
+  document.addEventListener('scroll', () => {
+    if (_scrollRaf) return;
+    _scrollRaf = true;
+    requestAnimationFrame(() => { _scrollRaf = false; renderAnnotations(); });
+  }, true);
+
   const observer = new MutationObserver(() => {
     if (!document.getElementById('pc-overlay')) mountOverlay();
     noteModule.injectAll();
