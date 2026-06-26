@@ -52,7 +52,7 @@ const SPEC = {
 
   console.log('spec-overlay e2e (mock firebase):');
 
-  await test('initSpecOverlay → FAB 出現（spec 有 notes）', async () => {
+  await test('initSpecOverlay → 規格 tab 出現（spec 有 notes）', async () => {
     await page.evaluate(({ user, spec }) => {
       const fb = window.__specTest.createMockFirebase({ user, comments: [] });
       window.__specTest.initSpecOverlay({
@@ -63,17 +63,17 @@ const SPEC = {
         firebaseConfig: {}, projectId: 'test-spec-overlay', _firebase: fb,
       });
     }, { user: USER, spec: SPEC });
-    await page.waitForSelector('.spec-fab', { timeout: 4000 });
-    const hidden = await page.evaluate(() => document.querySelector('.spec-fab').hidden);
-    assert(hidden === false, 'FAB 應在關閉時可見');
+    await page.waitForSelector('.spec-tab.show', { timeout: 4000 });
+    const shown = await page.evaluate(() => document.querySelector('.spec-tab').classList.contains('show'));
+    assert(shown === true, '關閉時規格 tab 應可見');
   });
 
-  await test('點 FAB → 抽屜開、FAB 隱藏、渲染 3 則 eng-note-row', async () => {
-    await page.click('.spec-fab');
+  await test('點 tab → 抽屜開、tab 隱藏、渲染 3 則 eng-note-row', async () => {
+    await page.click('.spec-tab');
     await page.waitForTimeout(120);
     const r = await page.evaluate(() => ({
       open: document.querySelector('.spec-drawer').classList.contains('open'),
-      fabHidden: document.querySelector('.spec-fab').hidden,
+      tabHidden: !document.querySelector('.spec-tab').classList.contains('show'),
       rows: document.querySelectorAll('.eng-note-row').length,
       tags: [...document.querySelectorAll('.eng-note-row')].map(x => x.dataset.tag),
       texts: [...document.querySelectorAll('.eng-note-row')].every(x => !!x.dataset.text),
@@ -82,7 +82,7 @@ const SPEC = {
     }));
     console.log('     drawer:', JSON.stringify(r));
     assert(r.open, '抽屜應開啟');
-    assert(r.fabHidden, 'FAB 開啟時應隱藏');
+    assert(r.tabHidden, 'tab 在抽屜完整展開時應隱藏');
     assert(r.rows === 3, `應有 3 row，實際 ${r.rows}`);
     assert(r.texts, '每 row 應有 data-text');
     assert(r.focusBtns === 1, `只有 1 則有 focus，實際 ${r.focusBtns}`);
@@ -131,7 +131,7 @@ const SPEC = {
         fieldW: Math.round(fieldR.width), inputW: Math.round(inputR.width),
         boxW: boxR ? Math.round(boxR.width) : 0,
         drawerOpen: document.querySelector('.spec-drawer').classList.contains('open'),
-        restoreShown: document.querySelector('.spec-restore')?.classList.contains('show'),
+        tabShown: document.querySelector('.spec-tab')?.classList.contains('show'),
         chipText: chip ? chip.textContent : null,
       };
     });
@@ -142,37 +142,37 @@ const SPEC = {
     assert(r.flashedField && !r.flashedInput, 'widen：應 flash 整個欄位容器，而非只有 input');
     assert(r.fieldW > r.inputW, `sanity：欄位容器(${r.fieldW}) 應比 input(${r.inputW}) 寬`);
     assert(Math.abs(r.boxW - r.fieldW) <= 4, `redline 框寬應等於整個欄位(${r.fieldW})，實際 ${r.boxW}`);
-    // 收合：抽屜縮起、右緣細條出現、元件旁浮動小卡帶 note 文字（規格資訊不被擋住）
+    // 收合：抽屜縮起、右緣規格 tab 露出、元件旁浮動小卡帶 note 文字（規格資訊不被擋住）
     assert(!r.drawerOpen, '點 🔦 後抽屜應收合（不再 .open）');
-    assert(r.restoreShown, '收合後應出現「規格」細條');
+    assert(r.tabShown, '收合後規格 tab 應露出（喚回鈕）');
     assert(r.chipText && r.chipText.includes('有聚焦目標'), `浮動小卡應顯示該 note 文字，實際 ${r.chipText}`);
   });
 
-  await test('點「規格」細條 → 抽屜展開、redline + 小卡清除', async () => {
-    await page.click('.spec-restore');
+  await test('點規格 tab → 抽屜展開、redline + 小卡清除', async () => {
+    await page.click('.spec-tab');
     await page.waitForTimeout(120);
     const r = await page.evaluate(() => ({
       drawerOpen: document.querySelector('.spec-drawer').classList.contains('open'),
-      restoreShown: document.querySelector('.spec-restore')?.classList.contains('show'),
+      tabShown: document.querySelector('.spec-tab')?.classList.contains('show'),
       layerGone: !document.querySelector('.spec-rl-layer'),
       chipGone: !document.querySelector('.spec-focus-chip'),
     }));
-    assert(r.drawerOpen, '點細條應展開抽屜');
-    assert(!r.restoreShown, '展開後細條應隱藏');
+    assert(r.drawerOpen, '點 tab 應展開抽屜');
+    assert(!r.tabShown, '展開後 tab 應隱藏');
     assert(r.layerGone, '展開應清掉 redline 層');
     assert(r.chipGone, '展開應清掉浮動小卡');
   });
 
-  await test('點側欄外 → 抽屜關閉、FAB 復現', async () => {
+  await test('點側欄外 → 抽屜關閉、規格 tab 復現', async () => {
     await page.waitForTimeout(80);
-    await page.mouse.click(200, 400); // #root 區域，非抽屜/FAB
+    await page.mouse.click(200, 400); // #root 區域，非抽屜/tab
     await page.waitForTimeout(120);
     const r = await page.evaluate(() => ({
       open: document.querySelector('.spec-drawer').classList.contains('open'),
-      fabHidden: document.querySelector('.spec-fab').hidden,
+      tabShown: document.querySelector('.spec-tab').classList.contains('show'),
     }));
     assert(!r.open, 'click-outside 應關閉抽屜');
-    assert(!r.fabHidden, '關閉後 FAB 應復現');
+    assert(r.tabShown, '關閉後規格 tab 應復現');
   });
 
   await test('pc.js 已被內部 init（pc-overlay 掛上）', async () => {

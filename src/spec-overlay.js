@@ -41,24 +41,23 @@ const DEFAULT_TAG_STYLE = {
 };
 
 // click-outside 時這些元素內的點擊不關抽屜（抽屜本身 + FAB + pc.js 互動 UI）
-const KEEP_OPEN_SEL = '.spec-drawer,.spec-fab,.spec-restore,.pc-popover,.pc-note-thread,.pc-emoji-picker,.pc-mention-pop,.pc-auth-bar,.pc-annotation';
+const KEEP_OPEN_SEL = '.spec-drawer,.spec-tab,.pc-popover,.pc-note-thread,.pc-emoji-picker,.pc-mention-pop,.pc-auth-bar,.pc-annotation';
 
 // 內嵌 MUI 圖示 SVG（vanilla 模組不能 import @mui/icons-material，故直接用其 path）。
-// FAB = StickyNote2Outlined、聚焦 = CenterFocusStrong；fill:currentColor 跟著按鈕文字色。
-const ICON_FAB = '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M19 5v9h-5v5H5V5zm0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h10l6-6V5c0-1.1-.9-2-2-2m-7 11H7v-2h5zm5-4H7V8h10z"/></svg>';
+// 聚焦 = CenterFocusStrong；fill:currentColor 跟著按鈕文字色。
 const ICON_FOCUS = '<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4m-7 7H3v4c0 1.1.9 2 2 2h4v-2H5zM5 5h4V3H5c-1.1 0-2 .9-2 2v4h2zm14-2h-4v2h4v4h2V5c0-1.1-.9-2-2-2m0 16h-4v2h4c1.1 0 2-.9 2-2v-4h-2z"/></svg>';
 
 const STYLES = `
-.spec-fab {
-  position: fixed; bottom: 72px; right: 16px; z-index: 1300;
-  width: 48px; height: 48px; border-radius: 50%; border: none;
-  background: #0FA0A0; color: #fff; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.25); font-size: 20px;
+/* 統一入口：右緣凸出的「規格」tab。抽屜關閉時＝開啟鈕；聚焦收合時＝喚回鈕（取代圓形 FAB）。 */
+.spec-tab {
+  position: fixed; top: 50%; right: 0; transform: translateY(-50%); z-index: 1301;
+  display: none; border: none; cursor: pointer; background: #0FA0A0; color: #fff;
+  padding: 16px 8px; border-radius: 10px 0 0 10px; box-shadow: -2px 0 12px rgba(0,0,0,.2);
+  writing-mode: vertical-rl; font-size: 13px; font-weight: 700; letter-spacing: 3px;
   transition: background .15s;
 }
-.spec-fab:hover { background: #0d8f8f; }
-.spec-fab[hidden] { display: none; }
+.spec-tab:hover { background: #0d8f8f; }
+.spec-tab.show { display: block; }
 .spec-drawer {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 1300;
   width: 360px; max-width: 92vw; background: #fff; border-left: 1px solid #e2e8f0;
@@ -87,7 +86,7 @@ const STYLES = `
 .spec-note-focus { border: none; background: none; cursor: pointer; color: #0FA0A0;
   font-size: 15px; padding: 2px; line-height: 1; }
 .spec-note-focus:hover { color: #0d8f8f; }
-.spec-fab svg, .spec-note-focus svg { display: block; }
+.spec-note-focus svg { display: block; }
 .spec-note-text { color: #334155; font-size: 12px; line-height: 1.6; }
 /* 元件間距：盒模型圖（方案 A）。margin 外圈(琥珀)、padding 內圈(綠)，四邊各標 px。 */
 .spec-bm-wrap { margin-top: 8px; }
@@ -131,15 +130,7 @@ const STYLES = `
 .spec-rl-h { transform: translateY(-50%); }
 .spec-focus-flash { outline: 2px solid #0FA0A0 !important; outline-offset: 2px;
   border-radius: 4px; animation: specFocusPulse 1.4s ease-out 2; }
-/* 聚焦時抽屜收合 → 右緣細條（喚回抽屜）+ 元件旁浮動小卡（顯示該 note，避免被抽屜擋住） */
-.spec-restore {
-  position: fixed; top: 50%; right: 0; transform: translateY(-50%); z-index: 1301;
-  display: none; border: none; cursor: pointer; background: #0FA0A0; color: #fff;
-  padding: 14px 7px; border-radius: 8px 0 0 8px; box-shadow: -2px 0 10px rgba(0,0,0,.18);
-  writing-mode: vertical-rl; font-size: 12px; font-weight: 700; letter-spacing: 3px;
-}
-.spec-restore:hover { background: #0d8f8f; }
-.spec-restore.show { display: block; }
+/* 聚焦收合時，元件旁浮動小卡（顯示該 note，避免規格資訊被抽屜帶走） */
 .spec-focus-chip {
   position: fixed; z-index: 1291; pointer-events: none; max-width: 280px;
   background: #111827; color: #fff; font-size: 12px; line-height: 1.45;
@@ -385,19 +376,14 @@ export function initSpecOverlay(opts = {}) {
   const state = { open: false, collapsed: false, spec: null, lastPath: getPath() };
   state.spec = getNotesForPath(state.lastPath);
 
-  // ── DOM：FAB + 抽屜（常駐 DOM，靠 transform 開關，等同 keepMounted）─────────────
-  const fab = el('button', 'spec-fab');
-  fab.title = '規格說明';
-  fab.innerHTML = ICON_FAB;
-  fab.onclick = () => setOpen(true);
+  // ── DOM：側邊 tab + 抽屜（常駐 DOM，靠 transform 開關，等同 keepMounted）─────────────
   const drawer = el('div', 'spec-drawer');
-  // 聚焦時抽屜收合 → 右緣這條細條把抽屜喚回（展開）
-  const restoreTab = el('button', 'spec-restore', '規格 ◂');
-  restoreTab.title = '展開規格面板';
-  restoreTab.onclick = exitFocusMode;
-  document.body.appendChild(fab);
+  // 統一入口：右緣凸出的「規格」tab（取代圓形 FAB）。關閉時＝開啟鈕；聚焦收合時＝喚回鈕。
+  const tab = el('button', 'spec-tab', '規格 ◂');
+  tab.title = '規格說明';
+  tab.onclick = () => { if (state.collapsed) exitFocusMode(); else setOpen(true); };
   document.body.appendChild(drawer);
-  document.body.appendChild(restoreTab);
+  document.body.appendChild(tab);
 
   // 點 🔦 → 收合抽屜（露出元件 + redline），redline 由 focusEl 畫。
   function enterFocusMode() {
@@ -491,8 +477,8 @@ export function initSpecOverlay(opts = {}) {
 
   function render() {
     const spec = state.spec;
-    fab.hidden = !spec || state.open;
-    restoreTab.classList.toggle('show', !!spec && state.open && state.collapsed);
+    // tab 顯示時機：抽屜未「完整展開」時都露出（關閉時＝開啟、聚焦收合時＝喚回）。
+    tab.classList.toggle('show', !!spec && (!state.open || state.collapsed));
     if (!spec) { drawer.classList.remove('open'); drawer.innerHTML = ''; return; }
     drawer.innerHTML = '';
     drawer.appendChild(buildHeader(spec));
