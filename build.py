@@ -20,6 +20,7 @@ files = [
     ('styles.js',        'lib'),
     ('store.js',         'lib'),
     ('note-comments.js', 'lib'),
+    ('draw-layer.js',    'lib'),
     ('index.js',         'entry'),
 ]
 

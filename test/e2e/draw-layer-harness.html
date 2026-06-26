@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<!--
+  draw-layer-harness.html — e2e 載入頁，測 src/draw-layer.js（繪圖層骨架，P1）。
+  import 自 /src/（同 prod 服務路徑）。不需 firebase。
+  expose window.__drawTest 給 spec 注入/操作/斷言。
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>draw-layer e2e harness</title>
+<style>
+  html, body { margin: 0; }
+  /* designTarget：模擬被標注的畫布。固定大小方便 playwright 用視窗座標下筆。 */
+  #canvas { position: relative; width: 600px; height: 400px; background: #f3f4f6; margin: 0; }
+</style>
+</head>
+<body>
+<div id="canvas"></div>
+
+<script type="module">
+  import { initDrawLayer } from '/src/draw-layer.js';
+  window.__drawTest = {
+    initDrawLayer,
+    init: (overrides = {}) => initDrawLayer('#canvas', overrides),
+    ready: true,
+  };
+</script>
+</body>
+</html>
