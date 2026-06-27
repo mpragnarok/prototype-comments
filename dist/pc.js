@@ -1896,13 +1896,20 @@ function initDrawLayer(target, opts = {}) {
       return dataURL;
     } catch (_) { return null; }
   }
+  // 實際使用時 flow 由 resolve server 同源服務 → 預設打同源 /api/draw（http(s) 才送；file:// 回 null 不送）。
+  function sameOriginDrawEndpoint() {
+    try {
+      const o = typeof location !== 'undefined' && location.origin;
+      return o && /^https?:/.test(o) ? o + '/api/draw' : null;
+    } catch (_) { return null; }
+  }
   // 組 {json, png} → POST 到 endpoint（可無）；無論有無 server 都回 payload 供 caller/測試讀。
   async function sendToAgent(opts2 = {}) {
     const json = exportPayload();
     if (!json.annotations.length) return { json, png: null, sent: false }; // 沒標注 → 不做事
     const png = await capturePng();
     const payload = { json, png, sent: false };
-    const endpoint = opts2.endpoint || state.exportEndpoint;
+    const endpoint = opts2.endpoint || state.exportEndpoint || sameOriginDrawEndpoint();
     if (endpoint && typeof fetch === 'function') {
       try {
         await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ json, png }) });
