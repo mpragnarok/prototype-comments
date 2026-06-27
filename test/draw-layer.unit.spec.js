@@ -18,6 +18,9 @@ import {
   DEFAULT_DRAW_STYLE, DRAW_MODES, DRAW_TOOLS, MIN_DRAW_SIZE_PCT,
   DRAW_FONT_SIZES,
   setEndpoint,
+  assignGroupId, clearGroupId, expandSelectionToGroups, groupMembers,
+  rectAnchorPoints, nearestPointOnRect, objectSnapPoints, nearestSnap,
+  anchorRel, resolveAnchorPoint, resolveEndpoints, mergeEndAnchor, SNAP_THRESHOLD_PCT,
 } from '../src/draw-layer.js';
 
 let pass = 0, fail = 0;
@@ -752,6 +755,285 @@ test('applyStylePatch: setFontSize 語意 — select 工具 + 選取 → 改選�
   );
   eq(res.objects[0].style.fontSize, 28, '選取物件 fontSize 應更新為 28');
   eq(res.defaultStyle.fontSize, 28, '預設 fontSize 也應更新');
+});
+
+// ── Batch 3：持久群組（groupId）───────────────────────────────────────────────
+console.log('\ndraw-layer unit — Batch 3 持久群組 (groupId):');
+
+function mkRect(id) {
+  return makeDrawObject({ id, tool: 'rect', geom: { x: 0, y: 0, w: 10, h: 10 } });
+}
+
+test('groupMembers: 回傳同 groupId 的所有 id', () => {
+  const objs = ['a', 'b', 'c'].map(mkRect);
+  objs[0].groupId = 'g1'; objs[1].groupId = 'g1';
+  const members = groupMembers(objs, 'g1');
+  eq(members.length, 2, 'g1 應有 2 個成員');
+  assert(members.includes('a') && members.includes('b'), '應包含 a 和 b');
+  assert(!members.includes('c'), '不應包含 c');
+});
+
+test('groupMembers: 無匹配 → 空陣列', () => {
+  const objs = [mkRect('x')];
+  eq(groupMembers(objs, 'g99').length, 0, '無匹配應回空陣列');
+});
+
+test('assignGroupId: 指定 id 設上 groupId；其他不動；immutable', () => {
+  const o1 = mkRect('a'), o2 = mkRect('b');
+  const result = assignGroupId([o1, o2], ['a'], 'g1');
+  eq(result[0].groupId, 'g1', 'a 應有 groupId g1');
+  assert(!result[1].groupId, 'b 不應有 groupId');
+  assert(result[0] !== o1, '應回傳新物件（immutable）');
+  assert(o1.groupId === undefined, '原物件不應被改動');
+});
+
+test('assignGroupId: 多 id 共享同一 gid', () => {
+  const objs = ['a', 'b', 'c'].map(mkRect);
+  const result = assignGroupId(objs, ['a', 'b'], 'g2');
+  eq(result[0].groupId, 'g2', 'a 應有 g2');
+  eq(result[1].groupId, 'g2', 'b 應有 g2');
+  assert(!result[2].groupId, 'c 不應有 groupId');
+});
+
+test('clearGroupId: 移除指定 id 的 groupId；其他保留；immutable', () => {
+  const objs = ['a', 'b', 'c'].map(mkRect);
+  objs[0].groupId = 'g1'; objs[1].groupId = 'g1';
+  const result = clearGroupId(objs, ['a']);
+  assert(!result[0].groupId, 'a 應清除 groupId');
+  eq(result[1].groupId, 'g1', 'b 應保留 groupId');
+  assert(result[0] !== objs[0], '應回傳新物件（immutable）');
+  assert(objs[0].groupId === 'g1', '原物件不應被改動');
+});
+
+test('clearGroupId: id 無 groupId → 不報錯、屬性不存在', () => {
+  const o = mkRect('x');
+  const result = clearGroupId([o], ['x']);
+  assert(!result[0].groupId, '無 groupId 的物件清除後仍無 groupId');
+  assert(!('groupId' in result[0]), 'groupId 屬性應不存在');
+});
+
+test('expandSelectionToGroups: 無群組成員 → 回傳原 selectedIds', () => {
+  const objs = ['a', 'b'].map(mkRect);
+  const result = expandSelectionToGroups(objs, ['a']);
+  assert(Array.isArray(result), '應回傳陣列');
+  eq(result.length, 1, '無群組不展開');
+  eq(result[0], 'a', '應包含原始 id');
+});
+
+test('expandSelectionToGroups: 點一個群組成員 → 展開為所有成員', () => {
+  const objs = ['a', 'b', 'c'].map(mkRect);
+  objs[0].groupId = 'g1'; objs[1].groupId = 'g1';
+  const result = expandSelectionToGroups(objs, ['a']);
+  eq(result.length, 2, '應展開為 2 個');
+  assert(result.includes('a') && result.includes('b'), '應包含 a 和 b');
+  assert(!result.includes('c'), '不應包含 c');
+});
+
+test('expandSelectionToGroups: 去重、stable 順序（依 objects 陣列）', () => {
+  const objs = ['a', 'b', 'c'].map(mkRect);
+  objs[0].groupId = 'g1'; objs[1].groupId = 'g1';
+  const result = expandSelectionToGroups(objs, ['a', 'b']); // 兩個都已選
+  eq(result.length, 2, '去重後應有 2 個');
+  eq(result[0], 'a', '順序應依 objects 陣列');
+  eq(result[1], 'b', '順序應依 objects 陣列');
+});
+
+test('expandSelectionToGroups: 混合（有群組+無群組）', () => {
+  const objs = ['a', 'b', 'c'].map(mkRect);
+  objs[0].groupId = 'g1'; objs[1].groupId = 'g1';
+  const result = expandSelectionToGroups(objs, ['a', 'c']); // a 有群組、c 無群組
+  eq(result.length, 3, '應含 a,b,c');
+  assert(result.includes('a') && result.includes('b') && result.includes('c'), '應含全部');
+});
+
+test('serializeDrawObject: groupId 有才帶，無 groupId 不帶欄位', () => {
+  const o = mkRect('s1');
+  o.groupId = 'g1';
+  const s = serializeDrawObject(o);
+  eq(s.groupId, 'g1', 'groupId 應序列化');
+  const o2 = mkRect('s2');
+  const s2 = serializeDrawObject(o2);
+  assert(!('groupId' in s2), '無 groupId 時不應帶此欄位');
+});
+
+test('drawingToDoc: groupId 有才帶，無 groupId 不帶欄位', () => {
+  const o = mkRect('d1');
+  o.groupId = 'gx';
+  const doc = drawingToDoc(o);
+  eq(doc.groupId, 'gx', 'drawingToDoc 應帶 groupId');
+  const o2 = mkRect('d2');
+  const doc2 = drawingToDoc(o2);
+  assert(!('groupId' in doc2), '無 groupId 時不應帶此欄位');
+});
+
+test('hydrateObjectsFromLocal: groupId round-trip', () => {
+  const o = mkRect('h1');
+  o.groupId = 'g9';
+  const docs = serializeObjectsForLocal([o]);
+  const back = hydrateObjectsFromLocal(docs);
+  eq(back[0].groupId, 'g9', 'hydrateObjectsFromLocal 應還原 groupId');
+});
+
+// ── Batch 4：端點吸附 + anchor 解析 ───────────────────────────────────────────
+console.log('\ndraw-layer unit — Batch 4 端點吸附/anchor:');
+
+const RECT = { x: 10, y: 20, w: 40, h: 30 }; // 角: (10,20)..(50,50)；中心 (30,35)
+
+test('rectAnchorPoints: 8 點（4 邊中點 + 4 角）座標正確', () => {
+  const pts = rectAnchorPoints(RECT);
+  eq(pts.length, 8, '應 8 點');
+  const byRef = Object.fromEntries(pts.map(p => [p.ref, p]));
+  eq(byRef.top.x, 30); eq(byRef.top.y, 20);
+  eq(byRef.right.x, 50); eq(byRef.right.y, 35);
+  eq(byRef.bottom.x, 30); eq(byRef.bottom.y, 50);
+  eq(byRef.left.x, 10); eq(byRef.left.y, 35);
+  eq(byRef.tl.x, 10); eq(byRef.tl.y, 20);
+  eq(byRef.tr.x, 50); eq(byRef.tr.y, 20);
+  eq(byRef.br.x, 50); eq(byRef.br.y, 50);
+  eq(byRef.bl.x, 10); eq(byRef.bl.y, 50);
+});
+
+test('nearestPointOnRect: 左側外部點 → 投影到左邊', () => {
+  const p = nearestPointOnRect({ x: 0, y: 35 }, RECT);
+  eq(p.x, 10); eq(p.y, 35);
+});
+test('nearestPointOnRect: 上方外部點 → 投影到上邊', () => {
+  const p = nearestPointOnRect({ x: 30, y: 0 }, RECT);
+  eq(p.x, 30); eq(p.y, 20);
+});
+test('nearestPointOnRect: 右下外部點 → clamp 到右下角', () => {
+  const p = nearestPointOnRect({ x: 100, y: 100 }, RECT);
+  eq(p.x, 50); eq(p.y, 50);
+});
+test('nearestPointOnRect: 內部點 → 投影到最近邊', () => {
+  const p = nearestPointOnRect({ x: 12, y: 35 }, RECT); // 最靠左邊
+  eq(p.x, 10); eq(p.y, 35);
+  const p2 = nearestPointOnRect({ x: 30, y: 48 }, RECT); // 最靠下邊
+  eq(p2.x, 30); eq(p2.y, 50);
+});
+
+test('objectSnapPoints: 取其他 arrow/line 端點，排除 exceptId 與非線物件', () => {
+  const objs = [
+    makeDrawObject({ id: 'a', tool: 'arrow', geom: { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } } }),
+    makeDrawObject({ id: 'b', tool: 'line', geom: { from: { x: 5, y: 6 }, to: { x: 7, y: 8 } } }),
+    makeDrawObject({ id: 'r', tool: 'rect', geom: { x: 0, y: 0, w: 9, h: 9 } }),
+  ];
+  const pts = objectSnapPoints(objs, 'a'); // 排除 a、跳過 rect
+  eq(pts.length, 2, '只剩 b 的兩端點');
+  assert(pts.every(p => p.objId === 'b'), '都來自 b');
+  const which = pts.map(p => p.which).sort();
+  assert(which[0] === 'from' && which[1] === 'to', '含 from/to');
+});
+
+test('nearestSnap: 閾值內回最近候選', () => {
+  const cands = [{ x: 10, y: 10, ref: 'a' }, { x: 0.5, y: 0, ref: 'b' }];
+  const r = nearestSnap({ x: 0, y: 0 }, cands, SNAP_THRESHOLD_PCT);
+  assert(r, '應命中');
+  eq(r.cand.ref, 'b'); eq(r.point.x, 0.5); eq(r.point.y, 0);
+});
+test('nearestSnap: 全部超過閾值 → null', () => {
+  const cands = [{ x: 100, y: 100 }];
+  eq(nearestSnap({ x: 0, y: 0 }, cands, SNAP_THRESHOLD_PCT), null);
+});
+
+test('anchorRel ↔ resolveAnchorPoint round-trip', () => {
+  const p = { x: 30, y: 35 };
+  const rel = anchorRel(p, RECT); // 中心 → 0.5,0.5
+  close(rel.relX, 0.5); close(rel.relY, 0.5);
+  const back = resolveAnchorPoint({ relX: rel.relX, relY: rel.relY }, RECT);
+  close(back.x, p.x); close(back.y, p.y);
+});
+
+test('resolveEndpoints: 無 anchor → 用 geom', () => {
+  const o = makeDrawObject({ id: 'n', tool: 'arrow', geom: { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } } });
+  const e = resolveEndpoints(o, null, []);
+  eq(e.from.x, 1); eq(e.to.x, 3);
+});
+test('resolveEndpoints: el anchor → 用 getRectPct(selector)', () => {
+  const o = makeDrawObject({
+    id: 'e', tool: 'arrow', geom: { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } },
+    endAnchors: { to: { kind: 'el', selector: '#btn', relX: 0.5, relY: 0.5 } },
+  });
+  const getRectPct = sel => (sel === '#btn' ? RECT : null);
+  const e = resolveEndpoints(o, getRectPct, []);
+  eq(e.from.x, 1); // from 無 anchor → geom
+  eq(e.to.x, 30); eq(e.to.y, 35); // RECT 中心
+});
+test('resolveEndpoints: el anchor 解析失敗（selector 不存在）→ geom fallback', () => {
+  const o = makeDrawObject({
+    id: 'f', tool: 'arrow', geom: { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } },
+    endAnchors: { to: { kind: 'el', selector: '#gone', relX: 0.5, relY: 0.5 } },
+  });
+  const e = resolveEndpoints(o, () => null, []);
+  eq(e.to.x, 3); eq(e.to.y, 4); // fallback geom.to
+});
+test('resolveEndpoints: obj anchor → 用目標物件端點', () => {
+  const target = makeDrawObject({ id: 't', tool: 'arrow', geom: { from: { x: 5, y: 6 }, to: { x: 9, y: 9 } } });
+  const o = makeDrawObject({
+    id: 'o', tool: 'arrow', geom: { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } },
+    endAnchors: { from: { kind: 'obj', objId: 't', which: 'to' } },
+  });
+  const e = resolveEndpoints(o, null, [target, o]);
+  eq(e.from.x, 9); eq(e.from.y, 9); // 鎖到 target.to
+});
+test('resolveEndpoints: obj anchor 目標不存在 → geom fallback', () => {
+  const o = makeDrawObject({
+    id: 'o', tool: 'arrow', geom: { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } },
+    endAnchors: { from: { kind: 'obj', objId: 'missing', which: 'to' } },
+  });
+  const e = resolveEndpoints(o, null, [o]);
+  eq(e.from.x, 1); eq(e.from.y, 2);
+});
+
+test('geomBBox: 對有 anchor 的 arrow 用注入的 resolver 端點', () => {
+  const o = makeDrawObject({
+    id: 'g', tool: 'arrow', geom: { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } },
+    endAnchors: { to: { kind: 'el', selector: '#x', relX: 1, relY: 1 } },
+  });
+  const resolve = obj => ({ from: { x: 0, y: 0 }, to: { x: 50, y: 50 } });
+  const b = geomBBox(o, resolve);
+  eq(b.x, 0); eq(b.y, 0); eq(b.w, 50); eq(b.h, 50);
+});
+test('labelAnchor: 對有 anchor 的 arrow 用解析後兩端中點', () => {
+  const o = makeDrawObject({ id: 'l', tool: 'arrow', geom: { from: { x: 1, y: 1 }, to: { x: 3, y: 3 } } });
+  const resolve = () => ({ from: { x: 0, y: 0 }, to: { x: 20, y: 40 } });
+  const a = labelAnchor(o, resolve);
+  eq(a.x, 10); eq(a.y, 20);
+});
+
+test('serializeDrawObject: endAnchors 有才帶', () => {
+  const o = makeDrawObject({ id: 'sa', tool: 'arrow', geom: { from: { x: 0, y: 0 }, to: { x: 1, y: 1 } } });
+  assert(!('endAnchors' in serializeDrawObject(o)), '無 endAnchors 不帶');
+  o.endAnchors = { to: { kind: 'el', selector: '#z', relX: 0, relY: 0 } };
+  eq(serializeDrawObject(o).endAnchors.to.selector, '#z', '有則序列化');
+});
+test('drawingToDoc: endAnchors 有才帶', () => {
+  const o = makeDrawObject({ id: 'da', tool: 'arrow', geom: { from: { x: 0, y: 0 }, to: { x: 1, y: 1 } } });
+  assert(!('endAnchors' in drawingToDoc(o)), '無 endAnchors 不帶');
+  o.endAnchors = { from: { kind: 'obj', objId: 'q', which: 'to' } };
+  eq(drawingToDoc(o).endAnchors.from.objId, 'q', '有則帶');
+});
+test('mergeEndAnchor: 設某端、清某端、兩端皆空 → undefined', () => {
+  const a = mergeEndAnchor(undefined, 'to', { kind: 'el', selector: '#a' });
+  eq(a.to.selector, '#a', '設 to');
+  const b = mergeEndAnchor(a, 'from', { kind: 'obj', objId: 'x', which: 'to' });
+  eq(b.from.objId, 'x'); eq(b.to.selector, '#a');
+  const c = mergeEndAnchor(b, 'to', undefined); // 清 to，仍留 from
+  assert(!c.to && c.from, '清 to 保留 from');
+  const d = mergeEndAnchor({ to: { kind: 'el', selector: '#z' } }, 'to', undefined);
+  eq(d, undefined, '兩端皆空 → undefined');
+});
+test('mergeEndAnchor: immutable（不改入參）', () => {
+  const prev = { to: { kind: 'el', selector: '#a' } };
+  mergeEndAnchor(prev, 'from', { kind: 'el', selector: '#b' });
+  assert(!('from' in prev), '入參不應被改');
+});
+
+test('hydrateObjectsFromLocal: endAnchors round-trip', () => {
+  const o = makeDrawObject({ id: 'ha', tool: 'arrow', geom: { from: { x: 0, y: 0 }, to: { x: 1, y: 1 } } });
+  o.endAnchors = { to: { kind: 'el', selector: '#k', relX: 0.25, relY: 0.75 } };
+  const back = hydrateObjectsFromLocal([serializeDrawObject(o)]);
+  eq(back[0].endAnchors.to.relX, 0.25, '應還原 endAnchors');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

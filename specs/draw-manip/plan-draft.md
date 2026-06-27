@@ -52,11 +52,35 @@ geom 為 host-rect %。元件 rect(px viewport)→host %：用現有 pxToPct/cli
 - 接近元件 → highlight rect 出現；離開/放開 → 消失
 - undo 還原端點＋anchor
 
+## Batch 3 — 持久群組（Cmd+G／Cmd+Shift+G）
+模型：DrawObject 加 `groupId?: string`（同 groupId＝一組）。additive，不破壞匯出（有才寫）。
+- Cmd+G：選取 ≥2 → 配同一新 groupId（綁定）。<2 不動作。
+- Cmd+Shift+G：選取含群組成員 → 清掉那些成員 groupId（解散）。
+- 點任一成員 → 選整組（selectedIds 展開成全體 group-mates）。
+- 移動/刪除/換色：作用在展開後整組（沿用現有多選邏輯）。
+- 綁定/解散為 command（before/after 快照）→ 吃 undo/redo。
+- 序列化帶 groupId（有才帶）。
+
+純函式（export，unit）：
+- `assignGroupId(objects, ids, gid)` → 新 objects（immutable）
+- `clearGroupId(objects, ids)` → 新 objects
+- `expandSelectionToGroups(objects, selectedIds)` → string[]（含同組成員去重）
+- `groupMembers(objects, gid)` → id[]
+
+整合：onKey 加 (e.metaKey||e.ctrlKey)&&key==='g'（shift→ungroup）；選取後用 expandSelectionToGroups 展開；serialize 帶 groupId。
+e2e：兩物件 Cmd+G→點其一兩個都選；拖一個兩個一起動；Cmd+Shift+G 後獨立；undo 還原。
+
 ## 進度
 - [x] 分支 + plan-draft
-- [ ] 純函式 + unit（紅→綠）
-- [ ] 渲染/pointer/anchor 整合
-- [ ] live reposition + highlight
-- [ ] e2e（紅→綠）
-- [ ] build bundle + 全套回歸（單元/e2e/visual 無 regression）
-- [ ] 截圖 + lavish 驗收
+- [x] Batch 3 持久群組（commit 9309632）：純函式+unit、onKey/onSelect 整合、e2e。unit 131/e2e 104
+- [x] Batch 4 純函式 + unit（紅→綠）
+- [x] Batch 4 渲染/pointer/anchor 整合（viewObject/resolveO/getRectPct）
+- [x] Batch 4 live reposition + highlight（startLive/stopLive/liveTick、snapHighlight）
+- [x] Batch 4 e2e（紅→綠，含重拖 anchored 即時跟手）
+- [x] build bundle + 全套回歸：unit 152 / e2e 109 全綠，dist 已重建
+- [x] code review（SHIP-WITH-NITS）：套 rAF 收尾 + ungroup 整組解散；deferred #2 見下
+- [ ] 截圖 + lavish 驗收（待使用者 merge 後在 practice app 實測）
+
+## 已知限制 / 待辦（deferred）
+- **objectSnapPoints 用 raw geom**：吸附到「另一條已 el-anchored 且元件移動過的 arrow 端點」時，會吸到該 arrow 的舊 geom 座標而非 live 位置（obj-anchor 吸附這條次要路徑）。修法＝把 resolve 注入 objectSnapPoints。影響小，暫不改（避免動 pure-fn 簽名）。
+- 標注紀錄 row 縮圖、即時換色新版驗證仍在 punch list。
