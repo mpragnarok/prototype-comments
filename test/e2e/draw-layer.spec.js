@@ -1525,6 +1525,129 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.endpointCount === 0, `rect 不應出現 data-endpoint，實際 ${r.endpointCount}`);
   });
 
+  // ── Batch 4：端點吸附 element anchor + live reposition + 接近高亮 ───────────────
+  console.log('\ndraw-layer e2e — Batch 4 端點吸附/anchor/live:');
+
+  // 重設 #submit-btn 到已知位置（前面測試可能改過 style），畫一條 arrow 並選取。
+  async function setupArrowForSnap() {
+    await page.evaluate(() => {
+      const b = document.querySelector('#submit-btn');
+      b.style.left = '400px'; b.style.top = '300px'; b.style.width = '80px'; b.style.height = '30px';
+      window.__drawTest.api.clear();
+      window.__drawTest.api.setTool('arrow');
+    });
+    await dragDraw(page, 100, 80, 250, 150); // 畫 arrow（自動選取）
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.mouse.click(175, 115); // 確保選取
+    await page.waitForTimeout(30);
+  }
+  // 回傳 #submit-btn 上邊中點附近的 viewport 座標（吸附目標）。
+  async function btnTopMid() {
+    return page.evaluate(() => {
+      const r = document.querySelector('#submit-btn').getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + 4 }; // 略入上緣 → 投影到 top 邊
+    });
+  }
+  async function toHandlePos() {
+    return page.evaluate(() => {
+      const el = document.querySelector('#pc-draw [data-endpoint="to"]');
+      return el ? { cx: parseFloat(el.getAttribute('cx')), cy: parseFloat(el.getAttribute('cy')) } : null;
+    });
+  }
+
+  await test('拖 to 端點到 #submit-btn 邊緣 → 吸附 + endAnchors.to.kind===el + selector 命中', async () => {
+    await setupArrowForSnap();
+    const h = await toHandlePos();
+    const t = await btnTopMid();
+    await page.mouse.move(h.cx, h.cy);
+    await page.mouse.down();
+    await page.mouse.move((h.cx + t.x) / 2, (h.cy + t.y) / 2);
+    await page.mouse.move(t.x, t.y);
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    const r = await page.evaluate(() => {
+      const o = window.__drawTest.api.getObjects()[0];
+      return { endAnchors: o.endAnchors || null, to: o.geom.to };
+    });
+    console.log('     snap result:', JSON.stringify(r));
+    assert(r.endAnchors && r.endAnchors.to, 'endAnchors.to 應建立');
+    assert(r.endAnchors.to.kind === 'el', `anchor kind 應為 el，實際 ${r.endAnchors.to.kind}`);
+    assert(r.endAnchors.to.selector === '#submit-btn', `selector 應命中 #submit-btn，實際 ${r.endAnchors.to.selector}`);
+    assert(typeof r.endAnchors.to.relX === 'number' && typeof r.endAnchors.to.relY === 'number', '應有 relX/relY');
+  });
+
+  await test('live reposition：移動 #submit-btn → arrow to 端點跟著移動', async () => {
+    // 承上：arrow 的 to 已鎖到 #submit-btn 上緣。讀渲染 line 的 y2，移動按鈕後應變大。
+    const before = await page.evaluate(() => parseFloat(document.querySelector('#pc-draw line').getAttribute('y2')));
+    await page.evaluate(() => { document.querySelector('#submit-btn').style.top = '360px'; }); // 下移 60px
+    await page.waitForTimeout(120); // 等 rAF live loop 比對 → render
+    const after = await page.evaluate(() => parseFloat(document.querySelector('#pc-draw line').getAttribute('y2')));
+    console.log('     line y2 before/after move:', before, '→', after);
+    assert(after > before + 20, `按鈕下移後 to 端點 y2 應變大，實際 ${before} → ${after}`);
+  });
+
+  await test('接近元件 → 出現 dashed teal 高亮 rect；放開 → 消失', async () => {
+    await setupArrowForSnap();
+    const h = await toHandlePos();
+    const t = await btnTopMid();
+    await page.mouse.move(h.cx, h.cy);
+    await page.mouse.down();
+    await page.mouse.move(t.x, t.y); // 移到按鈕上緣（吸附中）
+    await page.waitForTimeout(20);
+    const during = await page.evaluate(() => document.querySelectorAll('#pc-draw .pc-draw-snap-hl').length);
+    await page.mouse.up();
+    await page.waitForTimeout(20);
+    const after = await page.evaluate(() => document.querySelectorAll('#pc-draw .pc-draw-snap-hl').length);
+    console.log('     highlight during/after:', during, after);
+    assert(during === 1, `吸附中應有 1 個高亮 rect，實際 ${during}`);
+    assert(after === 0, `放開後高亮應消失，實際 ${after}`);
+  });
+
+  await test('undo 還原端點 + anchor', async () => {
+    await setupArrowForSnap();
+    const h = await toHandlePos();
+    const t = await btnTopMid();
+    const beforeTo = await page.evaluate(() => ({ ...window.__drawTest.api.getObjects()[0].geom.to }));
+    await page.mouse.move(h.cx, h.cy);
+    await page.mouse.down();
+    await page.mouse.move(t.x, t.y);
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    const snapped = await page.evaluate(() => !!(window.__drawTest.api.getObjects()[0].endAnchors || {}).to);
+    assert(snapped, 'undo 前應已建立 anchor');
+    await page.evaluate(() => window.__drawTest.api.undo());
+    await page.waitForTimeout(30);
+    const r = await page.evaluate(() => {
+      const o = window.__drawTest.api.getObjects()[0];
+      return { hasAnchor: !!(o.endAnchors || {}).to, to: o.geom.to };
+    });
+    console.log('     after undo:', JSON.stringify(r), 'origTo:', JSON.stringify(beforeTo));
+    assert(!r.hasAnchor, 'undo 後 endAnchors.to 應清除');
+    assert(Math.abs(r.to.x - beforeTo.x) < 0.01 && Math.abs(r.to.y - beforeTo.y) < 0.01, 'undo 後 geom.to 應還原');
+  });
+
+  await test('重拖已 anchored 的 to 端點 → 拖曳中即時跟手（不被舊 anchor 鎖住）', async () => {
+    await setupArrowForSnap();
+    let h = await toHandlePos();
+    const t = await btnTopMid();
+    await page.mouse.move(h.cx, h.cy); // 先把 to 鎖到 #submit-btn
+    await page.mouse.down();
+    await page.mouse.move(t.x, t.y);
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    const anchoredY2 = await page.evaluate(() => parseFloat(document.querySelector('#pc-draw line').getAttribute('y2')));
+    h = await toHandlePos(); // anchored 後 handle 落在按鈕上緣
+    await page.mouse.move(h.cx, h.cy);
+    await page.mouse.down();
+    await page.mouse.move(h.cx, 80); // 往上拖離按鈕（未放開）
+    await page.waitForTimeout(20);
+    const duringY2 = await page.evaluate(() => parseFloat(document.querySelector('#pc-draw line').getAttribute('y2')));
+    await page.mouse.up();
+    await page.waitForTimeout(20);
+    console.log('     re-drag anchored y2 during:', anchoredY2, '→', duringY2);
+    assert(duringY2 < anchoredY2 - 100, `重拖 anchored 端點應即時跟手上移，實際 ${anchoredY2} → ${duringY2}`);
+  });
+
   // ── P7 團隊持久（Firestore 向量同步，用 mock firebase）─────────────────────────────
   // 在獨立分頁跑（避免與上方共用 #canvas 的 P1–P6 draw layer 互相干擾）。
   const teamPage = await browser.newPage({ viewport: { width: 800, height: 600 } });

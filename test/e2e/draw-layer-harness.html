@@ -20,6 +20,8 @@
   <!-- 底層 app 元件（在 overlay 之下）：給 P4 elementFromPoint anchor 擷取測試用 -->
   <div id="price-card" style="position:absolute; left:80px; top:60px; width:160px; height:120px; background:#ddd;"></div>
   <div data-testid="sidebar" style="position:absolute; left:320px; top:60px; width:120px; height:200px; background:#eee;"></div>
+  <!-- Batch 4 吸附 fixture：已知位置的按鈕，供端點吸附 + live reposition e2e 用 -->
+  <button id="submit-btn" style="position:absolute; left:400px; top:300px; width:80px; height:30px;">送出</button>
 </div>
 
 <script type="module">

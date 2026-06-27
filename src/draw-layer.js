@@ -337,10 +337,11 @@ function pointDir(pts, i) {
 }
 
 // 任一物件 → 其 % bounding box（選取框 / 命中測試 / 縮放重映射用）。
-export function geomBBox(o) {
+// resolve(o)（選用）：回傳 arrow/line 解析後端點 {from,to}（el/obj anchor）。不傳則用 geom。
+export function geomBBox(o, resolve) {
   const g = o.geom;
   if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond' || o.tool === 'image') return { x: g.x, y: g.y, w: g.w, h: g.h };
-  if (o.tool === 'arrow' || o.tool === 'line') return rectFromPoints(g.from, g.to);
+  if (o.tool === 'arrow' || o.tool === 'line') { const e = resolve ? resolve(o) : g; return rectFromPoints(e.from, e.to); }
   if (o.tool === 'pencil') {
     const xs = g.points.map(p => p[0]), ys = g.points.map(p => p[1]);
     const x = Math.min(...xs), y = Math.min(...ys);
@@ -351,12 +352,12 @@ export function geomBBox(o) {
 }
 
 // 綁定標籤的錨點（% 座標）：line/arrow 取兩端中點；其餘取 bbox 中心。隨 geom 重算 → 跟著物件移動/縮放。
-export function labelAnchor(o) {
+export function labelAnchor(o, resolve) {
   if (o.tool === 'arrow' || o.tool === 'line') {
-    const g = o.geom;
-    return { x: (g.from.x + g.to.x) / 2, y: (g.from.y + g.to.y) / 2 };
+    const e = resolve ? resolve(o) : o.geom;
+    return { x: (e.from.x + e.to.x) / 2, y: (e.from.y + e.to.y) / 2 };
   }
-  const b = geomBBox(o);
+  const b = geomBBox(o, resolve);
   return { x: b.x + b.w / 2, y: b.y + b.h / 2 };
 }
 
@@ -406,6 +407,115 @@ export function resizeBBox(oldBox, handle, p, minSize = MIN_DRAW_SIZE_PCT) {
 // 設定箭頭/線段的端點（immutable）。which ∈ 'from'|'to'。回傳新 geom，不改入參。
 export function setEndpoint(geom, which, p) {
   return { ...geom, [which]: { x: p.x, y: p.y } };
+}
+
+// ── Batch 4 純函式：端點吸附 + element/object anchor 解析 ──────────────────────
+// 吸附閾值（host rect %）。約等於 800px 寬畫布上 ~20px。改這裡即可調整吸附靈敏度。
+export const SNAP_THRESHOLD_PCT = 2.5;
+
+// rect {x,y,w,h}（% 空間）→ 8 個吸附點：4 邊中點 + 4 角，各標 ref。
+export function rectAnchorPoints(rect) {
+  const { x, y, w, h } = rect;
+  return [
+    { x: x + w / 2, y, ref: 'top' },
+    { x: x + w, y: y + h / 2, ref: 'right' },
+    { x: x + w / 2, y: y + h, ref: 'bottom' },
+    { x, y: y + h / 2, ref: 'left' },
+    { x, y, ref: 'tl' },
+    { x: x + w, y, ref: 'tr' },
+    { x: x + w, y: y + h, ref: 'br' },
+    { x, y: y + h, ref: 'bl' },
+  ];
+}
+
+// p {x,y} → rect 邊界上最近點。外部點 → clamp 到邊界；內部點 → 投影到最近的一條邊。
+export function nearestPointOnRect(p, rect) {
+  const { x, y, w, h } = rect;
+  const inside = p.x > x && p.x < x + w && p.y > y && p.y < y + h;
+  if (!inside) {
+    return { x: Math.max(x, Math.min(p.x, x + w)), y: Math.max(y, Math.min(p.y, y + h)) };
+  }
+  const dl = p.x - x, dr = x + w - p.x, dt = p.y - y, db = y + h - p.y;
+  const m = Math.min(dl, dr, dt, db);
+  if (m === dl) return { x, y: p.y };
+  if (m === dr) return { x: x + w, y: p.y };
+  if (m === dt) return { x: p.x, y };
+  return { x: p.x, y: y + h };
+}
+
+// 其他畫圖物件（arrow/line）的端點 → 吸附候選，標上可建 obj anchor 的 objId/which。
+export function objectSnapPoints(objects, exceptId) {
+  const pts = [];
+  (objects || []).forEach(o => {
+    if (o.id === exceptId) return;
+    if (o.tool !== 'arrow' && o.tool !== 'line') return;
+    pts.push({ x: o.geom.from.x, y: o.geom.from.y, objId: o.id, which: 'from' });
+    pts.push({ x: o.geom.to.x, y: o.geom.to.y, objId: o.id, which: 'to' });
+  });
+  return pts;
+}
+
+// p → candidates 中閾值內最近者 {point, cand}；皆超過閾值 → null。
+export function nearestSnap(p, candidates, threshold = SNAP_THRESHOLD_PCT) {
+  let best = null, bestD = threshold;
+  (candidates || []).forEach(c => {
+    const d = Math.hypot(c.x - p.x, c.y - p.y);
+    if (d <= bestD) { bestD = d; best = c; }
+  });
+  return best ? { point: { x: best.x, y: best.y }, cand: best } : null;
+}
+
+// p(%) 在 elRect(%) 內的相對位置 0..1（除以零時回 0）。
+export function anchorRel(p, elRect) {
+  return {
+    relX: elRect.w ? (p.x - elRect.x) / elRect.w : 0,
+    relY: elRect.h ? (p.y - elRect.y) / elRect.h : 0,
+  };
+}
+
+// el anchor + elRect(%) → 絕對 % 點（anchorRel 的逆運算）。
+export function resolveAnchorPoint(anchor, elRect) {
+  return {
+    x: elRect.x + (anchor.relX || 0) * elRect.w,
+    y: elRect.y + (anchor.relY || 0) * elRect.h,
+  };
+}
+
+// 解析單一端點：有 el anchor → getRectPct(selector) 換算；有 obj anchor → 查目標物件端點；
+// 無 anchor 或解析失敗 → 回 geom fallback。seen 防 obj anchor 互鎖造成無限遞迴。
+function resolveOneEnd(o, which, getRectPct, objects, seen) {
+  const anchor = o.endAnchors && o.endAnchors[which];
+  const fallback = o.geom[which];
+  if (!anchor) return fallback;
+  if (anchor.kind === 'el') {
+    const elRect = getRectPct && getRectPct(anchor.selector);
+    return elRect ? resolveAnchorPoint(anchor, elRect) : fallback;
+  }
+  if (anchor.kind === 'obj') {
+    if (!objects || seen.has(anchor.objId)) return fallback;
+    const target = objects.find(t => t.id === anchor.objId);
+    if (!target) return fallback;
+    seen.add(o.id);
+    const ends = resolveEndpoints(target, getRectPct, objects, seen);
+    return ends[anchor.which] || fallback;
+  }
+  return fallback;
+}
+
+// 解析 arrow/line 物件的兩端 → {from,to}。供 render/geomBBox/labelAnchor 注入。
+export function resolveEndpoints(o, getRectPct, objects, seen = new Set()) {
+  return {
+    from: resolveOneEnd(o, 'from', getRectPct, objects, seen),
+    to: resolveOneEnd(o, 'to', getRectPct, objects, seen),
+  };
+}
+
+// 把某一端的 anchor 併入 endAnchors（immutable）。anchor 為 falsy → 清掉該端；
+// 兩端皆空 → 回 undefined（物件不再帶 endAnchors）。
+export function mergeEndAnchor(prev, which, anchor) {
+  const next = { ...(prev || {}) };
+  if (anchor) next[which] = anchor; else delete next[which];
+  return Object.keys(next).length ? next : undefined;
 }
 
 // ── Batch 3 純函式：持久群組（groupId）───────────────────────────────────────
@@ -590,10 +700,11 @@ function nextGroupId() { return 'g' + (++_idSeq); }
 
 // 組裝一個 DrawObject（plan §4.2 子集：id/tool/geom/style[/text]）。
 // z 由繪圖層在 commit 時依 DOM 順序戳上（stampZ），純函式不負責。
-export function makeDrawObject({ id, tool, geom, style, text, imageRef } = {}) {
+export function makeDrawObject({ id, tool, geom, style, text, imageRef, endAnchors } = {}) {
   const obj = { id: id || nextDrawId(), tool, geom, style: normalizeStyle(style) };
   if (text != null) obj.text = text;
   if (imageRef != null) obj.imageRef = imageRef; // image 物件的 dataURL（P3）/ 本機路徑（P4）
+  if (endAnchors != null) obj.endAnchors = endAnchors; // arrow/line 端點 element/object 硬鎖
   return obj;
 }
 
@@ -606,6 +717,7 @@ export function serializeDrawObject(obj) {
   if (obj.imageRef != null) out.imageRef = obj.imageRef;            // 貼圖 dataURL/路徑
   if (obj.z != null) out.z = obj.z;
   if (obj.groupId != null) out.groupId = obj.groupId;
+  if (obj.endAnchors != null) out.endAnchors = obj.endAnchors; // 端點硬鎖（有才帶）
   return out;
 }
 
@@ -639,6 +751,7 @@ export function drawingToDoc(obj) {
   if (obj.anchor != null) doc.anchor = obj.anchor;                 // elementFromPoint selector
   if (obj.z != null) doc.z = obj.z;                                // z-order
   if (obj.groupId != null) doc.groupId = obj.groupId;              // 群組 id
+  if (obj.endAnchors != null) doc.endAnchors = obj.endAnchors;     // 端點硬鎖（有才帶）
   return doc; // 注意：不含 imageRef / dataURL（PNG 永不進 Firestore）
 }
 
@@ -934,25 +1047,108 @@ export function initDrawLayer(target, opts = {}) {
 
   function stampZ() { state.objects.forEach((o, i) => { o.z = i; }); }
 
+  // ── Batch 4：端點 anchor 解析（element/object 硬鎖）+ 吸附 + live reposition ──────
+  // selector → 元件 rect 換算成 host(svg) % 空間（與 geom 同基準）。找不到 → null（fallback geom）。
+  function getRectPct(selector) {
+    if (!selector) return null;
+    let el = null;
+    try { el = document.querySelector(selector); } catch (_) { return null; }
+    if (!el || typeof el.getBoundingClientRect !== 'function') return null;
+    const er = el.getBoundingClientRect();
+    const hr = svg.getBoundingClientRect();
+    return {
+      x: pxToPct(er.left - hr.left, hr.width), y: pxToPct(er.top - hr.top, hr.height),
+      w: pxToPct(er.width, hr.width), h: pxToPct(er.height, hr.height),
+    };
+  }
+  // 綁定 resolver：供 render/geomBBox/labelAnchor 取得 arrow/line 解析後端點。
+  const resolveO = o => resolveEndpoints(o, getRectPct, state.objects);
+  // arrow/line 有 anchor 時 → 回傳「端點已解析」的渲染視圖物件；其餘原樣。
+  function viewObject(o) {
+    if ((o.tool === 'arrow' || o.tool === 'line') && o.endAnchors) {
+      const e = resolveO(o);
+      return { ...o, geom: { ...o.geom, from: e.from, to: e.to } };
+    }
+    return o;
+  }
+
+  // 拖端點吸附中的高亮 selector（render 時畫 dashed teal rect）。放開/離開 → null。
+  let snapHighlightSel = null;
+  function renderSnapHighlight() {
+    if (!snapHighlightSel) return;
+    const r = getRectPct(snapHighlightSel);
+    if (!r) return;
+    const rect = { width: svg.clientWidth || host.clientWidth, height: svg.clientHeight || host.clientHeight };
+    const b = toPxBox(r, rect);
+    svg.appendChild(drawSvgEl('rect', {
+      class: 'pc-draw-snap-hl', x: b.x, y: b.y, width: b.w, height: b.h, fill: 'none',
+      stroke: '#0FA0A0', 'stroke-width': 2, 'stroke-dasharray': '5 4', 'pointer-events': 'none',
+    }));
+  }
+
+  // ── live reposition：有 el anchor 時監聽 scroll/resize/ResizeObserver + rAF 比對 rect ──
+  let liveOn = false, liveRaf = null, liveRO = null;
+  const liveRects = new Map();
+  function anchoredSelectors() {
+    const sels = new Set();
+    state.objects.forEach(o => {
+      const ea = o.endAnchors; if (!ea) return;
+      ['from', 'to'].forEach(w => { if (ea[w] && ea[w].kind === 'el') sels.add(ea[w].selector); });
+    });
+    return sels;
+  }
+  function liveTick() {
+    if (!liveOn) return;
+    let changed = false;
+    anchoredSelectors().forEach(sel => {
+      const r = getRectPct(sel);
+      const sig = r ? `${r.x},${r.y},${r.w},${r.h}` : 'null';
+      if (liveRects.get(sel) !== sig) { liveRects.set(sel, sig); changed = true; }
+    });
+    if (changed) render();
+    liveRaf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame(liveTick) : null;
+  }
+  function syncLiveLoop() {
+    const need = state.objects.some(o => o.endAnchors);
+    if (need && !liveOn) startLive();
+    else if (!need && liveOn) stopLive();
+  }
+  function startLive() {
+    liveOn = true;
+    window.addEventListener('scroll', render, true); // capture：抓內層捲動容器
+    if (typeof ResizeObserver === 'function') { liveRO = new ResizeObserver(() => render()); liveRO.observe(host); }
+    if (typeof requestAnimationFrame === 'function') liveRaf = requestAnimationFrame(liveTick);
+  }
+  function stopLive() {
+    liveOn = false;
+    window.removeEventListener('scroll', render, true);
+    if (liveRO) { liveRO.disconnect(); liveRO = null; }
+    if (liveRaf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(liveRaf);
+    liveRaf = null; liveRects.clear();
+  }
+
   function render() {
     stampZ();
     while (svg.childNodes.length > 1) svg.removeChild(svg.lastChild); // 保留 <defs>
     const rect = { width: svg.clientWidth || host.clientWidth, height: svg.clientHeight || host.clientHeight };
     [...state.objects, state.draft].forEach(o => {
       if (!o) return;
-      const node = renderObject(o, rect, svg);
+      const vo = viewObject(o); // arrow/line anchor → 解析後端點渲染
+      const node = renderObject(vo, rect, svg);
       node.setAttribute('data-id', o.id);
       // 物件不吃指標事件 → 所有點擊都落在穩定的 <svg>（hit-test 用幾何）。
       // 關鍵：避免點擊細線時 render() 重建 <line> 導致瀏覽器 dblclick 因 target 改變而不觸發。
       node.setAttribute('pointer-events', 'none');
       svg.appendChild(node);
-      const lbl = renderLabel(o, rect);
+      const lbl = renderLabel(vo, rect);
       if (lbl) { svg.appendChild(lbl); sizeLabelBg(lbl); } // 綁定標籤；append 後量 text bbox 收緊白底
     });
     renderSelection(rect);
     renderMarquee(rect);
+    renderSnapHighlight(); // Batch 4：拖端點吸附中的 dashed teal 高亮
     syncToolbar(toolbar, state, history);
     renderRecordPanel(); // P6：標注紀錄面板隨 objects/selection 即時更新
+    syncLiveLoop();       // Batch 4：有 anchor 才啟動 live reposition 監聽
   }
 
   function renderSelection(rect) {
@@ -960,16 +1156,17 @@ export function initDrawLayer(target, opts = {}) {
     if (!objs.length) return;
     const g = drawSvgEl('g', { class: 'pc-draw-selection' });
     objs.forEach(o => {
-      const box = toPxBox(geomBBox(o), rect);
+      const box = toPxBox(geomBBox(o, resolveO), rect);
       g.appendChild(drawSvgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, fill: 'none', stroke: '#0FA0A0', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
     });
     if (objs.length === 1) { // handle 只在單選時出現
       const o = objs[0];
       if (o.tool === 'arrow' || o.tool === 'line') {
-        // 箭頭/線段：兩個圓端點 handle（取代 bbox 四角）
+        // 箭頭/線段：兩個圓端點 handle（取代 bbox 四角）；用解析後端點（anchor live）
+        const ends = resolveO(o);
         ['from', 'to'].forEach(which => {
-          const cx = pctToPx(o.geom[which].x, rect.width);
-          const cy = pctToPx(o.geom[which].y, rect.height);
+          const cx = pctToPx(ends[which].x, rect.width);
+          const cy = pctToPx(ends[which].y, rect.height);
           g.appendChild(drawSvgEl('circle', { cx, cy, r: 4, fill: '#fff', stroke: '#0FA0A0', 'stroke-width': 1, 'data-endpoint': which }));
         });
       } else {
@@ -1047,6 +1244,7 @@ export function initDrawLayer(target, opts = {}) {
     if (doc.label != null) obj.label = doc.label;
     if (doc.anchor != null) obj.anchor = doc.anchor;
     if (doc.groupId != null) obj.groupId = doc.groupId;
+    if (doc.endAnchors != null) obj.endAnchors = doc.endAnchors;
     return obj;
   }
   function commitChange(id, before, after) { pushHistory({ type: 'update', id, before, after }); }
@@ -1161,7 +1359,7 @@ export function initDrawLayer(target, opts = {}) {
   }
   function hitTest(p) {
     for (let i = state.objects.length - 1; i >= 0; i--) {
-      const b = geomBBox(state.objects[i]);
+      const b = geomBBox(state.objects[i], resolveO);
       const pad = 1.5;
       if (p.x >= b.x - pad && p.x <= b.x + b.w + pad && p.y >= b.y - pad && p.y <= b.y + b.h + pad)
         return state.objects[i];
@@ -1232,25 +1430,66 @@ export function initDrawLayer(target, opts = {}) {
     window.addEventListener('pointerup', onUp);
   }
 
-  // 拖曳端點 handle → 重新指向端點（arrow/line 專用）。仿 startResize。
+  // 拖曳端點 handle → 重新指向端點（arrow/line 專用）。仿 startResize，加吸附 + anchor + 高亮。
   function startEndpointDrag(e, which, rect) {
     const o = selectedObjects()[0];
     if (!o) return;
-    const before = o.geom;
-    let moved = false;
+    const before = { geom: o.geom, endAnchors: o.endAnchors };
+    let moved = false, pendingAnchor;
     const onMv = ev => {
       const p = clientToPct(ev.clientX, ev.clientY, rect);
-      o.geom = setEndpoint(before, which, p);
+      const snap = computeEndpointSnap(p, o.id, ev.clientX, ev.clientY);
+      o.geom = setEndpoint(before.geom, which, snap ? snap.point : p);
+      pendingAnchor = snap ? snap.anchor : undefined;
+      o.endAnchors = mergeEndAnchor(before.endAnchors, which, pendingAnchor); // 拖曳中即時反映：避免已 anchored 端點被舊 anchor 鎖住不跟手
+      snapHighlightSel = snap ? snap.selector : null; // 吸到元件 → 高亮其 rect
       moved = true;
       render();
     };
     const onUp = () => {
       window.removeEventListener('pointermove', onMv);
       window.removeEventListener('pointerup', onUp);
-      if (moved) commitChange(o.id, { geom: before }, { geom: o.geom });
+      snapHighlightSel = null;
+      if (moved) commitEndpoint(o, which, before, pendingAnchor);
+      else render(); // 清掉高亮
     };
     window.addEventListener('pointermove', onMv);
     window.addEventListener('pointerup', onUp);
+  }
+  // 蒐集候選（游標下元件的 8 錨點 + 最近邊 + 其他物件端點）→ 閾值內最近吸附點 + 對應 anchor。
+  function computeEndpointSnap(p, draggedId, clientX, clientY) {
+    const candidates = objectSnapPoints(state.objects, draggedId);
+    const selector = elSnapSelector(elementUnderPoint(clientX, clientY));
+    const elRect = selector ? getRectPct(selector) : null;
+    if (elRect) {
+      rectAnchorPoints(elRect).forEach(pt => candidates.push({ ...pt, selector }));
+      candidates.push({ ...nearestPointOnRect(p, elRect), selector, ref: 'edge' });
+    }
+    const hit = nearestSnap(p, candidates, SNAP_THRESHOLD_PCT);
+    if (!hit) return null;
+    return { point: hit.point, anchor: snapToAnchor(hit.cand, elRect), selector: hit.cand.selector || null };
+  }
+  // 候選 → anchor：obj 候選 → obj anchor；el 候選 → el anchor（relX/relY）。
+  function snapToAnchor(cand, elRect) {
+    if (cand.objId != null) return { kind: 'obj', objId: cand.objId, which: cand.which };
+    if (cand.selector && elRect) {
+      const rel = anchorRel(cand, elRect);
+      return { kind: 'el', selector: cand.selector, relX: rel.relX, relY: rel.relY };
+    }
+    return undefined;
+  }
+  // 排除 overlay/toolbar 自身與 body/html → 回傳可吸附元件的 css selector。
+  function elSnapSelector(el) {
+    if (!el || el === document.body || el === document.documentElement) return null;
+    if (svg.contains(el) || toolbar.contains(el)) return null;
+    return cssSelectorFor(el);
+  }
+  // 提交端點變更：before/after 同時含 geom + endAnchors（undo 一起還原）。
+  function commitEndpoint(o, which, before, pendingAnchor) {
+    const nextAnchors = mergeEndAnchor(before.endAnchors, which, pendingAnchor);
+    if (nextAnchors) o.endAnchors = nextAnchors; else delete o.endAnchors;
+    commitChange(o.id, { geom: before.geom, endAnchors: before.endAnchors },
+      { geom: o.geom, endAnchors: nextAnchors });
   }
 
   // ── pointer：繪製模式（拖曳畫物件）────────────────────────────────────────────
@@ -1593,6 +1832,7 @@ export function initDrawLayer(target, opts = {}) {
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
     clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; render(); persistLocalSave(); },
     destroy: () => {
+      stopLive(); // Batch 4：拆掉 live reposition 監聽/rAF/ResizeObserver
       svg.remove(); toolbar.remove(); contextMenu.remove();
       recordTab.remove(); recordDrawer.remove();
       window.removeEventListener('resize', render);
