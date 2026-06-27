@@ -830,12 +830,25 @@ async function dragDraw(page, x1, y1, x2, y2) {
       const g = document.querySelector(`.pc-draw-label[data-label-for="${o.id}"]`);
       const bg = g && g.querySelector('rect');
       const t = g && g.querySelector('text');
-      return { label: o.label, hasBg: !!bg, bgFill: bg && bg.getAttribute('fill'), tx: t && +t.getAttribute('x'), ty: t && +t.getAttribute('y') };
+      const tb = t.getBBox();        // 實際渲染文字框
+      const bb = bg.getBBox();        // 白底框
+      return {
+        label: o.label, bgFill: bg.getAttribute('fill'),
+        tx: +t.getAttribute('x'), ty: +t.getAttribute('y'),
+        textW: tb.width, textH: tb.height, bgW: bb.width, bgH: bb.height,
+        // 覆蓋檢查：白底四邊都包住文字框
+        covers: bb.x <= tb.x && bb.y <= tb.y && (bb.x + bb.width) >= (tb.x + tb.width) && (bb.y + bb.height) >= (tb.y + tb.height),
+        // 中心對齊錨點
+        bgCx: bb.x + bb.width / 2, bgCy: bb.y + bb.height / 2,
+      };
     });
     console.log('     line label:', JSON.stringify(r));
     assert(r.label === '對齊', 'line label 寫回');
-    assert(r.hasBg && /#fff|white/i.test(r.bgFill), 'line/arrow 標籤應有白底 rect 蓋線');
+    assert(/#fff|white/i.test(r.bgFill), 'line/arrow 標籤應有白底 rect 蓋線');
     assert(Math.abs(r.tx - 200) < 8 && Math.abs(r.ty - 150) < 8, `label 應在中點(~200,150)，實際 ${r.tx},${r.ty}`);
+    assert(r.bgW >= r.textW && r.bgH >= r.textH, `白底應 >= 文字框（bg ${r.bgW}x${r.bgH} vs text ${r.textW}x${r.textH}）`);
+    assert(r.covers, '白底四邊應完全包住文字框（線不會露出）');
+    assert(Math.abs(r.bgCx - 200) < 8 && Math.abs(r.bgCy - 150) < 8, `白底應置中於錨點，實際 ${r.bgCx},${r.bgCy}`);
   });
 
   await test('label 隨物件移動：拖 rect → 標籤重新置中', async () => {

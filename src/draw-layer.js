@@ -648,7 +648,7 @@ export function initDrawLayer(target, opts = {}) {
       node.setAttribute('pointer-events', 'none');
       svg.appendChild(node);
       const lbl = renderLabel(o, rect);
-      if (lbl) svg.appendChild(lbl); // 綁定標籤（隨 geom 重算位置）
+      if (lbl) { svg.appendChild(lbl); sizeLabelBg(lbl); } // 綁定標籤；append 後量 text bbox 收緊白底
     });
     renderSelection(rect);
     renderMarquee(rect);
@@ -1104,16 +1104,18 @@ function renderObject(o, rect, svg) {
 }
 
 const LABEL_FONT_SIZE = 14;
+const LABEL_BG_PAD = 5; // 白底每邊外擴 px
 // 綁定標籤 → <g>（含 <text>；line/arrow 另加白底 <rect> 把線蓋掉）。無 label 回 null。
+// 白底先用估算尺寸（fallback），append 後由 sizeLabelBg() 量實際 text bbox 收緊到完全覆蓋。
 function renderLabel(o, rect) {
   if (o.label == null || o.label === '') return null;
   const a = labelAnchor(o);
   const x = pctToPx(a.x, rect.width), y = pctToPx(a.y, rect.height);
   const isLine = o.tool === 'arrow' || o.tool === 'line';
   const g = drawSvgEl('g', { class: 'pc-draw-label', 'data-label-for': o.id, 'pointer-events': 'none' });
-  if (isLine) { // 白底蓋住線（使用者：「字會自動把線蓋掉」）
-    const w = o.label.length * LABEL_FONT_SIZE * 0.62 + 8;
-    const h = LABEL_FONT_SIZE + 6;
+  if (isLine) { // 白底蓋住線；rect 在前(底層)、text 在後(上層)
+    const w = o.label.length * LABEL_FONT_SIZE + LABEL_BG_PAD * 2; // 估寬偏大（CJK ~1em/字）→ fallback 也蓋住
+    const h = LABEL_FONT_SIZE + LABEL_BG_PAD * 2;
     g.appendChild(drawSvgEl('rect', { x: x - w / 2, y: y - h / 2, width: w, height: h, fill: '#ffffff', rx: 3 }));
   }
   const t = drawSvgEl('text', {
@@ -1123,6 +1125,20 @@ function renderLabel(o, rect) {
   t.textContent = o.label;
   g.appendChild(t);
   return g;
+}
+
+// 量實際 text bbox，把白底 rect 收到「text bbox + padding」完全覆蓋（需 text 已在 DOM）。
+function sizeLabelBg(g) {
+  const bg = g.querySelector('rect');
+  const text = g.querySelector('text');
+  if (!bg || !text) return; // shape 標籤無 bg → 略過
+  let bb;
+  try { bb = text.getBBox(); } catch (_) { bb = null; }
+  if (!bb || !bb.width) return; // 量不到 → 保留估算 fallback
+  bg.setAttribute('x', bb.x - LABEL_BG_PAD);
+  bg.setAttribute('y', bb.y - LABEL_BG_PAD);
+  bg.setAttribute('width', bb.width + LABEL_BG_PAD * 2);
+  bg.setAttribute('height', bb.height + LABEL_BG_PAD * 2);
 }
 
 // <defs> 容器（marker 依顏色按需建立，見 ensureArrowMarker）。render 保留首子節點＝此 defs。
