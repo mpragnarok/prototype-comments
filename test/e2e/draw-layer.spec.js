@@ -333,9 +333,10 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(redone === 0, 'Ctrl+Shift+Z 應重做');
   });
 
-  await test('color picker：點藍色 swatch → 選取物件 stroke 變色 + 新物件沿用', async () => {
+  await test('color picker（select 工具 + 選取）：swatch → 選取物件 stroke 變色 + 新物件沿用', async () => {
     await reset('rect');
-    await dragDraw(page, 100, 80, 200, 180); // 自動選取
+    await dragDraw(page, 100, 80, 200, 180); // 自動選取，tool 仍為 rect
+    await page.evaluate(() => window.__drawTest.api.setTool('select')); // 切 select（保留選取）
     await page.click('.pc-draw-swatch[data-color="#0066FF"]');
     const r = await page.evaluate(() => {
       const o = window.__drawTest.api.getObjects()[0];
@@ -352,9 +353,10 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(next === '#0066FF', `新物件應沿用新預設色，實際 ${next}`);
   });
 
-  await test('strokeWidth picker：點 8px → 選取物件線寬改變', async () => {
+  await test('strokeWidth picker（select 工具 + 選取）：8px → 選取物件線寬改變', async () => {
     await reset('rect');
     await dragDraw(page, 100, 80, 200, 180);
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
     await page.click('.pc-draw-width[data-width="8"]');
     const r = await page.evaluate(() => ({
       sw: window.__drawTest.api.getObjects()[0].style.strokeWidth,
@@ -362,6 +364,74 @@ async function dragDraw(page, x1, y1, x2, y2) {
     }));
     console.log('     strokeWidth picker:', JSON.stringify(r));
     assert(r.sw === 8 && r.domSw === '8', `線寬應為 8，實際 ${JSON.stringify(r)}`);
+  });
+
+  // ── Bug 1：繪圖工具啟用時 picker 只設預設、不回頭改選取；切繪圖工具會取消選取 ──
+  await test('bug1：繪圖工具啟用時 setColor 不改現有選取（只設下一個物件預設）', async () => {
+    await reset('rect');
+    await page.evaluate(() => window.__drawTest.api.setColor('#F5A623')); // tool=rect → 只設預設（amber）
+    await dragDraw(page, 100, 80, 200, 180);                              // 畫出 amber rect（自動選取）
+    const c1 = await page.evaluate(() => window.__drawTest.api.getObjects()[0].style.color);
+    await page.evaluate(() => window.__drawTest.api.setColor('#0066FF')); // tool 仍 rect → 不應改既有 rect
+    const c2 = await page.evaluate(() => window.__drawTest.api.getObjects()[0].style.color);
+    // 新預設應為藍 → 再畫一個是藍
+    await dragDraw(page, 300, 100, 380, 200);
+    const c3 = await page.evaluate(() => window.__drawTest.api.getObjects().slice(-1)[0].style.color);
+    console.log('     bug1 colors c1/c2/c3:', c1, c2, c3);
+    assert(c1 === '#F5A623', `首個 rect 應為 amber，實際 ${c1}`);
+    assert(c2 === '#F5A623', `繪圖工具下 setColor 不該改既有選取，實際 ${c2}`);
+    assert(c3 === '#0066FF', `新物件應沿用新預設藍，實際 ${c3}`);
+  });
+
+  await test('bug1：select 工具 + 選取時 setColor 才改選取物件', async () => {
+    await reset('rect');
+    await page.evaluate(() => window.__drawTest.api.setColor('#E5484D')); // 先把預設定成 red（tool=rect）
+    await dragDraw(page, 100, 80, 200, 180);                             // 畫出 red rect（自動選取）
+    const beforeC = await page.evaluate(() => window.__drawTest.api.getObjects()[0].style.color);
+    await page.evaluate(() => window.__drawTest.api.setColor('#0066FF')); // 仍是繪圖工具 → 不改選取
+    const midC = await page.evaluate(() => window.__drawTest.api.getObjects()[0].style.color);
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));   // 切 select（保留選取）
+    await page.evaluate(() => window.__drawTest.api.setColor('#111111')); // 這次應改選取物件
+    const afterC = await page.evaluate(() => window.__drawTest.api.getObjects()[0].style.color);
+    console.log('     bug1 select-recolor:', beforeC, '→(rect-tool setColor)→', midC, '→(select setColor)→', afterC);
+    assert(beforeC === '#E5484D', `畫出時應為 red，實際 ${beforeC}`);
+    assert(midC === '#E5484D', `繪圖工具 setColor 不改選取，應仍 red，實際 ${midC}`);
+    assert(afterC === '#111111', `select + 選取時 setColor 應改色為黑，實際 ${afterC}`);
+  });
+
+  await test('bug1：切換到繪圖工具會取消目前選取', async () => {
+    await reset('rect');
+    await dragDraw(page, 100, 80, 200, 180);
+    const selA = await page.evaluate(() => window.__drawTest.api.getSelected());
+    await page.evaluate(() => window.__drawTest.api.setTool('ellipse')); // 切繪圖工具
+    const selB = await page.evaluate(() => ({ sel: window.__drawTest.api.getSelected(), box: document.querySelectorAll('.pc-draw-selection').length }));
+    console.log('     bug1 deselect on tool switch:', selA, '→', JSON.stringify(selB));
+    assert(selA, '畫完應自動選取');
+    assert(selB.sel === null, '切繪圖工具應取消選取');
+    assert(selB.box === 0, '選取框應移除');
+  });
+
+  // ── Bug 2：箭頭 marker 顏色跟著 stroke 顏色（多色各自正確）──
+  await test('bug2：不同顏色的 arrow → 箭頭 marker fill === 各自 stroke', async () => {
+    await reset('arrow');
+    await page.evaluate(() => window.__drawTest.api.setColor('#0066FF')); // 藍箭頭
+    await dragDraw(page, 80, 80, 200, 160);
+    await page.evaluate(() => window.__drawTest.api.setTool('arrow')); // 重新拿 arrow（取消上一個選取）
+    await page.evaluate(() => window.__drawTest.api.setColor('#111111')); // 黑箭頭
+    await dragDraw(page, 260, 80, 400, 200);
+    const r = await page.evaluate(() => {
+      return [...document.querySelectorAll('#pc-draw line[marker-end]')].map(line => {
+        const stroke = line.getAttribute('stroke');
+        const m = (line.getAttribute('marker-end') || '').match(/#([^)]+)/);
+        const path = m && document.querySelector('#' + m[1] + ' path');
+        return { stroke, markerFill: path && path.getAttribute('fill') };
+      });
+    });
+    console.log('     bug2 arrows:', JSON.stringify(r));
+    assert(r.length === 2, `應有 2 條箭頭，實際 ${r.length}`);
+    r.forEach((a, i) => assert(a.markerFill === a.stroke, `箭頭 ${i} marker fill(${a.markerFill}) 應 === stroke(${a.stroke})`));
+    const colors = r.map(a => a.stroke).sort();
+    assert(colors[0] === '#0066FF' && colors[1] === '#111111', `兩箭頭應為藍/黑兩色，實際 ${JSON.stringify(colors)}`);
   });
 
   await browser.close();

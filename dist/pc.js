@@ -1214,7 +1214,9 @@ function initDrawLayer(target, opts = {}) {
   function setTool(tool) {
     if (!DRAW_TOOLS.includes(tool)) return;
     state.tool = tool;
+    if (tool !== 'select') state.selectedId = null; // 切到繪圖工具 → 取消選取（避免新物件被回頭改色）
     setMode('draw'); // 任何工具（含 select）都進 draw → SVG 吃事件
+    render();
   }
 
   function stampZ() { state.objects.forEach((o, i) => { o.z = i; }); }
@@ -1225,7 +1227,7 @@ function initDrawLayer(target, opts = {}) {
     const rect = { width: svg.clientWidth || host.clientWidth, height: svg.clientHeight || host.clientHeight };
     [...state.objects, state.draft].forEach(o => {
       if (!o) return;
-      const node = renderObject(o, rect);
+      const node = renderObject(o, rect, svg);
       node.setAttribute('data-id', o.id);
       svg.appendChild(node);
     });
@@ -1292,9 +1294,11 @@ function initDrawLayer(target, opts = {}) {
     state.selectedId = null;
     runCommand({ type: 'delete', obj: o, index });
   }
+  // Excalidraw 風格：繪圖工具啟用時，picker 只改「下一個新物件」的預設，不動目前選取；
+  // 只有 select 工具 + 有選取時才回頭改選取物件的樣式（同時更新預設）。
   function setStyle(patch) {
     Object.assign(DEFAULT_DRAW_STYLE, patch); // 影響之後新物件
-    const o = findById(state.objects, state.selectedId);
+    const o = state.tool === 'select' ? findById(state.objects, state.selectedId) : null;
     if (!o) { render(); return; }
     const before = { style: { ...o.style } };
     o.style = { ...o.style, ...patch };
@@ -1499,7 +1503,7 @@ function isDrawn(o) {
 }
 
 // ── render 一個 DrawObject → SVG 節點（% → px）──────────────────────────────
-function renderObject(o, rect) {
+function renderObject(o, rect, svg) {
   const s = o.style || DEFAULT_DRAW_STYLE;
   const stroke = { stroke: s.color, 'stroke-width': s.strokeWidth, fill: s.fill || 'none' };
   if (o.tool === 'ellipse') {
@@ -1523,7 +1527,7 @@ function renderObject(o, rect) {
       x2: pctToPx(g.to.x, rect.width), y2: pctToPx(g.to.y, rect.height),
       stroke: s.color, 'stroke-width': s.strokeWidth, fill: 'none',
     };
-    if (o.tool === 'arrow') attrs['marker-end'] = 'url(#pc-draw-arrowhead)';
+    if (o.tool === 'arrow') attrs['marker-end'] = `url(#${ensureArrowMarker(svg, s.color)})`;
     return drawSvgEl('line', attrs);
   }
   if (o.tool === 'pencil') {
@@ -1535,12 +1539,27 @@ function renderObject(o, rect) {
   return t;
 }
 
+// <defs> 容器（marker 依顏色按需建立，見 ensureArrowMarker）。render 保留首子節點＝此 defs。
 function buildArrowhead(svg) {
-  const defs = drawSvgEl('defs');
-  const marker = drawSvgEl('marker', { id: 'pc-draw-arrowhead', viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' });
-  marker.appendChild(drawSvgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill: '#E5484D' }));
-  defs.appendChild(marker);
-  svg.appendChild(defs);
+  svg.appendChild(drawSvgEl('defs'));
+}
+
+// 顏色 → 穩定的 marker id（只保留英數，確保是合法 id；保留 "arrowhead" 關鍵字）。
+function arrowMarkerId(color) {
+  return 'pc-draw-arrowhead-' + String(color).replace(/[^a-z0-9]/gi, '');
+}
+
+// 確保該顏色的箭頭 marker 存在於 <defs>（path fill＝該色 → 箭頭跟著 stroke 變色）。回傳 id。
+function ensureArrowMarker(svg, color) {
+  const id = arrowMarkerId(color);
+  let defs = svg.querySelector('defs');
+  if (!defs) { defs = drawSvgEl('defs'); svg.insertBefore(defs, svg.firstChild); }
+  if (!defs.querySelector('#' + id)) {
+    const marker = drawSvgEl('marker', { id, viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' });
+    marker.appendChild(drawSvgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill: color }));
+    defs.appendChild(marker);
+  }
+  return id;
 }
 
 // ── 工具列 UI ───────────────────────────────────────────────────────────────
