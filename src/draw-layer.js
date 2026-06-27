@@ -1263,13 +1263,13 @@ export function initDrawLayer(target, opts = {}) {
   async function handleDrawerSend() {
     const sendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
     if (!sendBtn || sendBtn.disabled || sendBtn.dataset.inflight) return;
-    const n = state.objects.length;
+    const n = annotationRows(state.objects).length; // 與面板計數一致（非 raw objects 數）
     sendBtn.dataset.inflight = '1';
     sendBtn.disabled = true;
     sendBtn.textContent = '送出中…';
     let result;
     try { result = await sendToAgent(); } catch (_) { result = { sent: false }; }
-    if (result.sent) {
+    if (result && result.sent) {
       sendBtn.textContent = `✅ 已送出 ${n} 筆`;
       setTimeout(() => { delete sendBtn.dataset.inflight; renderRecordPanel(); }, 1800);
       return;
