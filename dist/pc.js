@@ -953,10 +953,11 @@ function createNoteModule({
 // ── 常數 ────────────────────────────────────────────────────────────────────
 const DRAW_MODES = ['comment', 'draw', 'off'];
 const DRAW_TOOLS = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'pencil', 'text'];
-const DEFAULT_DRAW_STYLE = { color: '#E5484D', strokeWidth: 2, fill: 'none' };
+const DEFAULT_DRAW_STYLE = { color: '#E5484D', strokeWidth: 2, fill: 'none', fontSize: 16 };
 // Excalidraw/Figma 風格預設色（8 色）＋ picker 另附 <input type=color> 自訂任意 hex。
 const DRAW_COLORS = ['#1e1e1e', '#e03131', '#2f9e44', '#1971c2', '#f08c00', '#9c36b5', '#0c8599', '#868e96'];
 const DRAW_STROKE_WIDTHS = [1, 2, 4, 6]; // thin → bold
+const DRAW_FONT_SIZES = [12, 16, 20, 28]; // 文字工具字體大小選項（px）
 const MIN_DRAW_SIZE_PCT = 1; // 縮放最小尺寸（% 座標）
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -1467,6 +1468,7 @@ function normalizeStyle(style = {}) {
     color: style.color || DEFAULT_DRAW_STYLE.color,
     strokeWidth: style.strokeWidth ?? DEFAULT_DRAW_STYLE.strokeWidth,
     fill: style.fill || DEFAULT_DRAW_STYLE.fill,
+    fontSize: style.fontSize || DEFAULT_DRAW_STYLE.fontSize, // 文字工具字體大小（px）
   };
   if (style.brushType) out.brushType = style.brushType; // 自由筆刷類型（pen/marker/highlighter）
   return out;
@@ -1493,6 +1495,24 @@ function serializeDrawObject(obj) {
   if (obj.imageRef != null) out.imageRef = obj.imageRef;            // 貼圖 dataURL/路徑
   if (obj.z != null) out.z = obj.z;
   return out;
+}
+
+// ── 本機持久化純函式（dev 模式；可單測）──────────────────────────────────────
+// 序列化 objects → plain doc 陣列（跳過 image：dataURL 輕易超出 localStorage 配額，
+// 與 §4.6 vectors-only 哲學一致；code comment: images 不走本機持久化）。
+function serializeObjectsForLocal(objects) {
+  return objects.filter(o => o.tool !== 'image').map(serializeDrawObject);
+}
+// plain doc 陣列 → DrawObject[]（類似 rehydrateDrawing，供 initDrawLayer 初始載入）。
+function hydrateObjectsFromLocal(docs) {
+  if (!Array.isArray(docs)) return [];
+  return docs.map(doc => {
+    const obj = makeDrawObject({ id: doc.id, tool: doc.tool, geom: doc.geom, style: doc.style, text: doc.text });
+    if (doc.label != null) obj.label = doc.label;
+    if (doc.anchor != null) obj.anchor = doc.anchor;
+    if (doc.endAnchors != null) obj.endAnchors = doc.endAnchors;
+    return obj;
+  });
 }
 
 // 團隊模式 Firestore 文件序列化（純函式，可單測）。
@@ -1700,9 +1720,19 @@ function initDrawLayer(target, opts = {}) {
   // ── P7 團隊持久（選用）：把 opts.persist 解析成 drawings store（ready store 或 {fb,db,projectId}）。
   // 失敗或未提供 → drawStore = null → 一律走純本地（dev 模式 0 Firebase）。
   const drawStore = resolveDrawStore(opts.persist);
+  // ── dev 模式本機持久化（無 drawStore + persistLocal !== false 時啟用）──────────
+  // 讓 dev 環境重整後仍保留向量標注。image 不存（dataURL 佔空間太大，§4.6 哲學）。
+  const localKey = 'pc-draw-local:' + (opts.projectId || 'default');
+  const _storage = opts._storage || (typeof localStorage !== 'undefined' ? localStorage : null);
+  const useLocalPersist = !drawStore && opts.persistLocal !== false;
+  function persistLocalSave() {
+    if (!useLocalPersist || !_storage) return;
+    try { _storage.setItem(localKey, JSON.stringify(serializeObjectsForLocal(state.objects))); }
+    catch (_) { /* quota 溢位 / 無 localStorage → 不影響繪圖 */ }
+  }
   let unsubDraw = null;   // remote 訂閱解除函式（destroy 時呼叫）
   let drag = null;    // 繪製中：{ tool, rect, start, points }
-  const actions = { setMode, setTool, setBrush, setColor, setStrokeWidth, act, eyedropper: openEyedropper, closeContext: closeContextMenu, send: () => sendToAgent(), openRecord: () => { state.recordOpen = true; renderRecordPanel(); } };
+  const actions = { setMode, setTool, setBrush, setColor, setStrokeWidth, setFontSize, act, eyedropper: openEyedropper, closeContext: closeContextMenu, send: () => sendToAgent(), openRecord: () => { state.recordOpen = true; renderRecordPanel(); } };
   const toolbar = buildToolbar(state, actions);
   document.body.appendChild(toolbar);
   const contextMenu = buildContextMenu(actions);
@@ -1852,9 +1882,10 @@ function initDrawLayer(target, opts = {}) {
     if (cmd.type === 'create') state.selectedIds = [cmd.obj.id];
     render();
     syncCommand(cmd); // P7：團隊模式才會真的寫 Firestore（drawStore 為 null 時 no-op）
+    persistLocalSave(); // dev 模式本機持久化
   }
   // 物件已即時改好（拖曳預覽），只補登歷史（不重複 apply）。
-  function pushHistory(cmd) { history.push(cmd); render(); syncCommand(cmd); }
+  function pushHistory(cmd) { history.push(cmd); render(); syncCommand(cmd); persistLocalSave(); }
 
   // ── P7 團隊持久：把本地 command 反映到 Firestore（向量 only）。──────────────────
   // 持久化失敗一律吞掉 → 本地永遠是 live session 的真相，不因網路/權限問題壞掉繪圖。
@@ -1910,6 +1941,7 @@ function initDrawLayer(target, opts = {}) {
     state.objects = invertCommand(state.objects, cmd);
     ensureSelectionValid();
     render();
+    persistLocalSave();
   }
   function doRedo() {
     const cmd = history.redo();
@@ -1917,6 +1949,7 @@ function initDrawLayer(target, opts = {}) {
     state.objects = applyCommand(state.objects, cmd);
     ensureSelectionValid();
     render();
+    persistLocalSave();
   }
   function ensureSelectionValid() {
     state.selectedIds = state.selectedIds.filter(id => findById(state.objects, id));
@@ -1949,6 +1982,7 @@ function initDrawLayer(target, opts = {}) {
   }
   function setColor(c) { setStyle({ color: c }); }
   function setStrokeWidth(w) { setStyle({ strokeWidth: w }); }
+  function setFontSize(px) { setStyle({ fontSize: px }); }
 
   // 吸管：用瀏覽器 EyeDropper API 取樣 → 走 setColor 同一語意。
   async function openEyedropper() {
@@ -2369,6 +2403,14 @@ function initDrawLayer(target, opts = {}) {
   window.addEventListener('keydown', onKey);
   window.addEventListener('paste', onPaste);
 
+  // dev 模式：init 時從本機儲存還原向量物件（首次 render 前）。try/catch 確保失敗不影響繪圖。
+  if (useLocalPersist && _storage) {
+    try {
+      const raw = _storage.getItem(localKey);
+      if (raw) state.objects = hydrateObjectsFromLocal(JSON.parse(raw));
+    } catch (_) { /* localStorage 失敗 / JSON 損毀 → 從空白開始 */ }
+  }
+
   applyMode();
   render();
   startSync(); // P7：團隊模式才訂閱 + 載入既有 drawings（dev 模式 drawStore=null → no-op）
@@ -2393,6 +2435,7 @@ function initDrawLayer(target, opts = {}) {
     redo: doRedo,
     setColor,
     setStrokeWidth,
+    setFontSize,
     eyedropper: openEyedropper,
     addImage, // (dataURL, naturalW, naturalH, atPoint?) → 新 image 物件（paste/drop 與測試共用）
     buildExport: exportPayload,            // 結構化 JSON（selector + text + geom）
@@ -2401,7 +2444,7 @@ function initDrawLayer(target, opts = {}) {
     setExportEndpoint: url => { state.exportEndpoint = url; },
     getAnnotationRows: () => annotationRows(state.objects), // P6 面板 row 資料（純函式包裝）
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
-    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; render(); },
+    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; render(); persistLocalSave(); },
     destroy: () => {
       svg.remove(); toolbar.remove(); contextMenu.remove();
       recordTab.remove(); recordDrawer.remove();
@@ -2517,7 +2560,7 @@ function renderObject(o, rect, svg) {
       fill: s.color, stroke: 'none', opacity: cfg.opacity, 'stroke-linejoin': 'round', 'data-brush': brush,
     });
   }
-  const t = drawSvgEl('text', { x: pctToPx(o.geom.x, rect.width), y: pctToPx(o.geom.y, rect.height), fill: s.color, 'font-size': 14, 'font-family': 'system-ui, sans-serif' });
+  const t = drawSvgEl('text', { x: pctToPx(o.geom.x, rect.width), y: pctToPx(o.geom.y, rect.height), fill: s.color, 'font-size': s.fontSize || DEFAULT_DRAW_STYLE.fontSize, 'font-family': 'system-ui, sans-serif' });
   t.textContent = o.text || '';
   return t;
 }
@@ -2531,15 +2574,16 @@ function renderLabel(o, rect) {
   const a = labelAnchor(o);
   const x = pctToPx(a.x, rect.width), y = pctToPx(a.y, rect.height);
   const isLine = o.tool === 'arrow' || o.tool === 'line';
+  const labelFs = (o.style && o.style.fontSize) || LABEL_FONT_SIZE; // 跟隨物件字體大小
   const g = drawSvgEl('g', { class: 'pc-draw-label', 'data-label-for': o.id, 'pointer-events': 'none' });
   if (isLine) { // 白底蓋住線；rect 在前(底層)、text 在後(上層)
-    const w = o.label.length * LABEL_FONT_SIZE + LABEL_BG_PAD * 2; // 估寬偏大（CJK ~1em/字）→ fallback 也蓋住
-    const h = LABEL_FONT_SIZE + LABEL_BG_PAD * 2;
+    const w = o.label.length * labelFs + LABEL_BG_PAD * 2; // 估寬偏大（CJK ~1em/字）→ fallback 也蓋住
+    const h = labelFs + LABEL_BG_PAD * 2;
     g.appendChild(drawSvgEl('rect', { x: x - w / 2, y: y - h / 2, width: w, height: h, fill: '#ffffff', rx: 3 }));
   }
   const t = drawSvgEl('text', {
     x, y, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
-    fill: '#1e1e1e', 'font-size': LABEL_FONT_SIZE, 'font-family': 'system-ui, sans-serif',
+    fill: '#1e1e1e', 'font-size': labelFs, 'font-family': 'system-ui, sans-serif',
   });
   t.textContent = o.label;
   g.appendChild(t);
@@ -2597,6 +2641,7 @@ function buildToolbar(state, actions) {
   appendSep(bar);
   bar.appendChild(colorMenu(actions));
   bar.appendChild(widthMenu(actions));
+  bar.appendChild(fontSizeMenu(actions));
   appendSep(bar);
   bar.appendChild(actButton('delete', actions)); // 刪除（z-order 已移到右鍵選單）
   appendSep(bar);
@@ -2811,6 +2856,32 @@ function widthButton(w, actions) {
   b.onclick = () => actions.setStrokeWidth(w);
   return b;
 }
+// 字體大小 popover：用標本文字大小直觀呈現各選項。
+function fontSizeMenu(actions) {
+  const wrap = drawHtmlEl('div', 'pc-draw-menu');
+  const trigger = drawHtmlEl('button', 'pc-draw-tool pc-draw-trigger');
+  trigger.dataset.action = 'fontsize-menu';
+  trigger.title = '字體大小';
+  trigger.setAttribute('aria-label', '字體大小');
+  trigger.innerHTML = icon('text');
+  trigger.onclick = () => togglePopover(wrap);
+  const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-fontsize');
+  pop.dataset.menu = 'fontsize';
+  DRAW_FONT_SIZES.forEach(sz => pop.appendChild(fontSizeButton(sz, actions)));
+  wrap.appendChild(trigger);
+  wrap.appendChild(pop);
+  return wrap;
+}
+function fontSizeButton(sz, actions) {
+  const b = drawHtmlEl('button', 'pc-draw-fontsize');
+  b.dataset.fontSize = sz;
+  b.title = sz + 'px';
+  b.setAttribute('aria-label', sz + 'px');
+  b.style.cssText = `font-size:${Math.max(sz, 10)}px; padding:1px 6px; line-height:1.3; font-family:system-ui,sans-serif;`;
+  b.textContent = 'A';
+  b.onclick = () => actions.setFontSize(sz);
+  return b;
+}
 
 function syncToolbar(bar, state, history) {
   bar.querySelectorAll('.pc-draw-tool[data-tool]').forEach(b => {
@@ -2824,6 +2895,9 @@ function syncToolbar(bar, state, history) {
   });
   bar.querySelectorAll('.pc-draw-width').forEach(b => {
     b.classList.toggle('active', Number(b.dataset.width) === DEFAULT_DRAW_STYLE.strokeWidth);
+  });
+  bar.querySelectorAll('.pc-draw-fontsize').forEach(b => {
+    b.classList.toggle('active', Number(b.dataset.fontSize) === DEFAULT_DRAW_STYLE.fontSize);
   });
   bar.querySelectorAll('.pc-draw-brush').forEach(b => {
     b.classList.toggle('active', state.tool === 'pencil' && b.dataset.brush === state.brushType);
