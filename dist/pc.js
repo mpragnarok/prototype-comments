@@ -977,6 +977,28 @@ const BRUSH_RENDER = {
 };
 function brushStyle(brushType) { return BRUSH_RENDER[brushType] || BRUSH_RENDER.pen; }
 
+// ── 鍵盤快捷鍵（Excalidraw 風格：數字 + 字母都可）────────────────────────────────
+// 值為工具名（DRAW_TOOLS）或 'eyedropper'。鍵一律小寫；diamond(3)/image(9) 尚未實作故略過。
+const TOOL_SHORTCUTS = {
+  1: 'select', v: 'select',
+  2: 'rect', r: 'rect',
+  4: 'ellipse', o: 'ellipse',
+  5: 'arrow', a: 'arrow',
+  6: 'line', l: 'line',
+  7: 'pencil', p: 'pencil',
+  8: 'text', t: 'text',
+  i: 'eyedropper',
+};
+// 工具的中文標籤與主要字母提示（tooltip / aria）。
+const TOOL_LABELS_ZH = { select: '選取', ellipse: '橢圓', arrow: '箭頭', pencil: '自由筆', text: '文字', rect: '矩形', line: '直線' };
+const TOOL_KEY = { select: 'V', rect: 'R', ellipse: 'O', arrow: 'A', line: 'L', pencil: 'P', text: 'T' };
+
+// key（單鍵）→ 工具名 / 'eyedropper' / null。大小寫不敏感。純函式。
+function resolveShortcut(key) {
+  if (key == null) return null;
+  return TOOL_SHORTCUTS[String(key).toLowerCase()] || null;
+}
+
 // ── 純函式（單元測試對象，無 DOM 依賴）──────────────────────────────────────
 // px → viewport-%（沿用 index.js overlay click 的 toFixed(2) 慣例）。
 function pxToPct(px, total) {
@@ -1751,6 +1773,16 @@ function initDrawLayer(target, opts = {}) {
     if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedIds.length) {
       e.preventDefault();
       deleteSelected();
+      return;
+    }
+    // 工具切換快捷鍵（純按鍵；排除 Cmd/Ctrl/Alt 以免撞 undo/redo/瀏覽器）。打字已在上方 guard 擋掉。
+    if (!meta && !e.altKey) {
+      const action = resolveShortcut(e.key);
+      if (action) {
+        e.preventDefault();
+        if (action === 'eyedropper') openEyedropper();
+        else setTool(action);
+      }
     }
   }
 
@@ -1946,8 +1978,10 @@ function appendSep(bar) { bar.appendChild(drawHtmlEl('div', 'pc-draw-sep')); }
 function toolButton(tool, actions) {
   const b = drawHtmlEl('button', 'pc-draw-tool');
   b.dataset.tool = tool;
-  b.title = tool;
-  b.setAttribute('aria-label', tool);
+  const key = TOOL_KEY[tool];
+  const label = (TOOL_LABELS_ZH[tool] || tool) + (key ? ` (${key})` : '');
+  b.title = label;                       // tooltip 含快捷鍵，供探索
+  b.setAttribute('aria-label', label);
   b.innerHTML = icon(tool);
   b.onclick = () => actions.setTool(tool);
   return b;
@@ -2009,7 +2043,7 @@ function colorMenu(actions) {
 function eyedropperButton(actions) {
   const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-eyedropper');
   b.dataset.action = 'eyedropper';
-  b.title = '取樣顏色';
+  b.title = '取樣顏色 (I)'; // tooltip 含快捷鍵；aria-label 維持純名稱（測試/讀屏穩定）
   b.setAttribute('aria-label', '取樣顏色');
   b.innerHTML = icon('colorize');
   b.onclick = () => actions.eyedropper();

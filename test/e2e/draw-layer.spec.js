@@ -530,6 +530,81 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(colors[0] === '#0066FF' && colors[1] === '#111111', `兩箭頭應為藍/黑兩色，實際 ${JSON.stringify(colors)}`);
   });
 
+  // ── 鍵盤快捷鍵（Excalidraw 風格）──────────────────────────────────────────────
+  console.log('\ndraw-layer e2e — 鍵盤快捷鍵:');
+
+  await test('單鍵切工具：o→ellipse、r→rect、7→pencil、v→select、a→arrow', async () => {
+    await page.evaluate(() => window.__drawTest.api.setTool('select')); // 確保 draw 模式
+    async function pressTool(key) { await page.keyboard.press(key); return page.evaluate(() => window.__drawTest.api.getTool()); }
+    const o = await pressTool('o');
+    const r = await pressTool('r');
+    const seven = await pressTool('7');
+    const v = await pressTool('v');
+    const a = await pressTool('a');
+    console.log('     keys o/r/7/v/a →', JSON.stringify({ o, r, seven, v, a }));
+    assert(o === 'ellipse', `o → ellipse，實際 ${o}`);
+    assert(r === 'rect', `r → rect，實際 ${r}`);
+    assert(seven === 'pencil', `7 → pencil，實際 ${seven}`);
+    assert(v === 'select', `v → select，實際 ${v}`);
+    assert(a === 'arrow', `a → arrow，實際 ${a}`);
+  });
+
+  await test('大寫亦可（case-insensitive）：R → rect', async () => {
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.keyboard.press('Shift+R'); // 大寫 R
+    const tool = await page.evaluate(() => window.__drawTest.api.getTool());
+    console.log('     Shift+R →', tool);
+    assert(tool === 'rect', `大寫 R 應切 rect，實際 ${tool}`);
+  });
+
+  await test('打字 guard：在文字輸入框打 r 不切工具、字元進輸入框', async () => {
+    await reset('text');
+    await page.mouse.click(360, 300);
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.focus('.pc-draw-text-input');
+    await page.keyboard.press('r'); // 應進輸入框、不切工具
+    const r = await page.evaluate(() => ({
+      tool: window.__drawTest.api.getTool(),
+      val: document.querySelector('.pc-draw-text-input') ? document.querySelector('.pc-draw-text-input').value : null,
+    }));
+    console.log('     typing guard:', JSON.stringify(r));
+    assert(r.tool === 'text', `打字時不應切工具，實際 ${r.tool}`);
+    assert(r.val === 'r', `字元應進輸入框，實際 ${r.val}`);
+    await page.keyboard.press('Enter'); // 收尾：commit 文字
+    await page.evaluate(() => window.__drawTest.api.clear());
+  });
+
+  await test('Cmd/Ctrl/Alt + 字母不切工具（避免撞 undo/redo/瀏覽器）', async () => {
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.keyboard.press('Control+r'); // 含修飾鍵 → 不切
+    const tool = await page.evaluate(() => window.__drawTest.api.getTool());
+    console.log('     Ctrl+r tool stays:', tool);
+    assert(tool === 'select', `含 Ctrl 不應切工具，實際 ${tool}`);
+  });
+
+  await test('i 鍵 → 觸發 eyedropper（mock）→ 取樣色套到新物件', async () => {
+    await reset('rect');
+    await page.evaluate(() => window.__drawTest.setEyedropHex('#1488cc'));
+    await page.keyboard.press('i');
+    await page.waitForTimeout(30);
+    await dragDraw(page, 120, 90, 220, 190);
+    const c = await page.evaluate(() => window.__drawTest.api.getObjects().slice(-1)[0].style.color);
+    console.log('     i → eyedropper new obj color:', c);
+    assert(c === '#1488cc', `i 鍵應觸發 eyedropper 並套色，實際 ${c}`);
+  });
+
+  await test('工具 tooltip 含快捷鍵：select=(V)、rect=(R)；eyedropper title=(I)', async () => {
+    const r = await page.evaluate(() => ({
+      select: document.querySelector('.pc-draw-tool[data-tool="select"]').title,
+      rect: document.querySelector('.pc-draw-tool[data-tool="rect"]').title,
+      eye: document.querySelector('.pc-draw-eyedropper[data-action="eyedropper"]').title,
+    }));
+    console.log('     titles:', JSON.stringify(r));
+    assert(/\(V\)/.test(r.select), `select title 應含 (V)，實際 ${r.select}`);
+    assert(/\(R\)/.test(r.rect), `rect title 應含 (R)，實際 ${r.rect}`);
+    assert(/\(I\)/.test(r.eye), `eyedropper title 應含 (I)，實際 ${r.eye}`);
+  });
+
   // ── Change 2/3：筆刷類型（pen/marker/highlighter）+ 頭尾漸細 ────────────────────
   console.log('\ndraw-layer e2e — 筆刷類型 / 漸細:');
 

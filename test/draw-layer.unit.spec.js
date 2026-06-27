@@ -10,6 +10,7 @@ import {
   makeDrawObject, serializeDrawObject,
   geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath,
   taperScale, outlineWidths, taperedOutline, brushStyle, DRAW_BRUSHES,
+  TOOL_SHORTCUTS, resolveShortcut,
   reorderIds, reorderMany, rectsIntersect, marqueeSelect, applyStylePatch, eyedropperSupported,
   applyCommand, invertCommand, makeUndoStack,
   DEFAULT_DRAW_STYLE, DRAW_MODES, DRAW_TOOLS, MIN_DRAW_SIZE_PCT,
@@ -203,6 +204,32 @@ test('reorderIds: 不存在的 id → 原序回傳（新陣列）', () => {
   const out = reorderIds(src, 'z', 'front');
   eq(JSON.stringify(out), JSON.stringify(['a', 'b']));
   assert(out !== src, '應回傳新陣列');
+});
+
+// ── 鍵盤快捷鍵：TOOL_SHORTCUTS / resolveShortcut ─────────────────────────────────
+test('TOOL_SHORTCUTS: 每個工具都可達（含數字+字母）', () => {
+  const reachable = new Set(Object.values(TOOL_SHORTCUTS));
+  DRAW_TOOLS.forEach(t => assert(reachable.has(t), `工具 ${t} 應有快捷鍵`));
+  assert(reachable.has('eyedropper'), 'eyedropper 應可達');
+});
+test('TOOL_SHORTCUTS: 期望的數字+字母對映', () => {
+  const expect = { 1: 'select', v: 'select', 2: 'rect', r: 'rect', 4: 'ellipse', o: 'ellipse', 5: 'arrow', a: 'arrow', 6: 'line', l: 'line', 7: 'pencil', p: 'pencil', 8: 'text', t: 'text', i: 'eyedropper' };
+  Object.entries(expect).forEach(([k, v]) => eq(TOOL_SHORTCUTS[k], v, `key ${k}`));
+});
+test('TOOL_SHORTCUTS: 無重複/衝突的鍵（key 唯一）', () => {
+  const keys = Object.keys(TOOL_SHORTCUTS);
+  eq(keys.length, new Set(keys).size, 'key 不應重複');
+});
+test('resolveShortcut: 大小寫不敏感 + 未知/null → null', () => {
+  eq(resolveShortcut('o'), 'ellipse');
+  eq(resolveShortcut('O'), 'ellipse');
+  eq(resolveShortcut('7'), 'pencil');
+  eq(resolveShortcut('v'), 'select');
+  eq(resolveShortcut('i'), 'eyedropper');
+  eq(resolveShortcut('z'), null, 'z 是 undo、非工具');
+  eq(resolveShortcut('3'), null, 'diamond 尚未實作');
+  eq(resolveShortcut('9'), null, 'image 尚未實作');
+  eq(resolveShortcut(null), null);
 });
 
 // ── Change 2/3: 筆刷 brushStyle + serialize + 漸細外框 ───────────────────────────
