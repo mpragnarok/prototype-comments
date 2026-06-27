@@ -1268,6 +1268,129 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(png.prefix.startsWith('data:image/png'), `應為 data:image/png dataURL，實際 ${png.prefix}`);
   });
 
+  // ── P6：側邊標注紀錄面板（右緣 tab + 抽屜）────────────────────────────────────────
+  console.log('\ndraw-layer e2e — P6 側邊標注紀錄面板:');
+
+  await test('面板：tab + drawer 存在；position:fixed；預設 drawer 關閉、tab 顯示（off by default）', async () => {
+    await reset('ellipse'); // clear → 無標注
+    const r = await page.evaluate(() => {
+      const tab = document.getElementById('pc-draw-rec-tab');
+      const drawer = document.getElementById('pc-draw-rec-drawer');
+      return {
+        tab: !!tab, drawer: !!drawer,
+        tabShown: tab && tab.classList.contains('show'),
+        open: drawer && drawer.classList.contains('open'),
+        posTab: tab && getComputedStyle(tab).position,
+        posDrawer: drawer && getComputedStyle(drawer).position,
+        empty: !!(drawer && drawer.querySelector('.pc-draw-rec-empty')),
+      };
+    });
+    console.log('     panel default:', JSON.stringify(r));
+    assert(r.tab && r.drawer, '應有右緣 tab + 抽屜 drawer');
+    assert(r.posTab === 'fixed' && r.posDrawer === 'fixed', 'tab/drawer 應 position:fixed');
+    assert(r.tabShown, '預設 tab 應顯示（入口）');
+    assert(!r.open, '預設 drawer 應關閉（off by default，不打擾一般使用）');
+    assert(r.empty, '無標注 → 顯示空狀態');
+  });
+
+  await test('面板：畫 3 筆 → 點 tab 開抽屜 → 列出對應 rows（text/selector/icon/swatch）', async () => {
+    await reset('ellipse');
+    await dragDraw(page, 110, 80, 210, 160);                       // A：ellipse 蓋 #price-card → selector，無 label
+    await page.evaluate(() => window.__drawTest.api.setTool('rect'));
+    await dragDraw(page, 100, 250, 200, 320);                      // B：rect（待加綁定標籤）
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.mouse.click(150, 285, { clickCount: 2 });           // 雙擊加綁定標籤
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.fill('.pc-draw-text-input', '價格卡');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(40);
+    await page.evaluate(() => window.__drawTest.api.setTool('pencil')); // C：自由筆（不在 ANCHOR_TOOLS → 無 selector）
+    await page.mouse.move(300, 360);
+    await page.mouse.down();
+    for (const [x, y] of [[330, 362], [360, 358], [390, 360]]) await page.mouse.move(x, y);
+    await page.mouse.up();
+    // 點 tab 開面板
+    await page.click('#pc-draw-rec-tab');
+    const r = await page.evaluate(() => {
+      const drawer = document.getElementById('pc-draw-rec-drawer');
+      const rows = [...drawer.querySelectorAll('.pc-draw-rec-row')].map(el => ({
+        id: el.dataset.id,
+        text: el.querySelector('.pc-draw-rec-text').textContent,
+        sel: el.querySelector('.pc-draw-rec-sel') ? el.querySelector('.pc-draw-rec-sel').textContent : null,
+        hasIcon: !!el.querySelector('.pc-draw-rec-icon svg'),
+        hasSwatch: !!el.querySelector('.pc-draw-rec-swatch'),
+      }));
+      const byId = {}; window.__drawTest.api.getObjects().forEach(o => { byId[o.id] = o.tool; });
+      return {
+        open: drawer.classList.contains('open'),
+        tabShown: document.getElementById('pc-draw-rec-tab').classList.contains('show'),
+        count: drawer.querySelector('.pc-draw-rec-count').textContent,
+        rows, byId,
+      };
+    });
+    console.log('     panel rows:', JSON.stringify(r));
+    assert(r.open && !r.tabShown, '點 tab 應開抽屜並收起 tab');
+    assert(r.rows.length === 3 && r.count === '3', `應列 3 筆 + count 3，實際 rows=${r.rows.length} count=${r.count}`);
+    const byTool = {}; r.rows.forEach(row => { byTool[r.byId[row.id]] = row; });
+    assert(byTool.ellipse.text === '圈選', `ellipse 無 label → 友善預設「圈選」，實際 ${byTool.ellipse.text}`);
+    assert(byTool.ellipse.sel === '#price-card', `ellipse row 應顯示 selector #price-card，實際 ${byTool.ellipse.sel}`);
+    assert(byTool.rect.text === '價格卡', `rect row 應顯示綁定標籤，實際 ${byTool.rect.text}`);
+    assert(byTool.pencil.text === '手繪' && byTool.pencil.sel === null, `pencil 無 anchor → 無 selector + 友善預設，實際 ${JSON.stringify(byTool.pencil)}`);
+    assert(r.rows.every(row => row.hasIcon && row.hasSwatch), '每筆 row 應有工具圖示 + 色票');
+  });
+
+  await test('面板：點 row → 選取該物件（getSelectedIds）+ row 高亮 selected', async () => {
+    await page.evaluate(() => {
+      const d = document.getElementById('pc-draw-rec-drawer');
+      if (!d.classList.contains('open')) document.getElementById('pc-draw-rec-tab').click();
+    });
+    const targetId = await page.evaluate(() => window.__drawTest.api.getObjects()[0].id);
+    await page.click(`.pc-draw-rec-row[data-id="${targetId}"]`);
+    const r = await page.evaluate((id) => {
+      const row = document.querySelector(`.pc-draw-rec-row[data-id="${id}"]`);
+      return { sel: window.__drawTest.api.getSelectedIds(), selected: row.classList.contains('selected') };
+    }, targetId);
+    console.log('     row click → select:', JSON.stringify(r));
+    assert(r.sel.length === 1 && r.sel[0] === targetId, `點 row 應選取該物件，實際 ${JSON.stringify(r.sel)}`);
+    assert(r.selected, '被選取的 row 應有 selected 高亮');
+  });
+
+  await test('面板：刪除物件 → 即時更新（count 減少、該 row 移除）', async () => {
+    const before = await page.evaluate(() => document.querySelectorAll('.pc-draw-rec-row').length);
+    const delId = await page.evaluate(() => {
+      const id = window.__drawTest.api.getObjects()[0].id;
+      window.__drawTest.api.select(id);
+      window.__drawTest.api.deleteSelected();
+      return id;
+    });
+    const r = await page.evaluate((id) => ({
+      rows: document.querySelectorAll('.pc-draw-rec-row').length,
+      count: document.querySelector('.pc-draw-rec-count').textContent,
+      gone: !document.querySelector(`.pc-draw-rec-row[data-id="${id}"]`),
+    }), delId);
+    console.log('     after delete:', before, '→', JSON.stringify(r));
+    assert(r.rows === before - 1, `刪除後 row 應 ${before - 1}，實際 ${r.rows}`);
+    assert(r.count === String(before - 1), `count 應更新為 ${before - 1}，實際 ${r.count}`);
+    assert(r.gone, '被刪物件的 row 應從面板移除（即時更新）');
+  });
+
+  await test('面板：清空 → 顯示空狀態「尚無標注」', async () => {
+    await page.evaluate(() => window.__drawTest.api.clear());
+    const r = await page.evaluate(() => {
+      const list = document.querySelector('.pc-draw-rec-list');
+      const empty = list.querySelector('.pc-draw-rec-empty');
+      return {
+        rows: list.querySelectorAll('.pc-draw-rec-row').length,
+        empty: !!empty, text: empty ? empty.textContent : null,
+        count: document.querySelector('.pc-draw-rec-count').textContent,
+      };
+    });
+    console.log('     empty state:', JSON.stringify(r));
+    assert(r.rows === 0, '清空後不應有 row');
+    assert(r.empty && /尚無標注/.test(r.text), `應顯示友善空狀態，實際 ${r.text}`);
+    assert(r.count === '0', `count 應為 0，實際 ${r.count}`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

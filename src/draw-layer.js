@@ -209,6 +209,32 @@ export function buildExport(objects, viewport = {}) {
   };
 }
 
+// ── P6 側邊標注紀錄面板：row 資料（純函式，可單測）─────────────────────────────────
+// 每個工具的友善預設標籤（物件無 label/text 時，面板顯示這個 → 比 'ellipse' 易讀）。
+const ANNOTATION_TOOL_LABELS = {
+  ellipse: '圈選', arrow: '箭頭', line: '直線', rect: '矩形', diamond: '菱形',
+  pencil: '手繪', text: '文字', image: '參考圖',
+};
+// DrawObject[] → 側邊「標注紀錄」面板的 row 資料。純函式：
+//   text：label（綁定標籤）優先 → text（文字工具）→ 工具友善預設（圈選/箭頭…）。
+//   selector：取 anchor（elementFromPoint 擷取的元件），無則 null。
+//   color：取 style.color。icon：對映合法的工具圖示名（無對應者退回 'rect'）。
+export function annotationRows(objects) {
+  return (objects || []).map(o => {
+    const text = (o.label != null && o.label !== '') ? o.label
+      : (o.text != null && o.text !== '') ? o.text
+      : (ANNOTATION_TOOL_LABELS[o.tool] || o.tool);
+    return {
+      id: o.id,
+      tool: o.tool,
+      icon: ICON_PATHS[o.tool] ? o.tool : 'rect', // 面板圖示用（image 無專屬圖示 → 退回方框）
+      text,
+      selector: o.anchor != null ? o.anchor : null,
+      color: (o.style && o.style.color) || null,
+    };
+  });
+}
+
 // 一次拖曳（起點 a、終點 b）→ 某工具的幾何（box 類 / 端點類）。pencil 另走累點邏輯。
 export function geomFromDrag(tool, a, b) {
   if (tool === 'ellipse' || tool === 'rect' || tool === 'diamond') return rectFromPoints(a, b);
@@ -631,6 +657,50 @@ const DRAW_STYLES = `
   color: #E5484D; background: rgba(255,255,255,.92); border: 1px solid #E5484D;
   border-radius: 4px; padding: 2px 4px; outline: none;
 }
+/* ── P6 側邊「標注紀錄」面板（右緣 tab + 抽屜，沿用 spec-overlay 互動）──────────────
+   position:fixed + 高 z-index；pointer-events 只在面板本身（tab/drawer），不擋畫布。
+   預設 drawer 關閉（off by default）→ comment-only/一般使用不被打擾，靠 tab 才打開。 */
+.pc-draw-rec-tab {
+  position: fixed; top: 62%; right: 0; transform: translateY(-50%); z-index: 2147483550;
+  display: none; border: none; cursor: pointer; background: #0FA0A0; color: #fff;
+  padding: 14px 7px; border-radius: 10px 0 0 10px; box-shadow: -2px 0 12px rgba(0,0,0,.2);
+  writing-mode: vertical-rl; font: 700 12px/1 system-ui, -apple-system, sans-serif; letter-spacing: 2px;
+  transition: background .15s;
+}
+.pc-draw-rec-tab:hover { background: #0d8f8f; }
+.pc-draw-rec-tab.show { display: block; }
+.pc-draw-rec-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 2147483549;
+  width: 300px; max-width: 90vw; background: #fff; border-left: 1px solid #e2e8f0;
+  display: flex; flex-direction: column; box-shadow: -2px 0 16px rgba(0,0,0,.12);
+  transform: translateX(100%); transition: transform .22s ease;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+.pc-draw-rec-drawer.open { transform: translateX(0); }
+.pc-draw-rec-hd { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid #eef2f6; }
+.pc-draw-rec-hd-title { color: #0FA0A0; font-weight: 700; font-size: 13px; }
+.pc-draw-rec-count { background: rgba(15,160,160,.12); color: #0d8f8f; border-radius: 9px;
+  font-size: 10px; padding: 1px 7px; line-height: 16px; }
+.pc-draw-rec-close { margin-left: auto; border: none; background: none; cursor: pointer;
+  color: #94a3b8; font-size: 18px; line-height: 1; padding: 2px 4px; }
+.pc-draw-rec-close:hover { color: #475569; }
+.pc-draw-rec-list { padding: 10px; overflow-y: auto; flex: 1; background: #f8fafc; }
+.pc-draw-rec-row {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  background: #fff; border: 1px solid #eef2f6; border-radius: 7px; padding: 8px 10px;
+  margin-bottom: 8px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04);
+}
+.pc-draw-rec-row:last-child { margin-bottom: 0; }
+.pc-draw-rec-row:hover { border-color: #0FA0A0; }
+.pc-draw-rec-row.selected { border-color: #0FA0A0; background: rgba(15,160,160,.08); box-shadow: 0 0 0 1px #0FA0A0; }
+.pc-draw-rec-icon { flex: none; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; color: #475569; }
+.pc-draw-rec-icon svg { display: block; }
+.pc-draw-rec-swatch { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); }
+.pc-draw-rec-body { min-width: 0; flex: 1; }
+.pc-draw-rec-text { color: #1e293b; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-draw-rec-sel { margin-top: 2px; color: #0d8f8f; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-draw-rec-empty { color: #94a3b8; font-size: 12px; text-align: center; padding: 28px 12px; line-height: 1.6; }
 `;
 
 function injectDrawStyles() {
@@ -666,6 +736,7 @@ export function initDrawLayer(target, opts = {}) {
     marquee: null,    // 進行中的橡皮筋框 {x,y,w,h}（% 座標）
     brushType: 'pen', // 自由筆刷類型 pen/marker/highlighter
     exportEndpoint: opts.exportEndpoint || null, // 「送給 AI」POST 目標（無則只回 payload）
+    recordOpen: false, // P6 側邊標注紀錄抽屜開關（預設關 → 不打擾一般使用）
   };
   const history = makeUndoStack();
   let drag = null;    // 繪製中：{ tool, rect, start, points }
@@ -682,6 +753,44 @@ export function initDrawLayer(target, opts = {}) {
     state.selectedIds = isSelected(id) ? state.selectedIds.filter(x => x !== id) : [...state.selectedIds, id];
   };
   const selectedObjects = () => state.selectedIds.map(id => findById(state.objects, id)).filter(Boolean);
+
+  // ── P6 側邊標注紀錄面板（右緣 tab + 抽屜）─────────────────────────────────────────
+  const recordTab = buildRecordTab(() => { state.recordOpen = !state.recordOpen; renderRecordPanel(); });
+  const recordDrawer = buildRecordDrawer(() => { state.recordOpen = false; renderRecordPanel(); });
+  document.body.appendChild(recordDrawer);
+  document.body.appendChild(recordTab);
+
+  // 依目前 objects/selectedIds 重畫面板（render() 每次變動都會喚起 → 即時更新）。
+  function renderRecordPanel() {
+    recordTab.classList.toggle('show', !state.recordOpen);
+    recordDrawer.classList.toggle('open', state.recordOpen);
+    const rows = annotationRows(state.objects);
+    const count = recordDrawer.querySelector('.pc-draw-rec-count');
+    if (count) count.textContent = String(rows.length);
+    const list = recordDrawer.querySelector('.pc-draw-rec-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!rows.length) {
+      const empty = drawHtmlEl('div', 'pc-draw-rec-empty');
+      empty.textContent = '尚無標注';
+      list.appendChild(empty);
+      return;
+    }
+    rows.forEach(row => list.appendChild(recordRowEl(row, isSelected(row.id), onRecordRowClick)));
+  }
+  // 點一筆 row → 選取該物件、若在畫面外則捲入視野（沿用 spec-overlay 的 scrollIntoView）。
+  function onRecordRowClick(id) {
+    selectOnly(id);
+    render();
+    scrollObjectIntoView(id);
+  }
+  function scrollObjectIntoView(id) {
+    const node = svg.querySelector('[data-id="' + id + '"]');
+    if (!node || typeof node.getBoundingClientRect !== 'function') return;
+    const r = node.getBoundingClientRect();
+    const offscreen = r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth;
+    if (offscreen && node.scrollIntoView) node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
 
   function applyMode() {
     svg.classList.toggle('pc-draw-active', state.mode === 'draw');
@@ -726,6 +835,7 @@ export function initDrawLayer(target, opts = {}) {
     renderSelection(rect);
     renderMarquee(rect);
     syncToolbar(toolbar, state, history);
+    renderRecordPanel(); // P6：標注紀錄面板隨 objects/selection 即時更新
   }
 
   function renderSelection(rect) {
@@ -1211,9 +1321,12 @@ export function initDrawLayer(target, opts = {}) {
     capturePng,                            // async → PNG dataURL
     sendToAgent,                           // async (opts?) → {json, png, sent}；回 payload
     setExportEndpoint: url => { state.exportEndpoint = url; },
+    getAnnotationRows: () => annotationRows(state.objects), // P6 面板 row 資料（純函式包裝）
+    toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
     clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; render(); },
     destroy: () => {
       svg.remove(); toolbar.remove(); contextMenu.remove();
+      recordTab.remove(); recordDrawer.remove();
       window.removeEventListener('resize', render);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('paste', onPaste);
@@ -1464,6 +1577,55 @@ function buildContextMenu(actions) {
       menu.appendChild(item);
     });
   return menu;
+}
+
+// ── P6 側邊「標注紀錄」面板 DOM（右緣 tab + 抽屜，沿用 spec-overlay 的 tab/drawer 模式）──
+function buildRecordTab(onToggle) {
+  const tab = drawHtmlEl('button', 'pc-draw-rec-tab');
+  tab.id = 'pc-draw-rec-tab';
+  tab.textContent = '標注紀錄 ◂';
+  tab.title = '標注紀錄';
+  tab.setAttribute('aria-label', '標注紀錄');
+  tab.onclick = onToggle;
+  return tab;
+}
+function buildRecordDrawer(onClose) {
+  const drawer = drawHtmlEl('div', 'pc-draw-rec-drawer');
+  drawer.id = 'pc-draw-rec-drawer';
+  const hd = drawHtmlEl('div', 'pc-draw-rec-hd');
+  const title = drawHtmlEl('span', 'pc-draw-rec-hd-title'); title.textContent = '標注紀錄';
+  const count = drawHtmlEl('span', 'pc-draw-rec-count'); count.textContent = '0';
+  const close = drawHtmlEl('button', 'pc-draw-rec-close'); close.textContent = '✕';
+  close.title = '關閉'; close.setAttribute('aria-label', '關閉標注紀錄'); close.onclick = onClose;
+  hd.appendChild(title); hd.appendChild(count); hd.appendChild(close);
+  drawer.appendChild(hd);
+  drawer.appendChild(drawHtmlEl('div', 'pc-draw-rec-list'));
+  return drawer;
+}
+// 一筆標注 → 面板 row（工具圖示 + 色票 + 文字 + selector）。點擊 → onClick(id)。
+function recordRowEl(row, selected, onClick) {
+  const el = drawHtmlEl('button', 'pc-draw-rec-row' + (selected ? ' selected' : ''));
+  el.dataset.id = row.id;
+  el.setAttribute('aria-label', row.text);
+  const ic = drawHtmlEl('span', 'pc-draw-rec-icon');
+  ic.innerHTML = icon(row.icon, 18);
+  el.appendChild(ic);
+  if (row.color) {
+    const sw = drawHtmlEl('span', 'pc-draw-rec-swatch');
+    sw.style.background = row.color;
+    el.appendChild(sw);
+  }
+  const body = drawHtmlEl('div', 'pc-draw-rec-body');
+  const txt = drawHtmlEl('div', 'pc-draw-rec-text'); txt.textContent = row.text;
+  body.appendChild(txt);
+  if (row.selector) {
+    const sel = drawHtmlEl('div', 'pc-draw-rec-sel');
+    sel.textContent = row.selector; sel.title = row.selector;
+    body.appendChild(sel);
+  }
+  el.appendChild(body);
+  el.onclick = () => onClick(row.id);
+  return el;
 }
 
 // 顏色 popover：8 預設色 swatch ＋ <input type=color> 自訂任意 hex。

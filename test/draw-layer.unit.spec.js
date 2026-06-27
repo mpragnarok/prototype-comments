@@ -9,7 +9,7 @@ import {
   pxToPct, pctToPx, clientToPct, rectFromPoints,
   makeDrawObject, serializeDrawObject,
   geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath, diamondPoints, labelAnchor, imageGeom,
-  cssSelectorFor, buildExport,
+  cssSelectorFor, buildExport, annotationRows,
   taperScale, outlineWidths, taperedOutline, brushStyle, DRAW_BRUSHES,
   TOOL_SHORTCUTS, resolveShortcut,
   reorderIds, reorderMany, rectsIntersect, marqueeSelect, applyStylePatch, eyedropperSupported,
@@ -370,6 +370,48 @@ test('buildExport: text 工具用 obj.text 當 text；image 標 image:true', () 
 });
 test('buildExport: 空 → annotations []', () => {
   eq(JSON.stringify(buildExport([], { w: 10, h: 10 }).annotations), '[]');
+});
+
+// ── P6 annotationRows（側邊標注紀錄 row 資料；純函式）─────────────────────────────────
+test('annotationRows: 空 / 無入參 → []', () => {
+  eq(JSON.stringify(annotationRows([])), '[]');
+  eq(JSON.stringify(annotationRows()), '[]');
+});
+test('annotationRows: text 解析 label → text → 工具友善預設', () => {
+  const rows = annotationRows([
+    { id: 'a', tool: 'ellipse', label: '對齊', text: '舊', style: { color: '#e03131' } },
+    { id: 'b', tool: 'text', text: '備註', style: { color: '#000' } },
+    { id: 'c', tool: 'arrow', style: { color: '#1971c2' } },
+  ]);
+  eq(rows[0].text, '對齊', 'label 優先於 text');
+  eq(rows[1].text, '備註', '無 label → 用 text');
+  eq(rows[2].text, '箭頭', '無 label/text → arrow 友善預設');
+});
+test('annotationRows: ellipse 無文字 → 友善預設「圈選」、line → 「直線」', () => {
+  eq(annotationRows([{ id: 'e', tool: 'ellipse', style: {} }])[0].text, '圈選');
+  eq(annotationRows([{ id: 'l', tool: 'line', style: {} }])[0].text, '直線');
+});
+test('annotationRows: selector 取 anchor（無則 null）、color 取 style.color', () => {
+  const rows = annotationRows([
+    { id: 'a', tool: 'rect', anchor: '#price-card', style: { color: '#f08c00' } },
+    { id: 'b', tool: 'rect', style: { color: '#2f9e44' } },
+  ]);
+  eq(rows[0].selector, '#price-card'); eq(rows[0].color, '#f08c00');
+  eq(rows[1].selector, null, '無 anchor → null'); eq(rows[1].color, '#2f9e44');
+});
+test('annotationRows: 每筆含 id/tool/icon（icon 為非空字串、image 退回方框）', () => {
+  const rows = annotationRows([{ id: 'p', tool: 'pencil', style: {} }, { id: 'i', tool: 'image', style: {} }]);
+  eq(rows[0].id, 'p'); eq(rows[0].tool, 'pencil');
+  assert(typeof rows[0].icon === 'string' && rows[0].icon, 'pencil 應有 icon 名');
+  eq(rows[1].icon, 'rect', 'image 無專屬圖示 → 退回 rect');
+});
+test('annotationRows: 保序、不改入參（純函式）', () => {
+  const src = [{ id: 'x', tool: 'line', style: { color: '#000' } }, { id: 'y', tool: 'diamond', style: {} }];
+  const copy = JSON.stringify(src);
+  const rows = annotationRows(src);
+  eq(rows[0].id, 'x'); eq(rows[1].id, 'y', '保留輸入順序');
+  eq(rows[1].text, '菱形');
+  eq(JSON.stringify(src), copy, 'annotationRows 不應改入參');
 });
 
 // ── 綁定標籤：labelAnchor + serialize ───────────────────────────────────────────
