@@ -1216,35 +1216,39 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(rect.text === '說明', `綁定標籤的物件應有 text，實際 ${rect.text}`);
   });
 
-  await test('送給 AI 按鈕 + sendToAgent：POST 到 endpoint，body 含 json，回傳 payload.png 為 data:image/png', async () => {
-    // 工具列有送出鈕（aria-label 送給 AI）
+  await test('送給 AI 按鈕 + sendToAgent：工具列鈕開抽屜、footer 鈕 POST endpoint，sendToAgent API 回 payload', async () => {
+    // 工具列有送出鈕（data-action=send，aria-label 含「送給 AI」）
     const btn = await page.evaluate(() => {
       const b = document.querySelector('.pc-draw-toolbar [data-action="send"]');
       return { present: !!b, aria: b && b.getAttribute('aria-label') };
     });
     assert(btn.present, '工具列應有送出鈕（data-action=send）');
-    assert(btn.aria === '送給 AI', `送出鈕 aria-label 應為「送給 AI」，實際 ${btn.aria}`);
+    assert(btn.aria === '標注紀錄／送給 AI', `送出鈕 aria-label 應為「標注紀錄／送給 AI」，實際 ${btn.aria}`);
 
     await reset('ellipse');
-    await dragDraw(page, 110, 80, 210, 160); // 至少一筆標注（否則 sendToAgent 早退、不 fetch）
+    await dragDraw(page, 110, 80, 210, 160); // 至少一筆標注
     // stub window.fetch 記錄呼叫，並設定 endpoint
     await page.evaluate(() => {
       window.__fetchCalls = [];
       window.fetch = (url, opts) => { window.__fetchCalls.push({ url, body: opts && opts.body }); return Promise.resolve({ ok: true, json: () => Promise.resolve({}) }); };
       window.__drawTest.api.setExportEndpoint('http://x/api/draw');
     });
-    // 點工具列送出鈕 → 觸發 actions.send() → sendToAgent()
+    // 點工具列 ✈ 鈕 → 開抽屜（不直接送出）
     await page.click('.pc-draw-toolbar [data-action="send"]');
-    await page.waitForFunction(() => window.__fetchCalls && window.__fetchCalls.length > 0, { timeout: 2000 });
+    const drawerOpened = await page.evaluate(() => document.getElementById('pc-draw-rec-drawer').classList.contains('open'));
+    assert(drawerOpened, '點工具列 ✈ 鈕應開啟標注紀錄抽屜');
+    // 點抽屜 footer 送出鈕 → 觸發 sendToAgent → fetch
+    await page.click('.pc-draw-rec-send-btn');
+    await page.waitForFunction(() => window.__fetchCalls && window.__fetchCalls.length > 0, { timeout: 3000 });
     const fc = await page.evaluate(() => {
       const c = window.__fetchCalls[0];
       let parsed = null; try { parsed = JSON.parse(c.body); } catch (_) {}
       return { url: c.url, hasJson: !!(parsed && parsed.json && parsed.json.annotations), annN: parsed && parsed.json && parsed.json.annotations.length };
     });
-    console.log('     send button fetch:', JSON.stringify(fc));
+    console.log('     footer send fetch:', JSON.stringify(fc));
     assert(fc.url === 'http://x/api/draw', `fetch 應送到設定的 endpoint，實際 ${fc.url}`);
     assert(fc.hasJson && fc.annN >= 1, `POST body 應含 json.annotations，實際 ${JSON.stringify(fc)}`);
-    // 直接呼叫 sendToAgent 取回 payload（驗證回傳形狀 + png）
+    // 直接呼叫 sendToAgent API 驗證回傳形狀
     const payload = await page.evaluate(async () => {
       const p = await window.__drawTest.api.sendToAgent();
       return { sent: p.sent, hasJson: !!(p.json && p.json.annotations), pngPrefix: p.png ? p.png.slice(0, 15) : null };
@@ -1253,6 +1257,8 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(payload.sent === true, 'endpoint 設定下 sendToAgent 應回 sent=true');
     assert(payload.hasJson, 'payload 應含 json');
     assert(payload.pngPrefix && payload.pngPrefix.startsWith('data:image/png'), `payload.png 應為 data:image/png，實際 ${payload.pngPrefix}`);
+    // 測試結束：關閉抽屜，避免後續 P6 test 接到開啟狀態
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d && d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
   });
 
   await test('capturePng：回傳 data:image/png 字串（chromium rasterize SVG）', async () => {
@@ -1389,6 +1395,65 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.rows === 0, '清空後不應有 row');
     assert(r.empty && /尚無標注/.test(r.text), `應顯示友善空狀態，實際 ${r.text}`);
     assert(r.count === '0', `count 應為 0，實際 ${r.count}`);
+  });
+
+  // ── Fix 2：工具列 ✈ 鈕開抽屜 + 抽屜 footer「送給 AI（N）」────────────────────────
+  console.log('\ndraw-layer e2e — Fix 2 send-to-agent UX:');
+
+  await test('Fix2 工具列 ✈ 鈕 → 開標注紀錄抽屜（不直接送出）', async () => {
+    await reset('ellipse');
+    // 確保抽屜關閉（若前面 test 留開著）
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) d.classList.remove('open'); document.getElementById('pc-draw-rec-tab').classList.add('show'); });
+    const before = await page.evaluate(() => document.getElementById('pc-draw-rec-drawer').classList.contains('open'));
+    assert(!before, 'precondition：抽屜應關閉');
+    await page.click('.pc-draw-toolbar [data-action="send"]');
+    const r = await page.evaluate(() => ({
+      open: document.getElementById('pc-draw-rec-drawer').classList.contains('open'),
+      tabHidden: !document.getElementById('pc-draw-rec-tab').classList.contains('show'),
+    }));
+    console.log('     toolbar send → drawer:', JSON.stringify(r));
+    assert(r.open, '點工具列 ✈ 鈕應開啟標注紀錄抽屜');
+    assert(r.tabHidden, '抽屜開啟後 tab 應收起');
+  });
+
+  await test('Fix2 footer 送出鈕：0 標注 → disabled；畫 1 筆 → 顯示「送給 AI（1）」且 enabled', async () => {
+    await reset('ellipse');
+    // 點工具列鈕開抽屜
+    await page.click('.pc-draw-toolbar [data-action="send"]');
+    const r0 = await page.evaluate(() => {
+      const btn = document.querySelector('.pc-draw-rec-send-btn');
+      return { text: btn && btn.textContent.trim(), disabled: btn && btn.disabled };
+    });
+    assert(r0.disabled, `0 標注時 footer 送出鈕應 disabled，實際 ${JSON.stringify(r0)}`);
+    // 畫一筆
+    await page.evaluate(() => window.__drawTest.api.setTool('ellipse'));
+    await dragDraw(page, 110, 80, 210, 160);
+    const r1 = await page.evaluate(() => {
+      const btn = document.querySelector('.pc-draw-rec-send-btn');
+      return { text: btn && btn.textContent.trim(), disabled: btn && btn.disabled };
+    });
+    console.log('     footer btn 0→1 annot:', JSON.stringify({ r0, r1 }));
+    assert(!r1.disabled, `有標注後 footer 送出鈕應 enabled，實際 ${JSON.stringify(r1)}`);
+    assert(r1.text === '送給 AI（1）', `footer 送出鈕文字應為「送給 AI（1）」，實際 ${r1.text}`);
+  });
+
+  await test('Fix2 footer 送出鈕：點擊 → 觸發一次 fetch + 顯示已送出狀態（1.8s disabled）', async () => {
+    // 承接上一個 test：畫布有 1 筆標注、抽屜已開
+    await page.evaluate(() => {
+      window.__fetchCallsFix2 = [];
+      window.fetch = (url, opts) => { window.__fetchCallsFix2.push({ url }); return Promise.resolve({ ok: true, json: () => Promise.resolve({}) }); };
+      window.__drawTest.api.setExportEndpoint('http://x/api/draw');
+    });
+    await page.click('.pc-draw-rec-send-btn');
+    await page.waitForFunction(() => window.__fetchCallsFix2 && window.__fetchCallsFix2.length > 0, { timeout: 3000 });
+    const r = await page.evaluate(() => {
+      const btn = document.querySelector('.pc-draw-rec-send-btn');
+      return { fetchCount: window.__fetchCallsFix2.length, btnText: btn && btn.textContent.trim(), disabled: btn && btn.disabled };
+    });
+    console.log('     footer send result:', JSON.stringify(r));
+    assert(r.fetchCount === 1, `應恰好 fetch 一次，實際 ${r.fetchCount}`);
+    assert(/已送出/.test(r.btnText), `送出後 btn 應顯示「✅ 已送出」，實際 ${r.btnText}`);
+    assert(r.disabled, '送出後 1.8s 內 btn 應保持 disabled');
   });
 
   // ── Phase A：arrow/line 端點 handle + 拖曳重指向 ─────────────────────────────
