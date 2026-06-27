@@ -402,6 +402,11 @@ export function resizeBBox(oldBox, handle, p, minSize = MIN_DRAW_SIZE_PCT) {
   return box;
 }
 
+// 設定箭頭/線段的端點（immutable）。which ∈ 'from'|'to'。回傳新 geom，不改入參。
+export function setEndpoint(geom, which, p) {
+  return { ...geom, [which]: { x: p.x, y: p.y } };
+}
+
 // 兩個 box（{x,y,w,h}）是否相交（marquee 命中測試用）。
 export function rectsIntersect(a, b) {
   return !(a.x > b.x + b.w || a.x + a.w < b.x || a.y > b.y + b.h || a.y + a.h < b.y);
@@ -670,7 +675,8 @@ const DRAW_STYLES = `
 .pc-draw-context-item:hover { background: #0FA0A0; color: #fff; }
 .pc-draw-context-item svg { flex: none; }
 .pc-draw-text-input {
-  position: absolute; z-index: 230; min-width: 80px; font: 14px system-ui, sans-serif;
+  position: absolute; z-index: 230; width: auto !important; min-width: 80px; max-width: 60vw;
+  box-sizing: content-box; font: 14px system-ui, sans-serif;
   color: #E5484D; background: rgba(255,255,255,.92); border: 1px solid #E5484D;
   border-radius: 4px; padding: 2px 4px; outline: none;
 }
@@ -678,7 +684,7 @@ const DRAW_STYLES = `
    position:fixed + 高 z-index；pointer-events 只在面板本身（tab/drawer），不擋畫布。
    預設 drawer 關閉（off by default）→ comment-only/一般使用不被打擾，靠 tab 才打開。 */
 .pc-draw-rec-tab {
-  position: fixed; top: 62%; right: 0; transform: translateY(-50%); z-index: 2147483550;
+  position: fixed; top: 62%; right: 0; transform: translateY(-50%); z-index: 2147483603;
   display: none; border: none; cursor: pointer; background: #0FA0A0; color: #fff;
   padding: 14px 7px; border-radius: 10px 0 0 10px; box-shadow: -2px 0 12px rgba(0,0,0,.2);
   writing-mode: vertical-rl; font: 700 12px/1 system-ui, -apple-system, sans-serif; letter-spacing: 2px;
@@ -687,7 +693,7 @@ const DRAW_STYLES = `
 .pc-draw-rec-tab:hover { background: #0d8f8f; }
 .pc-draw-rec-tab.show { display: block; }
 .pc-draw-rec-drawer {
-  position: fixed; top: 0; right: 0; bottom: 0; z-index: 2147483549;
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 2147483602;
   width: 300px; max-width: 90vw; background: #fff; border-left: 1px solid #e2e8f0;
   display: flex; flex-direction: column; box-shadow: -2px 0 16px rgba(0,0,0,.12);
   transform: translateX(100%); transition: transform .22s ease;
@@ -718,6 +724,15 @@ const DRAW_STYLES = `
 .pc-draw-rec-sel { margin-top: 2px; color: #0d8f8f; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-draw-rec-empty { color: #94a3b8; font-size: 12px; text-align: center; padding: 28px 12px; line-height: 1.6; }
+/* ── 抽屜 footer：「送給 AI（N）」主要送出按鈕（teal 主色）── */
+.pc-draw-rec-footer { padding: 10px 14px; border-top: 1px solid #eef2f6; background: #fff; }
+.pc-draw-rec-send-btn {
+  width: 100%; padding: 8px; border: none; border-radius: 7px; cursor: pointer;
+  background: #0FA0A0; color: #fff; font: 600 13px/1.4 system-ui, -apple-system, sans-serif;
+  transition: background .12s, opacity .12s;
+}
+.pc-draw-rec-send-btn:disabled { opacity: .5; cursor: not-allowed; }
+.pc-draw-rec-send-btn:not(:disabled):hover { background: #0d8f8f; }
 `;
 
 function injectDrawStyles() {
@@ -761,7 +776,7 @@ export function initDrawLayer(target, opts = {}) {
   const drawStore = resolveDrawStore(opts.persist);
   let unsubDraw = null;   // remote 訂閱解除函式（destroy 時呼叫）
   let drag = null;    // 繪製中：{ tool, rect, start, points }
-  const actions = { setMode, setTool, setBrush, setColor, setStrokeWidth, act, eyedropper: openEyedropper, closeContext: closeContextMenu, send: () => sendToAgent() };
+  const actions = { setMode, setTool, setBrush, setColor, setStrokeWidth, act, eyedropper: openEyedropper, closeContext: closeContextMenu, send: () => sendToAgent(), openRecord: () => { state.recordOpen = true; renderRecordPanel(); } };
   const toolbar = buildToolbar(state, actions);
   document.body.appendChild(toolbar);
   const contextMenu = buildContextMenu(actions);
@@ -778,6 +793,8 @@ export function initDrawLayer(target, opts = {}) {
   // ── P6 側邊標注紀錄面板（右緣 tab + 抽屜）─────────────────────────────────────────
   const recordTab = buildRecordTab(() => { state.recordOpen = !state.recordOpen; renderRecordPanel(); });
   const recordDrawer = buildRecordDrawer(() => { state.recordOpen = false; renderRecordPanel(); });
+  const drawerSendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
+  if (drawerSendBtn) drawerSendBtn.onclick = () => handleDrawerSend();
   document.body.appendChild(recordDrawer);
   document.body.appendChild(recordTab);
 
@@ -788,6 +805,15 @@ export function initDrawLayer(target, opts = {}) {
     const rows = annotationRows(state.objects);
     const count = recordDrawer.querySelector('.pc-draw-rec-count');
     if (count) count.textContent = String(rows.length);
+    // footer 送出鈕：畫布清空時強制重設（否則 in-flight 中若 clear 仍殘留舊狀態）
+    const sendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
+    if (sendBtn) {
+      if (!rows.length) delete sendBtn.dataset.inflight; // clear → 強制重設
+      if (!sendBtn.dataset.inflight) {
+        sendBtn.textContent = `送給 AI（${rows.length}）`;
+        sendBtn.disabled = rows.length === 0;
+      }
+    }
     const list = recordDrawer.querySelector('.pc-draw-rec-list');
     if (!list) return;
     list.innerHTML = '';
@@ -867,12 +893,23 @@ export function initDrawLayer(target, opts = {}) {
       const box = toPxBox(geomBBox(o), rect);
       g.appendChild(drawSvgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, fill: 'none', stroke: '#0FA0A0', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
     });
-    if (objs.length === 1) { // 縮放 handle 只在單選時出現
-      const box = toPxBox(geomBBox(objs[0]), rect);
-      ['nw', 'ne', 'se', 'sw'].forEach(name => {
-        const c = boxCorner(box, name);
-        g.appendChild(drawSvgEl('rect', { x: c.x - 4, y: c.y - 4, width: 8, height: 8, fill: '#fff', stroke: '#0FA0A0', 'stroke-width': 1, 'data-handle': name }));
-      });
+    if (objs.length === 1) { // handle 只在單選時出現
+      const o = objs[0];
+      if (o.tool === 'arrow' || o.tool === 'line') {
+        // 箭頭/線段：兩個圓端點 handle（取代 bbox 四角）
+        ['from', 'to'].forEach(which => {
+          const cx = pctToPx(o.geom[which].x, rect.width);
+          const cy = pctToPx(o.geom[which].y, rect.height);
+          g.appendChild(drawSvgEl('circle', { cx, cy, r: 4, fill: '#fff', stroke: '#0FA0A0', 'stroke-width': 1, 'data-endpoint': which }));
+        });
+      } else {
+        // 其餘工具：4 角縮放 handle（原行為不變）
+        const box = toPxBox(geomBBox(o), rect);
+        ['nw', 'ne', 'se', 'sw'].forEach(name => {
+          const c = boxCorner(box, name);
+          g.appendChild(drawSvgEl('rect', { x: c.x - 4, y: c.y - 4, width: 8, height: 8, fill: '#fff', stroke: '#0FA0A0', 'stroke-width': 1, 'data-handle': name }));
+        });
+      }
     }
     svg.appendChild(g);
   }
@@ -1007,6 +1044,9 @@ export function initDrawLayer(target, opts = {}) {
   // ── pointer：select 模式（選取 / 多選 / marquee / 移動 / 縮放）──────────────────
   function onSelectDown(e) {
     const rect = svg.getBoundingClientRect();
+    // 端點拖曳（arrow/line）：優先於 bbox handle 分支
+    const endpoint = e.target?.dataset?.endpoint;
+    if (endpoint && state.selectedIds.length === 1) { startEndpointDrag(e, endpoint, rect); return; }
     const handle = e.target && e.target.dataset ? e.target.dataset.handle : null;
     if (handle && state.selectedIds.length === 1) { startResize(e, handle, rect); return; }
     const p = clientToPct(e.clientX, e.clientY, rect);
@@ -1085,6 +1125,27 @@ export function initDrawLayer(target, opts = {}) {
       window.removeEventListener('pointermove', onMv);
       window.removeEventListener('pointerup', onUp);
       if (resized) commitChange(o.id, { geom: before }, { geom: o.geom });
+    };
+    window.addEventListener('pointermove', onMv);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  // 拖曳端點 handle → 重新指向端點（arrow/line 專用）。仿 startResize。
+  function startEndpointDrag(e, which, rect) {
+    const o = selectedObjects()[0];
+    if (!o) return;
+    const before = o.geom;
+    let moved = false;
+    const onMv = ev => {
+      const p = clientToPct(ev.clientX, ev.clientY, rect);
+      o.geom = setEndpoint(before, which, p);
+      moved = true;
+      render();
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMv);
+      window.removeEventListener('pointerup', onUp);
+      if (moved) commitChange(o.id, { geom: before }, { geom: o.geom });
     };
     window.addEventListener('pointermove', onMv);
     window.addEventListener('pointerup', onUp);
@@ -1196,6 +1257,26 @@ export function initDrawLayer(target, opts = {}) {
       } catch (_) { payload.sent = false; }
     }
     return payload;
+  }
+
+  // 抽屜 footer「送給 AI（N）」按鈕處理：防重複送出、顯示中間/成功/失敗狀態。
+  async function handleDrawerSend() {
+    const sendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
+    if (!sendBtn || sendBtn.disabled || sendBtn.dataset.inflight) return;
+    const n = annotationRows(state.objects).length; // 與面板計數一致（非 raw objects 數）
+    sendBtn.dataset.inflight = '1';
+    sendBtn.disabled = true;
+    sendBtn.textContent = '送出中…';
+    let result;
+    try { result = await sendToAgent(); } catch (_) { result = { sent: false }; }
+    if (result && result.sent) {
+      sendBtn.textContent = `✅ 已送出 ${n} 筆`;
+      setTimeout(() => { delete sendBtn.dataset.inflight; renderRecordPanel(); }, 1800);
+      return;
+    }
+    sendBtn.textContent = '⚠️ 送出失敗，再試一次';
+    sendBtn.disabled = false;
+    delete sendBtn.dataset.inflight;
   }
 
   function startTextInput(clientX, clientY, rect) {
@@ -1597,10 +1678,10 @@ function buildToolbar(state, actions) {
   appendSep(bar);
   const send = drawHtmlEl('button', 'pc-draw-tool pc-draw-send');
   send.dataset.action = 'send';
-  send.title = '送給 AI';
-  send.setAttribute('aria-label', '送給 AI');
+  send.title = '標注紀錄／送給 AI';
+  send.setAttribute('aria-label', '標注紀錄／送給 AI');
   send.innerHTML = icon('send');
-  send.onclick = () => actions.send();
+  send.onclick = () => actions.openRecord();
   bar.appendChild(send);
   appendSep(bar);
   const off = drawHtmlEl('button', 'pc-draw-tool');
@@ -1686,6 +1767,13 @@ function buildRecordDrawer(onClose) {
   hd.appendChild(title); hd.appendChild(count); hd.appendChild(close);
   drawer.appendChild(hd);
   drawer.appendChild(drawHtmlEl('div', 'pc-draw-rec-list'));
+  // footer：主要送出按鈕（onclick 在 initDrawLayer 掛上）
+  const footer = drawHtmlEl('div', 'pc-draw-rec-footer');
+  const sendBtn = drawHtmlEl('button', 'pc-draw-rec-send-btn');
+  sendBtn.textContent = '送給 AI（0）';
+  sendBtn.disabled = true;
+  footer.appendChild(sendBtn);
+  drawer.appendChild(footer);
   return drawer;
 }
 // 一筆標注 → 面板 row（工具圖示 + 色票 + 文字 + selector）。點擊 → onClick(id)。
