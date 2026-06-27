@@ -547,11 +547,19 @@ const styleObjs = () => ([
   { id: 'a', tool: 'rect', geom: {}, style: { color: '#000', strokeWidth: 2, fill: 'none' } },
   { id: 'b', tool: 'rect', geom: {}, style: { color: '#000', strokeWidth: 2, fill: 'none' } },
 ]);
-test('applyStylePatch: 繪圖工具啟用 → 只改預設、物件與 cmds 不動', () => {
+test('applyStylePatch: 繪圖工具 + 有選取（剛建立物件 auto-select）→ 即時換色該物件 + 更新預設', () => {
   const objs = styleObjs();
   const res = applyStylePatch({ tool: 'rect', selectedIds: ['a'], objects: objs, defaultStyle: { ...DEFAULT_DRAW_STYLE } }, { color: '#abcdef' });
+  eq(res.defaultStyle.color, '#abcdef', '預設一併更新（下一個物件用）');
+  eq(res.objects[0].style.color, '#abcdef', '剛建立的選取物件應即時換色');
+  eq(res.objects[1].style.color, '#000', '未選取的不動');
+  eq(res.cmds.length, 1, '只有選取的一條 update cmd');
+});
+test('applyStylePatch: 繪圖工具 + 無選取 → 只改預設、物件不動', () => {
+  const objs = styleObjs();
+  const res = applyStylePatch({ tool: 'rect', selectedIds: [], objects: objs, defaultStyle: { ...DEFAULT_DRAW_STYLE } }, { color: '#abcdef' });
   eq(res.defaultStyle.color, '#abcdef');
-  eq(res.objects[0].style.color, '#000', '繪圖工具不該改既有物件');
+  eq(res.objects[0].style.color, '#000', '無選取 → 既有物件不動');
   eq(res.cmds.length, 0);
 });
 test('applyStylePatch: select 工具 + 多選 → 改所有選取物件、產生 update cmds', () => {

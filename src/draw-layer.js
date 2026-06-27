@@ -618,7 +618,9 @@ function shiftGroup(ids, selSet, dir) {
 // 回傳 { defaultStyle, objects, cmds }；eyedropper 與 picker 共用同一路徑。
 export function applyStylePatch({ tool, selectedIds, objects, defaultStyle }, patch) {
   const nextDefault = { ...defaultStyle, ...patch };
-  const sel = new Set(tool === 'select' ? selectedIds : []);
+  // 有選取就套到選取物件（不限 select 工具）：剛建立的物件會 auto-select，
+  // 此時按顏色/筆寬/字級應「即時換」到該物件，同時更新預設供下一個物件用。
+  const sel = new Set(selectedIds || []);
   if (!sel.size) return { defaultStyle: nextDefault, objects, cmds: [] };
   const cmds = [];
   const nextObjects = objects.map(o => {
@@ -1015,7 +1017,33 @@ export function initDrawLayer(target, opts = {}) {
       list.appendChild(empty);
       return;
     }
+    list.appendChild(recordPreviewEl()); // 置頂：送給 AI 的畫面截圖預覽
     rows.forEach(row => list.appendChild(recordRowEl(row, isSelected(row.id), onRecordRowClick)));
+    refreshRecordPreview();
+  }
+  // 標注紀錄頂部「送出畫面」縮圖：顯示 capturePng() 的結果（=送給 AI 的 PNG）。
+  let _previewSig = null, _previewUrl = null, _previewTimer = null;
+  function recordPreviewEl() {
+    const img = drawHtmlEl('img', 'pc-draw-rec-preview');
+    img.alt = '送給 AI 的畫面預覽';
+    img.style.cssText = 'display:block;width:100%;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;';
+    if (_previewUrl) img.src = _previewUrl;
+    return img;
+  }
+  function refreshRecordPreview() {
+    if (!state.recordOpen) return;
+    const sig = state.objects.length + '|' + history.length; // 內容變更（增刪/移動/換色）即重拍
+    if (sig === _previewSig) return;
+    _previewSig = sig;
+    if (_previewTimer) clearTimeout(_previewTimer);
+    _previewTimer = setTimeout(() => {
+      capturePng().then(url => {
+        if (!url) return;
+        _previewUrl = url;
+        const img = recordDrawer.querySelector('.pc-draw-rec-preview');
+        if (img) img.src = url;
+      });
+    }, 180); // debounce：連續操作只在停手後拍一次
   }
   // 點一筆 row → 選取該物件、若在畫面外則捲入視野（沿用 spec-overlay 的 scrollIntoView）。
   function onRecordRowClick(id) {
