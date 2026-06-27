@@ -1645,6 +1645,90 @@ async function dragDraw(page, x1, y1, x2, y2) {
   });
 
   await teamPage.close();
+
+  // ── Item 1：dev 模式 localStorage 持久化 ─────────────────────────────────────
+  // 使用主 page（已有 #canvas），注入 opts.projectId 區分 key，每個 test 自行清 key。
+  console.log('\ndraw-layer e2e — dev 模式 localStorage 持久化:');
+
+  const LOCAL_PROJ = 'e2e-local-persist';
+  const LOCAL_KEY  = 'pc-draw-local:' + LOCAL_PROJ;
+
+  // 清 key + destroy 舊 api + 建新 controller（同 projectId）。
+  async function initLocalPersist(overrides = {}) {
+    await page.evaluate(({ key, proj, extra }) => {
+      localStorage.removeItem(key);
+      try { if (window.__drawTest.api) window.__drawTest.api.destroy(); } catch (_) {}
+      window.__drawTest.api = window.__drawTest.init({ projectId: proj, ...extra });
+    }, { key: LOCAL_KEY, proj: LOCAL_PROJ, extra: overrides });
+  }
+
+  await test('畫 rect → localStorage 寫入序列化資料', async () => {
+    await initLocalPersist();
+    await page.evaluate(() => window.__drawTest.api.setTool('rect'));
+    await dragDraw(page, 50, 50, 150, 130);
+    const stored = await page.evaluate(k => localStorage.getItem(k), LOCAL_KEY);
+    assert(stored !== null, 'localStorage 應有資料');
+    const docs = JSON.parse(stored);
+    assert(Array.isArray(docs) && docs.length === 1 && docs[0].tool === 'rect',
+      `應序列化 1 筆 rect，實際 ${JSON.stringify(docs)}`);
+  });
+
+  await test('重新 initDrawLayer 同 projectId → 物件從 localStorage 還原並渲染', async () => {
+    // 不清 key（承接上一個 test 留下的 rect）
+    await page.evaluate(proj => {
+      try { window.__drawTest.api.destroy(); } catch (_) {}
+      window.__drawTest.api = window.__drawTest.init({ projectId: proj });
+    }, LOCAL_PROJ);
+    const r = await page.evaluate(() => ({
+      objs: window.__drawTest.api.getObjects(),
+      domRects: document.querySelectorAll('#pc-draw > rect').length,
+    }));
+    assert(r.objs.length === 1 && r.objs[0].tool === 'rect',
+      `重新 init 後應還原 1 筆 rect，實際 ${JSON.stringify(r.objs.map(o => o.tool))}`);
+    assert(r.domRects >= 1, `DOM 應渲染 rect，實際 ${r.domRects}`);
+  });
+
+  await test('image 物件不進 localStorage（vectors only）', async () => {
+    await initLocalPersist();
+    const PNG_TINY = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    await page.evaluate(d => window.__drawTest.api.addImage(d, 1, 1, null), PNG_TINY);
+    const stored = await page.evaluate(k => localStorage.getItem(k), LOCAL_KEY);
+    const docs = stored ? JSON.parse(stored) : [];
+    assert(!docs.some(d => d.tool === 'image'),
+      `image 物件不應進 localStorage，實際 ${JSON.stringify(docs)}`);
+  });
+
+  await test('opts.persistLocal=false → localStorage 不寫入', async () => {
+    const noKey = 'pc-draw-local:e2e-no-persist';
+    await page.evaluate(k => {
+      localStorage.removeItem(k);
+      try { window.__drawTest.api.destroy(); } catch (_) {}
+      window.__drawTest.api = window.__drawTest.init({ projectId: 'e2e-no-persist', persistLocal: false });
+    }, noKey);
+    await page.evaluate(() => window.__drawTest.api.setTool('rect'));
+    await dragDraw(page, 50, 50, 130, 110);
+    const stored = await page.evaluate(k => localStorage.getItem(k), noKey);
+    assert(stored === null, 'persistLocal=false 應不寫入 localStorage');
+    await page.evaluate(() => { localStorage.removeItem('pc-draw-local:e2e-no-persist'); });
+  });
+
+  await test('clear() 後 localStorage 更新為空陣列', async () => {
+    await initLocalPersist();
+    await page.evaluate(() => window.__drawTest.api.setTool('rect'));
+    await dragDraw(page, 50, 50, 150, 130);
+    await page.evaluate(() => window.__drawTest.api.clear());
+    const stored = await page.evaluate(k => localStorage.getItem(k), LOCAL_KEY);
+    const docs = stored ? JSON.parse(stored) : null;
+    assert(Array.isArray(docs) && docs.length === 0, `clear 後 localStorage 應為空陣列，實際 ${JSON.stringify(docs)}`);
+    // 清理
+    await page.evaluate(k => localStorage.removeItem(k), LOCAL_KEY);
+    // 還原：重建 default controller 給後續 test 用
+    await page.evaluate(() => {
+      try { window.__drawTest.api.destroy(); } catch (_) {}
+      window.__drawTest.api = window.__drawTest.init();
+    });
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

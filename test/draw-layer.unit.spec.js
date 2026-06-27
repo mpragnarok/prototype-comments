@@ -8,6 +8,7 @@
 import {
   pxToPct, pctToPx, clientToPct, rectFromPoints,
   makeDrawObject, serializeDrawObject, drawingToDoc,
+  serializeObjectsForLocal, hydrateObjectsFromLocal,
   geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath, diamondPoints, labelAnchor, imageGeom,
   cssSelectorFor, buildExport, annotationRows,
   taperScale, outlineWidths, taperedOutline, brushStyle, DRAW_BRUSHES,
@@ -675,6 +676,51 @@ test('setEndpoint: 回傳新物件（非同一參考）', () => {
   const geom = { from: { x: 0, y: 0 }, to: { x: 1, y: 1 } };
   const result = setEndpoint(geom, 'to', { x: 2, y: 2 });
   assert(result !== geom, '應回傳新物件');
+});
+
+// ── serializeObjectsForLocal / hydrateObjectsFromLocal（Item 1 localStorage 持久化）──
+console.log('\ndraw-layer unit — localStorage 持久化純函式:');
+
+test('serializeObjectsForLocal: image 物件跳過，向量物件保留', () => {
+  const vec = makeDrawObject({ id: 'loc-v1', tool: 'rect', geom: { x: 1, y: 2, w: 3, h: 4 } });
+  const img = makeDrawObject({ id: 'loc-i1', tool: 'image', geom: { x: 0, y: 0, w: 10, h: 10 } });
+  img.imageRef = 'data:image/png;base64,abc'; // 模擬 dataURL
+  const docs = serializeObjectsForLocal([vec, img]);
+  eq(docs.length, 1, '應跳過 image → 只剩 1 筆');
+  eq(docs[0].id, 'loc-v1', '保留向量物件 id');
+});
+test('serializeObjectsForLocal: 空陣列回傳空陣列', () => {
+  eq(serializeObjectsForLocal([]).length, 0);
+});
+test('hydrateObjectsFromLocal: 從 plain doc 還原 DrawObject + label / anchor', () => {
+  const docs = [{ id: 'loc-h1', tool: 'arrow', geom: { from: { x: 0, y: 0 }, to: { x: 5, y: 5 } }, style: {}, label: '標籤', anchor: '#btn' }];
+  const objs = hydrateObjectsFromLocal(docs);
+  eq(objs.length, 1, '還原 1 筆');
+  eq(objs[0].id, 'loc-h1');
+  eq(objs[0].tool, 'arrow');
+  eq(objs[0].label, '標籤');
+  eq(objs[0].anchor, '#btn');
+});
+test('hydrateObjectsFromLocal: null / undefined 輸入回傳空陣列', () => {
+  eq(hydrateObjectsFromLocal(null).length, 0);
+  eq(hydrateObjectsFromLocal(undefined).length, 0);
+});
+test('round-trip: vector 物件序列化後還原 id/tool/geom/style 相同', () => {
+  const obj = makeDrawObject({ id: 'loc-rt1', tool: 'ellipse', geom: { x: 5, y: 10, w: 20, h: 15 }, style: { color: '#f00', strokeWidth: 3 } });
+  const docs = serializeObjectsForLocal([obj]);
+  const back = hydrateObjectsFromLocal(docs);
+  eq(back[0].id, 'loc-rt1', 'id 一致');
+  eq(back[0].tool, 'ellipse', 'tool 一致');
+  eq(back[0].style.color, '#f00', 'style.color 一致');
+  eq(back[0].geom.w, 20, 'geom.w 一致');
+});
+test('round-trip: image 物件在 round-trip 中被濾掉（vectors only）', () => {
+  const img = makeDrawObject({ id: 'loc-img', tool: 'image', geom: { x: 0, y: 0, w: 50, h: 50 } });
+  const vec = makeDrawObject({ id: 'loc-rv', tool: 'line', geom: { from: { x: 0, y: 0 }, to: { x: 10, y: 10 } } });
+  const docs = serializeObjectsForLocal([img, vec]);
+  const back = hydrateObjectsFromLocal(docs);
+  eq(back.length, 1, 'image 不進 round-trip');
+  eq(back[0].id, 'loc-rv', '只剩向量物件');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
