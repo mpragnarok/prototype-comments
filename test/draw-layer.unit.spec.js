@@ -8,7 +8,7 @@
 import {
   pxToPct, pctToPx, clientToPct, rectFromPoints,
   makeDrawObject, serializeDrawObject,
-  geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath, diamondPoints, labelAnchor,
+  geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath, diamondPoints, labelAnchor, imageGeom,
   taperScale, outlineWidths, taperedOutline, brushStyle, DRAW_BRUSHES,
   TOOL_SHORTCUTS, resolveShortcut,
   reorderIds, reorderMany, rectsIntersect, marqueeSelect, applyStylePatch, eyedropperSupported,
@@ -270,6 +270,44 @@ test('diamond: DRAW_TOOLS 含 diamond、serialize 保留 tool', () => {
   assert(DRAW_TOOLS.includes('diamond'), 'DRAW_TOOLS 應含 diamond');
   const o = makeDrawObject({ id: 'dm1', tool: 'diamond', geom: { x: 1, y: 1, w: 4, h: 4 } });
   eq(serializeDrawObject(o).tool, 'diamond');
+});
+
+// ── P3 貼圖 image：imageGeom 尺寸 + serialize imageRef + box 幾何 ──────────────────
+test('imageGeom: 大圖等比縮到 ≤60% 畫布、置中', () => {
+  const g = imageGeom(1200, 800, 600, 400); // 自然 200%×200% → 縮到 60%
+  // 視覺像素長寬比應 = 1200/800 = 1.5
+  const wpx = g.w / 100 * 600, hpx = g.h / 100 * 400;
+  close(wpx / hpx, 1200 / 800, '像素長寬比應保留');
+  assert(g.w <= 60 + 1e-6 && g.h <= 60 + 1e-6, `應 ≤60% 畫布，實際 ${g.w}×${g.h}`);
+  close(g.x + g.w / 2, 50, '水平置中'); close(g.y + g.h / 2, 50, '垂直置中');
+});
+test('imageGeom: 非等比畫布也保留像素長寬比（正方形圖）', () => {
+  const g = imageGeom(800, 800, 600, 400); // 正方形圖，畫布非正方
+  const wpx = g.w / 100 * 600, hpx = g.h / 100 * 400;
+  close(wpx, hpx, '正方形圖應渲染成正方形像素');
+  assert(hpx <= 0.6 * 400 + 1e-6, `高度受 60% 高限制，實際 ${hpx}`);
+});
+test('imageGeom: 小圖不放大（scale=1）', () => {
+  const g = imageGeom(60, 40, 600, 400); // 自然 10%×10%，遠小於 60%
+  eq(g.w, 10); eq(g.h, 10);
+});
+test('imageGeom: atPoint → 以該點為中心並夾進畫布', () => {
+  const g = imageGeom(120, 80, 600, 400, { x: 5, y: 5 }); // 想置中於(5,5)，但會被夾住不出界
+  assert(g.x >= 0 && g.y >= 0 && g.x + g.w <= 100 + 1e-6 && g.y + g.h <= 100 + 1e-6, '不應超出畫布');
+  const mid = imageGeom(120, 80, 600, 400, { x: 50, y: 50 });
+  close(mid.x + mid.w / 2, 50); close(mid.y + mid.h / 2, 50, '畫布內的點 → 真正以該點為中心');
+});
+test('image: makeDrawObject 帶 imageRef、serialize 一併輸出', () => {
+  const o = makeDrawObject({ id: 'im1', tool: 'image', geom: { x: 0, y: 0, w: 30, h: 20 }, imageRef: 'data:image/png;base64,AAA' });
+  eq(o.imageRef, 'data:image/png;base64,AAA');
+  eq(serializeDrawObject(o).imageRef, 'data:image/png;base64,AAA', 'serialize 應含 imageRef');
+});
+test('image: 走 box 幾何（geomBBox / translateGeom / remapGeom）', () => {
+  const o = { tool: 'image', geom: { x: 10, y: 10, w: 30, h: 20 }, imageRef: 'x' };
+  eq(JSON.stringify(geomBBox(o)), JSON.stringify({ x: 10, y: 10, w: 30, h: 20 }));
+  const t = translateGeom(o, 5, 7); eq(t.x, 15); eq(t.y, 17); eq(t.w, 30);
+  const r = remapGeom(o, { x: 10, y: 10, w: 30, h: 20 }, { x: 0, y: 0, w: 60, h: 40 });
+  eq(JSON.stringify(r), JSON.stringify({ x: 0, y: 0, w: 60, h: 40 }), 'resize 重映射');
 });
 
 // ── 綁定標籤：labelAnchor + serialize ───────────────────────────────────────────

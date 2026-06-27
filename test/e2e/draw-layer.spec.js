@@ -908,6 +908,113 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => window.__drawTest.api.clear());
   });
 
+  // ── P3 貼圖 image（addImage / paste / drop）──────────────────────────────────
+  console.log('\ndraw-layer e2e — P3 貼圖 image:');
+
+  // 1×1 紅點 PNG（dataURL）。e2e 以明確自然尺寸呼叫 addImage，不需真剪貼簿。
+  const PNG_1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  // 用 addImage 建一張圖（自然 300×200），回傳 id。
+  async function addImg() {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setTool('select'); });
+    return page.evaluate(d => window.__drawTest.api.addImage(d, 300, 200).id, PNG_1x1);
+  }
+
+  await test('addImage → #pc-draw 渲染 <image href=dataURL> + getObjects tool=image', async () => {
+    const id = await addImg();
+    const r = await page.evaluate(({ id, d }) => {
+      const el = document.querySelector(`#pc-draw image[data-id="${id}"]`);
+      const o = window.__drawTest.api.getObjects().find(o => o.id === id);
+      return {
+        images: document.querySelectorAll('#pc-draw image').length,
+        href: el && (el.getAttribute('href') || el.getAttribute('xlink:href')),
+        tool: o && o.tool, imageRef: o && o.imageRef, geom: o && o.geom,
+        w: el && +el.getAttribute('width'), h: el && +el.getAttribute('height'),
+      };
+    }, { id, d: PNG_1x1 });
+    console.log('     addImage:', JSON.stringify({ ...r, href: r.href && r.href.slice(0, 20) }));
+    assert(r.images === 1 && r.href === PNG_1x1, `應渲染 <image> 帶 dataURL，實際 ${r.images}`);
+    assert(r.tool === 'image' && r.imageRef === PNG_1x1, 'getObjects 應為 image + imageRef');
+    assert(r.geom.w > 0 && r.geom.h > 0 && r.w > 0 && r.h > 0, 'image 應有正尺寸 box');
+    // 自然 300×200 在 600×400 畫布 → 50%×50%（未超 60%），渲染 px = 300×200
+    assert(Math.abs(r.w - 300) < 2 && Math.abs(r.h - 200) < 2, `渲染尺寸 ~300×200，實際 ${r.w}×${r.h}`);
+  });
+
+  await test('image 可選取 + 移動（拖曳 → geom 改變）', async () => {
+    const id = await addImg(); // 置中於 (50%,50%) → 約 (175,125)..(425,275)，中心 (300,200)
+    await page.evaluate(() => window.__drawTest.api.select(null));
+    await page.mouse.click(300, 200); // 點圖中心
+    const sel = await page.evaluate(() => window.__drawTest.api.getSelectedIds());
+    const before = await page.evaluate(i => window.__drawTest.api.getObjects().find(o => o.id === i).geom, id);
+    await dragDraw(page, 300, 200, 360, 250); // 拖圖
+    const after = await page.evaluate(i => window.__drawTest.api.getObjects().find(o => o.id === i).geom, id);
+    console.log('     image move:', JSON.stringify({ sel: sel.length, bx: before.x, ax: after.x }));
+    assert(sel.length === 1 && sel[0] === id, '點圖應選取');
+    assert(after.x > before.x + 1 && after.y > before.y + 1, 'image 應可被拖動');
+  });
+
+  await test('image 可縮放（拖 se handle → 尺寸改變）', async () => {
+    const id = await addImg();
+    await page.mouse.click(300, 200); // 選取
+    const before = await page.evaluate(i => window.__drawTest.api.getObjects().find(o => o.id === i).geom, id);
+    const handle = await page.evaluate(() => {
+      const h = document.querySelector('.pc-draw-selection rect[data-handle="se"]');
+      const r = h.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    await dragDraw(page, handle.x, handle.y, handle.x + 60, handle.y + 40);
+    const after = await page.evaluate(i => window.__drawTest.api.getObjects().find(o => o.id === i).geom, id);
+    console.log('     image resize w/h:', before.w, before.h, '→', after.w, after.h);
+    assert(after.w > before.w + 1 && after.h > before.h + 1, 'image 應可縮放');
+  });
+
+  await test('image z-order：右鍵選單「置底」把圖排到 shape 之下', async () => {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setTool('rect'); });
+    await dragDraw(page, 50, 300, 150, 360); // 先畫 rect（底層，與圖不重疊）
+    const imgId = await page.evaluate(d => window.__drawTest.api.addImage(d, 300, 200).id, PNG_1x1); // 再建圖（在 rect 之上）
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    const beforeFirst = await page.evaluate(() => window.__drawTest.api.getObjects()[0].tool);
+    await page.mouse.click(300, 200, { button: 'right' }); // 右鍵圖中心 → 選圖 + 開選單
+    await page.click('#pc-draw-context .pc-draw-context-item[data-action="back"]'); // 置底
+    const r = await page.evaluate(() => ({
+      domFirst: document.querySelector('#pc-draw [data-id]').dataset.id,
+      objFirst: window.__drawTest.api.getObjects()[0].id,
+      objFirstTool: window.__drawTest.api.getObjects()[0].tool,
+    }));
+    console.log('     image z-order:', JSON.stringify({ beforeFirst, ...r, imgId }));
+    assert(beforeFirst === 'rect', '初始 rect 在底層');
+    assert(r.domFirst === imgId && r.objFirst === imgId && r.objFirstTool === 'image', '右鍵置底後 image 應在最底（DOM 最前）');
+  });
+
+  await test('image 可刪除（Delete 鍵）', async () => {
+    const id = await addImg();
+    await page.mouse.click(300, 200); // 選取
+    await page.keyboard.press('Delete');
+    const n = await page.evaluate(() => ({ objs: window.__drawTest.api.getObjects().length, imgs: document.querySelectorAll('#pc-draw image').length }));
+    console.log('     image delete:', JSON.stringify(n));
+    assert(n.objs === 0 && n.imgs === 0, 'image 應可刪除');
+  });
+
+  await test('drop 圖檔 → 建 image 物件（合成 drop 事件 + File）', async () => {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setTool('select'); });
+    await page.evaluate(async d => {
+      const blob = await (await fetch(d)).blob();
+      const file = new File([blob], 'x.png', { type: 'image/png' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const svg = document.getElementById('pc-draw');
+      svg.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      svg.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, clientX: 250, clientY: 180, dataTransfer: dt }));
+    }, PNG_1x1);
+    await page.waitForFunction(() => window.__drawTest.api.getObjects().some(o => o.tool === 'image'), { timeout: 2000 });
+    const r = await page.evaluate(() => {
+      const o = window.__drawTest.api.getObjects().find(o => o.tool === 'image');
+      return { tool: o && o.tool, hasRef: !!(o && o.imageRef), imgs: document.querySelectorAll('#pc-draw image').length };
+    });
+    console.log('     drop image:', JSON.stringify(r));
+    assert(r.tool === 'image' && r.hasRef && r.imgs === 1, 'drop 圖檔應建立 image 物件');
+  });
+
   // ── Feature A：marquee 多選 + 右鍵 z-order 選單 ──────────────────────────────
   console.log('\ndraw-layer e2e — Feature A 多選 / marquee / 右鍵選單:');
 

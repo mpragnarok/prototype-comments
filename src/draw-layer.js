@@ -140,6 +140,21 @@ export function diamondPoints(box) {
   ];
 }
 
+// 貼圖初始幾何（% 座標）：自然像素尺寸等比縮到 ≤ maxFrac 畫布，置於 atPoint 中心（無則畫布中心），夾進畫布。
+// 純函式 → {x,y,w,h}（%）。等比在「像素空間」計算後再換成 %，確保視覺長寬比正確。
+export function imageGeom(natW, natH, canvasW, canvasH, atPoint, maxFrac = 0.6) {
+  const r2 = n => parseFloat(n.toFixed(2));
+  const CW = canvasW || 1, CH = canvasH || 1;
+  const scale = Math.min(1, (maxFrac * CW) / (natW || 1), (maxFrac * CH) / (natH || 1)); // 等比、不放大
+  const wPct = (natW * scale / CW) * 100;
+  const hPct = (natH * scale / CH) * 100;
+  let x = atPoint ? atPoint.x - wPct / 2 : 50 - wPct / 2;
+  let y = atPoint ? atPoint.y - hPct / 2 : 50 - hPct / 2;
+  x = Math.max(0, Math.min(x, 100 - wPct)); // 夾進畫布
+  y = Math.max(0, Math.min(y, 100 - hPct));
+  return { x: r2(x), y: r2(y), w: r2(wPct), h: r2(hPct) };
+}
+
 // 一次拖曳（起點 a、終點 b）→ 某工具的幾何（box 類 / 端點類）。pencil 另走累點邏輯。
 export function geomFromDrag(tool, a, b) {
   if (tool === 'ellipse' || tool === 'rect' || tool === 'diamond') return rectFromPoints(a, b);
@@ -239,7 +254,7 @@ function pointDir(pts, i) {
 // 任一物件 → 其 % bounding box（選取框 / 命中測試 / 縮放重映射用）。
 export function geomBBox(o) {
   const g = o.geom;
-  if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond') return { x: g.x, y: g.y, w: g.w, h: g.h };
+  if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond' || o.tool === 'image') return { x: g.x, y: g.y, w: g.w, h: g.h };
   if (o.tool === 'arrow' || o.tool === 'line') return rectFromPoints(g.from, g.to);
   if (o.tool === 'pencil') {
     const xs = g.points.map(p => p[0]), ys = g.points.map(p => p[1]);
@@ -266,7 +281,7 @@ export function translateGeom(o, dx, dy) {
   if (o.tool === 'arrow' || o.tool === 'line')
     return { from: { x: g.from.x + dx, y: g.from.y + dy }, to: { x: g.to.x + dx, y: g.to.y + dy } };
   if (o.tool === 'pencil') return { points: g.points.map(([x, y]) => [x + dx, y + dy]) };
-  if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond') return { x: g.x + dx, y: g.y + dy, w: g.w, h: g.h };
+  if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond' || o.tool === 'image') return { x: g.x + dx, y: g.y + dy, w: g.w, h: g.h };
   return { x: g.x + dx, y: g.y + dy }; // text
 }
 
@@ -280,7 +295,7 @@ export function remapGeom(o, oldBox, newBox) {
   if (o.tool === 'arrow' || o.tool === 'line')
     return { from: { x: mx(g.from.x), y: my(g.from.y) }, to: { x: mx(g.to.x), y: my(g.to.y) } };
   if (o.tool === 'pencil') return { points: g.points.map(([x, y]) => [mx(x), my(y)]) };
-  if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond') return { x: newBox.x, y: newBox.y, w: newBox.w, h: newBox.h };
+  if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond' || o.tool === 'image') return { x: newBox.x, y: newBox.y, w: newBox.w, h: newBox.h };
   return { x: mx(g.x), y: my(g.y) }; // text
 }
 
@@ -447,9 +462,10 @@ function nextDrawId() { return 'd' + (++_idSeq); }
 
 // 組裝一個 DrawObject（plan §4.2 子集：id/tool/geom/style[/text]）。
 // z 由繪圖層在 commit 時依 DOM 順序戳上（stampZ），純函式不負責。
-export function makeDrawObject({ id, tool, geom, style, text } = {}) {
+export function makeDrawObject({ id, tool, geom, style, text, imageRef } = {}) {
   const obj = { id: id || nextDrawId(), tool, geom, style: normalizeStyle(style) };
   if (text != null) obj.text = text;
+  if (imageRef != null) obj.imageRef = imageRef; // image 物件的 dataURL（P3）/ 本機路徑（P4）
   return obj;
 }
 
@@ -458,6 +474,7 @@ export function serializeDrawObject(obj) {
   const out = { id: obj.id, tool: obj.tool, geom: obj.geom, style: obj.style };
   if (obj.text != null) out.text = obj.text;
   if (obj.label != null && obj.label !== '') out.label = obj.label; // 綁定標籤
+  if (obj.imageRef != null) out.imageRef = obj.imageRef;            // 貼圖 dataURL/路徑
   if (obj.z != null) out.z = obj.z;
   return out;
 }
@@ -927,6 +944,52 @@ export function initDrawLayer(target, opts = {}) {
     input.addEventListener('blur', commit);
   }
 
+  // ── 貼圖：paste（剪貼簿）/ drop（檔案）→ image 物件（P3，dataURL 內嵌）─────────────
+  // 核心：addImage（純資料路徑，paste/drop 與 e2e 共用），回傳新物件。
+  function addImage(dataURL, naturalW, naturalH, atPoint) {
+    const cw = svg.clientWidth || host.clientWidth || 1;
+    const ch = svg.clientHeight || host.clientHeight || 1;
+    const geom = imageGeom(naturalW, naturalH, cw, ch, atPoint);
+    const obj = makeDrawObject({ tool: 'image', geom, imageRef: dataURL });
+    runCommand({ type: 'create', obj }); // 進 undo/redo + 自動選取
+    return obj;
+  }
+  // blob → dataURL → 量自然尺寸 → addImage。
+  function loadBlobAsImage(blob, atPoint) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataURL = reader.result;
+      const img = new Image();
+      img.onload = () => addImage(dataURL, img.naturalWidth || img.width, img.naturalHeight || img.height, atPoint);
+      img.src = dataURL;
+    };
+    reader.readAsDataURL(blob);
+  }
+  function isTyping() {
+    const ae = document.activeElement;
+    return !!ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
+  }
+  function onPaste(e) {
+    if (state.mode !== 'draw' || isTyping()) return; // 打字時不攔貼上
+    const items = (e.clipboardData && e.clipboardData.items) || [];
+    for (const it of items) {
+      if (it.type && it.type.indexOf('image') === 0) {
+        const blob = it.getAsFile();
+        if (blob) { e.preventDefault(); loadBlobAsImage(blob, null); return; } // 置中
+      }
+    }
+  }
+  function onDragOver(e) { if (state.mode === 'draw') e.preventDefault(); } // 允許 drop
+  function onDrop(e) {
+    if (state.mode !== 'draw') return;
+    e.preventDefault(); // 擋瀏覽器開新頁
+    const files = (e.dataTransfer && e.dataTransfer.files) || [];
+    const at = clientToPct(e.clientX, e.clientY, svg.getBoundingClientRect());
+    for (const f of files) {
+      if (f.type && f.type.indexOf('image') === 0) { loadBlobAsImage(f, at); return; }
+    }
+  }
+
   // ── 鍵盤：Delete/Backspace 刪除、Cmd/Ctrl+Z undo、Shift+Cmd/Ctrl+Z redo ────────
   function onKey(e) {
     if (state.mode !== 'draw') return;
@@ -983,8 +1046,11 @@ export function initDrawLayer(target, opts = {}) {
   svg.addEventListener('pointerdown', onDown);
   svg.addEventListener('dblclick', onDblClick);
   svg.addEventListener('contextmenu', onContextMenu);
+  svg.addEventListener('dragover', onDragOver);
+  svg.addEventListener('drop', onDrop);
   window.addEventListener('resize', render);
   window.addEventListener('keydown', onKey);
+  window.addEventListener('paste', onPaste);
 
   applyMode();
   render();
@@ -1010,11 +1076,13 @@ export function initDrawLayer(target, opts = {}) {
     setColor,
     setStrokeWidth,
     eyedropper: openEyedropper,
+    addImage, // (dataURL, naturalW, naturalH, atPoint?) → 新 image 物件（paste/drop 與測試共用）
     clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; render(); },
     destroy: () => {
       svg.remove(); toolbar.remove(); contextMenu.remove();
       window.removeEventListener('resize', render);
       window.removeEventListener('keydown', onKey);
+      window.removeEventListener('paste', onPaste);
       closeContextMenu();
     },
   };
@@ -1040,7 +1108,7 @@ function updateGeom(drag, p) {
 }
 // 判斷物件是否「真的畫了」（避免單點 click 留下空物件）。
 function isDrawn(o) {
-  if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond') return o.geom.w > 0.2 || o.geom.h > 0.2;
+  if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond' || o.tool === 'image') return o.geom.w > 0.2 || o.geom.h > 0.2;
   if (o.tool === 'arrow' || o.tool === 'line') { const g = o.geom; return Math.abs(g.to.x - g.from.x) > 0.2 || Math.abs(g.to.y - g.from.y) > 0.2; }
   if (o.tool === 'pencil') return (o.geom.points || []).length > 1;
   return true; // text 由 input commit 控制
@@ -1063,6 +1131,17 @@ function renderObject(o, rect, svg) {
       x: pctToPx(g.x, rect.width), y: pctToPx(g.y, rect.height),
       width: pctToPx(g.w, rect.width), height: pctToPx(g.h, rect.height), ...stroke,
     });
+  }
+  if (o.tool === 'image') {
+    const g = o.geom;
+    const img = drawSvgEl('image', {
+      x: pctToPx(g.x, rect.width), y: pctToPx(g.y, rect.height),
+      width: pctToPx(g.w, rect.width), height: pctToPx(g.h, rect.height),
+      preserveAspectRatio: 'xMidYMid meet',
+    });
+    img.setAttribute('href', o.imageRef || '');
+    img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', o.imageRef || ''); // 舊瀏覽器相容
+    return img;
   }
   if (o.tool === 'diamond') {
     const g = o.geom;
