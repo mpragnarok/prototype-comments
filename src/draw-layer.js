@@ -408,6 +408,42 @@ export function setEndpoint(geom, which, p) {
   return { ...geom, [which]: { x: p.x, y: p.y } };
 }
 
+// ── Batch 3 純函式：持久群組（groupId）───────────────────────────────────────
+// 指定 ids 設上新的 groupId（immutable）。不在 ids 中的物件保持不變。
+export function assignGroupId(objects, ids, gid) {
+  const idSet = new Set(ids);
+  return objects.map(o => idSet.has(o.id) ? { ...o, groupId: gid } : o);
+}
+
+// 指定 ids 清除 groupId（immutable）。不在 ids 中的物件保持不變。
+export function clearGroupId(objects, ids) {
+  const idSet = new Set(ids);
+  return objects.map(o => {
+    if (!idSet.has(o.id)) return o;
+    const next = { ...o };
+    delete next.groupId;
+    return next;
+  });
+}
+
+// 將選取展開：若選取的物件屬於某群組，展開為所有群組成員 id（去重、依 objects 順序）。
+export function expandSelectionToGroups(objects, selectedIds) {
+  const groupIds = new Set();
+  selectedIds.forEach(id => {
+    const o = objects.find(x => x.id === id);
+    if (o && o.groupId) groupIds.add(o.groupId);
+  });
+  if (!groupIds.size) return selectedIds.slice();
+  const expanded = new Set(selectedIds);
+  objects.forEach(o => { if (o.groupId && groupIds.has(o.groupId)) expanded.add(o.id); });
+  return objects.filter(o => expanded.has(o.id)).map(o => o.id);
+}
+
+// 回傳屬於同一 groupId 的所有物件 id。
+export function groupMembers(objects, gid) {
+  return objects.filter(o => o.groupId === gid).map(o => o.id);
+}
+
 // 兩個 box（{x,y,w,h}）是否相交（marquee 命中測試用）。
 export function rectsIntersect(a, b) {
   return !(a.x > b.x + b.w || a.x + a.w < b.x || a.y > b.y + b.h || a.y + a.h < b.y);
@@ -550,6 +586,7 @@ function normalizeStyle(style = {}) {
 
 let _idSeq = 0;
 function nextDrawId() { return 'd' + (++_idSeq); }
+function nextGroupId() { return 'g' + (++_idSeq); }
 
 // 組裝一個 DrawObject（plan §4.2 子集：id/tool/geom/style[/text]）。
 // z 由繪圖層在 commit 時依 DOM 順序戳上（stampZ），純函式不負責。
@@ -568,6 +605,7 @@ export function serializeDrawObject(obj) {
   if (obj.anchor != null) out.anchor = obj.anchor;                  // elementFromPoint selector
   if (obj.imageRef != null) out.imageRef = obj.imageRef;            // 貼圖 dataURL/路徑
   if (obj.z != null) out.z = obj.z;
+  if (obj.groupId != null) out.groupId = obj.groupId;
   return out;
 }
 
@@ -585,6 +623,7 @@ export function hydrateObjectsFromLocal(docs) {
     if (doc.label != null) obj.label = doc.label;
     if (doc.anchor != null) obj.anchor = doc.anchor;
     if (doc.endAnchors != null) obj.endAnchors = doc.endAnchors;
+    if (doc.groupId != null) obj.groupId = doc.groupId;
     return obj;
   });
 }
@@ -599,6 +638,7 @@ export function drawingToDoc(obj) {
   if (obj.label != null && obj.label !== '') doc.label = obj.label; // 綁定標籤
   if (obj.anchor != null) doc.anchor = obj.anchor;                 // elementFromPoint selector
   if (obj.z != null) doc.z = obj.z;                                // z-order
+  if (obj.groupId != null) doc.groupId = obj.groupId;              // 群組 id
   return doc; // 注意：不含 imageRef / dataURL（PNG 永不進 Firestore）
 }
 
@@ -1006,6 +1046,7 @@ export function initDrawLayer(target, opts = {}) {
     const obj = makeDrawObject({ id: doc.id, tool: doc.tool, geom: doc.geom, style: doc.style, text: doc.text });
     if (doc.label != null) obj.label = doc.label;
     if (doc.anchor != null) obj.anchor = doc.anchor;
+    if (doc.groupId != null) obj.groupId = doc.groupId;
     return obj;
   }
   function commitChange(id, before, after) { pushHistory({ type: 'update', id, before, after }); }
@@ -1027,6 +1068,31 @@ export function initDrawLayer(target, opts = {}) {
   }
   function ensureSelectionValid() {
     state.selectedIds = state.selectedIds.filter(id => findById(state.objects, id));
+  }
+
+  // ── Batch 3：群組 bind / ungroup ──────────────────────────────────────────────
+  function doGroupSelected() {
+    if (state.selectedIds.length < 2) return;
+    const gid = nextGroupId();
+    const cmds = state.selectedIds.map(id => {
+      const o = findById(state.objects, id);
+      return { type: 'update', id, before: { groupId: o ? o.groupId : undefined }, after: { groupId: gid } };
+    });
+    state.objects = assignGroupId(state.objects, state.selectedIds, gid);
+    pushHistory(cmds.length === 1 ? cmds[0] : { type: 'batch', cmds });
+  }
+  function doUngroupSelected() {
+    const toUngroup = state.selectedIds.filter(id => {
+      const o = findById(state.objects, id);
+      return o && o.groupId;
+    });
+    if (!toUngroup.length) return;
+    const cmds = toUngroup.map(id => {
+      const o = findById(state.objects, id);
+      return { type: 'update', id, before: { groupId: o.groupId }, after: { groupId: undefined } };
+    });
+    state.objects = clearGroupId(state.objects, toUngroup);
+    pushHistory(cmds.length === 1 ? cmds[0] : { type: 'batch', cmds });
   }
 
   // ── z-order / 刪除 / style（皆作用於整個選取集合）──────────────────────────────
@@ -1087,7 +1153,9 @@ export function initDrawLayer(target, opts = {}) {
     const hit = hitTest(p);
     if (!hit) { startMarquee(rect, p, e.shiftKey); render(); return; } // 空白起拖 → 橡皮筋框
     if (e.shiftKey) { toggleSelect(hit.id); render(); return; }        // Shift+click → 加/減選
-    if (!isSelected(hit.id)) selectOnly(hit.id);                       // 點未選物件 → 只選它
+    if (!isSelected(hit.id)) {                                         // 點未選物件 → 展開群組後選
+      state.selectedIds = expandSelectionToGroups(state.objects, [hit.id]);
+    }
     render();
     startMove(rect, p);                                               // 拖曳 → 整個選取一起移動
   }
@@ -1425,6 +1493,11 @@ export function initDrawLayer(target, opts = {}) {
     if (meta && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
       if (e.shiftKey) doRedo(); else doUndo();
+      return;
+    }
+    if (meta && e.key.toLowerCase() === 'g') {
+      e.preventDefault();
+      if (e.shiftKey) doUngroupSelected(); else doGroupSelected();
       return;
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedIds.length) {

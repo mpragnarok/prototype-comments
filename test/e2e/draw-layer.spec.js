@@ -1898,6 +1898,126 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(toolAfter === toolBefore, `TEXTAREA 為焦點時 keydown 不應切工具，tool=${toolAfter}`);
   });
 
+  // ── Batch 3：持久群組（Cmd+G / Cmd+Shift+G）───────────────────────────────────
+  console.log('\ndraw-layer e2e — Batch 3 持久群組:');
+
+  // 每次清空畫布並重設到 select 模式（mode=draw 讓 onKey 生效）。
+  async function resetGroup() {
+    await page.evaluate(() => {
+      window.__drawTest.api.clear();
+      window.__drawTest.api.setMode('draw');
+      window.__drawTest.api.setTool('select');
+    });
+  }
+
+  // 畫 2 個 rect，回傳 [id1, id2]。
+  // rect1: 60..160 × 200..260（center ≈ 110, 230）
+  // rect2: 220..340 × 200..260（center ≈ 280, 230）
+  async function draw2RectsForGroup() {
+    await page.evaluate(() => window.__drawTest.api.setTool('rect'));
+    await dragDraw(page, 60, 200, 160, 260);
+    await page.evaluate(() => window.__drawTest.api.setTool('rect'));
+    await dragDraw(page, 220, 200, 340, 260);
+    return page.evaluate(() => window.__drawTest.api.getObjects().map(o => o.id));
+  }
+
+  await test('Cmd+G：≥2 選取 → 群組化；點其中一個成員 → 兩個都被選取', async () => {
+    await resetGroup();
+    const ids = await draw2RectsForGroup();
+    assert(ids.length === 2, `應畫出 2 個物件，實際 ${ids.length}`);
+    // 用 API 全選後按 Ctrl+G 群組化
+    await page.evaluate(ids => window.__drawTest.api.selectIds(ids), ids);
+    await page.keyboard.press('Control+g');
+    await page.waitForTimeout(30);
+    // 驗證兩個物件都有相同 groupId
+    const gids = await page.evaluate(() => window.__drawTest.api.getObjects().map(o => o.groupId));
+    console.log('     after Ctrl+G groupIds:', JSON.stringify(gids));
+    assert(gids[0] && gids[0] === gids[1], `兩物件應有相同 groupId，實際 ${JSON.stringify(gids)}`);
+    // 取消選取後點第一個 rect → 應展開選取整個群組
+    await page.evaluate(() => { window.__drawTest.api.selectIds([]); window.__drawTest.api.setTool('select'); });
+    await page.mouse.click(110, 230);
+    await page.waitForTimeout(30);
+    const selIds = await page.evaluate(() => window.__drawTest.api.getSelectedIds());
+    console.log('     group click selIds:', JSON.stringify(selIds));
+    assert(selIds.length === 2, `點群組成員後應選取 2 個，實際 ${selIds.length}`);
+  });
+
+  await test('群組拖曳：拖一個成員 → 兩個物件一起移動', async () => {
+    await resetGroup();
+    const ids = await draw2RectsForGroup();
+    // 群組化
+    await page.evaluate(ids => window.__drawTest.api.selectIds(ids), ids);
+    await page.keyboard.press('Control+g');
+    await page.waitForTimeout(30);
+    // 切 select 工具，記錄拖曳前 geom
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    const before = await page.evaluate(() =>
+      window.__drawTest.api.getObjects().map(o => ({ id: o.id, x: o.geom.x, y: o.geom.y }))
+    );
+    // 從 rect1 中心（110, 230）拖到（180, 250）——兩個物件都已被選取（Cmd+G 後未取消選取）
+    await page.mouse.move(110, 230);
+    await page.mouse.down();
+    await page.mouse.move(145, 240);
+    await page.mouse.move(180, 250);
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    const after = await page.evaluate(() =>
+      window.__drawTest.api.getObjects().map(o => ({ id: o.id, x: o.geom.x, y: o.geom.y }))
+    );
+    const d0 = Math.abs(after[0].x - before[0].x) + Math.abs(after[0].y - before[0].y);
+    const d1 = Math.abs(after[1].x - before[1].x) + Math.abs(after[1].y - before[1].y);
+    console.log('     group drag delta: obj0=', d0.toFixed(3), 'obj1=', d1.toFixed(3));
+    assert(d0 > 0.5, `第一個物件應已移動，delta=${d0.toFixed(3)}`);
+    assert(d1 > 0.5, `第二個物件應一起移動，delta=${d1.toFixed(3)}`);
+  });
+
+  await test('Cmd+Shift+G：解散群組；點一個 → 只選一個', async () => {
+    await resetGroup();
+    const ids = await draw2RectsForGroup();
+    // 群組化
+    await page.evaluate(ids => window.__drawTest.api.selectIds(ids), ids);
+    await page.keyboard.press('Control+g');
+    await page.waitForTimeout(30);
+    // 全選後解散
+    await page.evaluate(ids => window.__drawTest.api.selectIds(ids), ids);
+    await page.keyboard.press('Control+Shift+g');
+    await page.waitForTimeout(30);
+    const gids = await page.evaluate(() => window.__drawTest.api.getObjects().map(o => o.groupId));
+    console.log('     after Ctrl+Shift+G groupIds:', JSON.stringify(gids));
+    assert(gids.every(g => !g), `解散後所有 groupId 應清除，實際 ${JSON.stringify(gids)}`);
+    // 取消選取後點第一個 rect → 應只選一個
+    await page.evaluate(() => { window.__drawTest.api.selectIds([]); window.__drawTest.api.setTool('select'); });
+    await page.mouse.click(110, 230);
+    await page.waitForTimeout(30);
+    const selIds = await page.evaluate(() => window.__drawTest.api.getSelectedIds());
+    console.log('     ungroup click selIds:', JSON.stringify(selIds));
+    assert(selIds.length === 1, `解散後點一個應只選一個，實際 ${selIds.length}`);
+  });
+
+  await test('群組化後 undo → 群組解除；點一個 → 只選一個', async () => {
+    await resetGroup();
+    const ids = await draw2RectsForGroup();
+    // 群組化
+    await page.evaluate(ids => window.__drawTest.api.selectIds(ids), ids);
+    await page.keyboard.press('Control+g');
+    await page.waitForTimeout(30);
+    const gidBefore = await page.evaluate(() => window.__drawTest.api.getObjects()[0].groupId);
+    assert(gidBefore, 'undo test: 群組化後應有 groupId');
+    // Undo 群組化
+    await page.keyboard.press('Control+z');
+    await page.waitForTimeout(30);
+    const gidsAfter = await page.evaluate(() => window.__drawTest.api.getObjects().map(o => o.groupId));
+    console.log('     after undo groupIds:', JSON.stringify(gidsAfter));
+    assert(gidsAfter.every(g => !g), `undo 後 groupId 應清除，實際 ${JSON.stringify(gidsAfter)}`);
+    // 取消選取後點第一個 → 只選一個
+    await page.evaluate(() => { window.__drawTest.api.selectIds([]); window.__drawTest.api.setTool('select'); });
+    await page.mouse.click(110, 230);
+    await page.waitForTimeout(30);
+    const selIds = await page.evaluate(() => window.__drawTest.api.getSelectedIds());
+    console.log('     undo group selIds:', JSON.stringify(selIds));
+    assert(selIds.length === 1, `undo 群組後點一個應只選一個，實際 ${selIds.length}`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

@@ -52,6 +52,24 @@ geom 為 host-rect %。元件 rect(px viewport)→host %：用現有 pxToPct/cli
 - 接近元件 → highlight rect 出現；離開/放開 → 消失
 - undo 還原端點＋anchor
 
+## Batch 3 — 持久群組（Cmd+G／Cmd+Shift+G）
+模型：DrawObject 加 `groupId?: string`（同 groupId＝一組）。additive，不破壞匯出（有才寫）。
+- Cmd+G：選取 ≥2 → 配同一新 groupId（綁定）。<2 不動作。
+- Cmd+Shift+G：選取含群組成員 → 清掉那些成員 groupId（解散）。
+- 點任一成員 → 選整組（selectedIds 展開成全體 group-mates）。
+- 移動/刪除/換色：作用在展開後整組（沿用現有多選邏輯）。
+- 綁定/解散為 command（before/after 快照）→ 吃 undo/redo。
+- 序列化帶 groupId（有才帶）。
+
+純函式（export，unit）：
+- `assignGroupId(objects, ids, gid)` → 新 objects（immutable）
+- `clearGroupId(objects, ids)` → 新 objects
+- `expandSelectionToGroups(objects, selectedIds)` → string[]（含同組成員去重）
+- `groupMembers(objects, gid)` → id[]
+
+整合：onKey 加 (e.metaKey||e.ctrlKey)&&key==='g'（shift→ungroup）；選取後用 expandSelectionToGroups 展開；serialize 帶 groupId。
+e2e：兩物件 Cmd+G→點其一兩個都選；拖一個兩個一起動；Cmd+Shift+G 後獨立；undo 還原。
+
 ## 進度
 - [x] 分支 + plan-draft
 - [ ] 純函式 + unit（紅→綠）
