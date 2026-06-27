@@ -72,9 +72,15 @@ e2e：兩物件 Cmd+G→點其一兩個都選；拖一個兩個一起動；Cmd+S
 
 ## 進度
 - [x] 分支 + plan-draft
-- [ ] 純函式 + unit（紅→綠）
-- [ ] 渲染/pointer/anchor 整合
-- [ ] live reposition + highlight
-- [ ] e2e（紅→綠）
-- [ ] build bundle + 全套回歸（單元/e2e/visual 無 regression）
-- [ ] 截圖 + lavish 驗收
+- [x] Batch 3 持久群組（commit 9309632）：純函式+unit、onKey/onSelect 整合、e2e。unit 131/e2e 104
+- [x] Batch 4 純函式 + unit（紅→綠）
+- [x] Batch 4 渲染/pointer/anchor 整合（viewObject/resolveO/getRectPct）
+- [x] Batch 4 live reposition + highlight（startLive/stopLive/liveTick、snapHighlight）
+- [x] Batch 4 e2e（紅→綠，含重拖 anchored 即時跟手）
+- [x] build bundle + 全套回歸：unit 152 / e2e 109 全綠，dist 已重建
+- [x] code review（SHIP-WITH-NITS）：套 rAF 收尾 + ungroup 整組解散；deferred #2 見下
+- [ ] 截圖 + lavish 驗收（待使用者 merge 後在 practice app 實測）
+
+## 已知限制 / 待辦（deferred）
+- **objectSnapPoints 用 raw geom**：吸附到「另一條已 el-anchored 且元件移動過的 arrow 端點」時，會吸到該 arrow 的舊 geom 座標而非 live 位置（obj-anchor 吸附這條次要路徑）。修法＝把 resolve 注入 objectSnapPoints。影響小，暫不改（避免動 pure-fn 簽名）。
+- 標注紀錄 row 縮圖、即時換色新版驗證仍在 punch list。

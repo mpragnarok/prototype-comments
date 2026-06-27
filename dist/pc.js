@@ -2032,7 +2032,7 @@ function initDrawLayer(target, opts = {}) {
       if (liveRects.get(sel) !== sig) { liveRects.set(sel, sig); changed = true; }
     });
     if (changed) render();
-    liveRaf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame(liveTick) : null;
+    liveRaf = (liveOn && typeof requestAnimationFrame === 'function') ? requestAnimationFrame(liveTick) : null; // render→syncLiveLoop 可能已 stopLive，勿排程鬼魂 rAF
   }
   function syncLiveLoop() {
     const need = state.objects.some(o => o.endAnchors);
@@ -2206,11 +2206,13 @@ function initDrawLayer(target, opts = {}) {
     pushHistory(cmds.length === 1 ? cmds[0] : { type: 'batch', cmds });
   }
   function doUngroupSelected() {
-    const toUngroup = state.selectedIds.filter(id => {
+    const gids = new Set();
+    state.selectedIds.forEach(id => {
       const o = findById(state.objects, id);
-      return o && o.groupId;
+      if (o && o.groupId) gids.add(o.groupId); // 解散整組（含未選到的成員），避免落單成 group-of-one
     });
-    if (!toUngroup.length) return;
+    if (!gids.size) return;
+    const toUngroup = state.objects.filter(o => o.groupId && gids.has(o.groupId)).map(o => o.id);
     const cmds = toUngroup.map(id => {
       const o = findById(state.objects, id);
       return { type: 'update', id, before: { groupId: o.groupId }, after: { groupId: undefined } };
