@@ -21,6 +21,7 @@ import {
   assignGroupId, clearGroupId, expandSelectionToGroups, groupMembers,
   rectAnchorPoints, nearestPointOnRect, objectSnapPoints, nearestSnap,
   anchorRel, resolveAnchorPoint, resolveEndpoints, mergeEndAnchor, SNAP_THRESHOLD_PCT,
+  isLocalEnv, shouldEnableDraw,
 } from '../src/draw-layer.js';
 
 let pass = 0, fail = 0;
@@ -1035,6 +1036,20 @@ test('hydrateObjectsFromLocal: endAnchors round-trip', () => {
   const back = hydrateObjectsFromLocal([serializeDrawObject(o)]);
   eq(back[0].endAnchors.to.relX, 0.25, '應還原 endAnchors');
 });
+
+// ── isLocalEnv / shouldEnableDraw（localhost-gated 繪圖入口）─────────────────
+test('isLocalEnv: localhost / 127.0.0.1 / 0.0.0.0 / ::1 / 空字串 → true', () => {
+  for (const h of ['localhost', '127.0.0.1', '0.0.0.0', '::1', '']) eq(isLocalEnv(h), true, h);
+});
+test('isLocalEnv: 線上網域 → false', () => {
+  eq(isLocalEnv('vitallink-flow-docs.netlify.app'), false);
+  eq(isLocalEnv('example.com'), false);
+});
+test("shouldEnableDraw: ('auto','localhost') → true", () => eq(shouldEnableDraw('auto', 'localhost'), true));
+test("shouldEnableDraw: ('auto','example.com') → false", () => eq(shouldEnableDraw('auto', 'example.com'), false));
+test("shouldEnableDraw: (true,'example.com') → true（永遠開）", () => eq(shouldEnableDraw(true, 'example.com'), true));
+test("shouldEnableDraw: (false,'localhost') → false（永遠關）", () => eq(shouldEnableDraw(false, 'localhost'), false));
+test("shouldEnableDraw: (undefined,'localhost') → true（預設等同 auto）", () => eq(shouldEnableDraw(undefined, 'localhost'), true));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
