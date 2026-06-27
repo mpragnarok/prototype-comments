@@ -1648,6 +1648,69 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(duringY2 < anchoredY2 - 100, `重拖 anchored 端點應即時跟手上移，實際 ${anchoredY2} → ${duringY2}`);
   });
 
+  // ── Batch 5：箭頭吸附「自繪形狀」+ 畫線時即時吸附 ────────────────────────────────
+  console.log('\ndraw-layer e2e — Batch 5 attach 到自繪形狀 / 繪製時吸附:');
+
+  // 畫一個 rect 當吸附目標，回傳其 id。canvas 僅 600×400，座標需落在範圍內。
+  async function drawTargetRect() {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setTool('rect'); });
+    await dragDraw(page, 380, 250, 500, 330);
+    return page.evaluate(() => window.__drawTest.api.getObjects().find(o => o.tool === 'rect').id);
+  }
+  // rect 上邊中點的 viewport 座標（吸附目標點）。
+  async function rectTopMid() {
+    return page.evaluate(() => {
+      const o = window.__drawTest.api.getObjects().find(o => o.tool === 'rect');
+      const r = document.querySelector('#pc-draw').getBoundingClientRect();
+      return { x: r.left + (o.geom.x + o.geom.w / 2) / 100 * r.width, y: r.top + o.geom.y / 100 * r.height };
+    });
+  }
+
+  await test('拖 arrow to 端點到自繪 rect → endAnchors.to.kind===obj + objId 命中 rect', async () => {
+    const rectId = await drawTargetRect();
+    await page.evaluate(() => window.__drawTest.api.setTool('arrow'));
+    await dragDraw(page, 120, 100, 250, 180);
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.mouse.click(185, 140);
+    await page.waitForTimeout(30);
+    const h = await page.evaluate(() => { const el = document.querySelector('#pc-draw [data-endpoint="to"]'); return { cx: +el.getAttribute('cx'), cy: +el.getAttribute('cy') }; });
+    const t = await rectTopMid();
+    await page.mouse.move(h.cx, h.cy); await page.mouse.down();
+    await page.mouse.move((h.cx + t.x) / 2, (h.cy + t.y) / 2); await page.mouse.move(t.x, t.y); await page.mouse.up();
+    await page.waitForTimeout(30);
+    const r = await page.evaluate(() => (window.__drawTest.api.getObjects().find(o => o.tool === 'arrow').endAnchors || {}).to || null);
+    console.log('     attach-to-shape anchor:', JSON.stringify(r));
+    assert(r && r.kind === 'obj', `to anchor 應為 obj，實際 ${r && r.kind}`);
+    assert(r.objId === rectId, `objId 應命中 rect ${rectId}，實際 ${r.objId}`);
+    assert(typeof r.relX === 'number' && typeof r.relY === 'number', '應帶 relX/relY');
+  });
+
+  await test('自繪 rect 移動 → 吸附其上的 arrow 端點跟著移動', async () => {
+    // 承上：arrow.to 已鎖 rect 上緣。移動 rect → arrow line y2 變大。
+    const before = await page.evaluate(() => +document.querySelector('#pc-draw line').getAttribute('y2'));
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.mouse.click(440, 290); // 選 rect（中心）
+    await page.waitForTimeout(20);
+    await page.mouse.move(440, 290); await page.mouse.down();
+    await page.mouse.move(440, 330); await page.mouse.move(440, 360); await page.mouse.up(); // rect 下移（仍在 canvas 內）
+    await page.waitForTimeout(30);
+    const after = await page.evaluate(() => +document.querySelector('#pc-draw line').getAttribute('y2'));
+    console.log('     arrow y2 before/after rect move:', before, '→', after);
+    assert(after > before + 20, `rect 下移後 arrow to 端點 y2 應變大，實際 ${before} → ${after}`);
+  });
+
+  await test('畫 arrow 時終點落在自繪 rect → 新箭頭直接帶 endAnchors.to(obj)', async () => {
+    const rectId = await drawTargetRect();
+    await page.evaluate(() => window.__drawTest.api.setTool('arrow'));
+    const t = await rectTopMid();
+    await page.mouse.move(120, 120); await page.mouse.down();
+    await page.mouse.move((120 + t.x) / 2, (120 + t.y) / 2); await page.mouse.move(t.x, t.y); await page.mouse.up();
+    await page.waitForTimeout(30);
+    const r = await page.evaluate(() => (window.__drawTest.api.getObjects().find(o => o.tool === 'arrow').endAnchors || {}).to || null);
+    console.log('     create-time snap anchor:', JSON.stringify(r));
+    assert(r && r.kind === 'obj' && r.objId === rectId, `畫線終點應即時吸附 rect，實際 ${JSON.stringify(r)}`);
+  });
+
   // ── P7 團隊持久（Firestore 向量同步，用 mock firebase）─────────────────────────────
   // 在獨立分頁跑（避免與上方共用 #canvas 的 P1–P6 draw layer 互相干擾）。
   const teamPage = await browser.newPage({ viewport: { width: 800, height: 600 } });

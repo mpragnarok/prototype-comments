@@ -912,17 +912,17 @@ test('nearestPointOnRect: 內部點 → 投影到最近邊', () => {
   eq(p2.x, 30); eq(p2.y, 50);
 });
 
-test('objectSnapPoints: 取其他 arrow/line 端點，排除 exceptId 與非線物件', () => {
+test('objectSnapPoints: 取其他 line 端點 + 形狀 bbox 錨點，排除 exceptId', () => {
   const objs = [
     makeDrawObject({ id: 'a', tool: 'arrow', geom: { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } } }),
     makeDrawObject({ id: 'b', tool: 'line', geom: { from: { x: 5, y: 6 }, to: { x: 7, y: 8 } } }),
     makeDrawObject({ id: 'r', tool: 'rect', geom: { x: 0, y: 0, w: 9, h: 9 } }),
   ];
-  const pts = objectSnapPoints(objs, 'a'); // 排除 a、跳過 rect
-  eq(pts.length, 2, '只剩 b 的兩端點');
-  assert(pts.every(p => p.objId === 'b'), '都來自 b');
-  const which = pts.map(p => p.which).sort();
-  assert(which[0] === 'from' && which[1] === 'to', '含 from/to');
+  const pts = objectSnapPoints(objs, 'a'); // 排除 a；b 兩端點 + r 8 錨點
+  eq(pts.length, 10, 'b 兩端點 + r 八錨點');
+  const bWhich = pts.filter(p => p.objId === 'b').map(p => p.which).sort();
+  assert(bWhich[0] === 'from' && bWhich[1] === 'to', 'b 含 from/to 端點');
+  eq(pts.filter(p => p.objId === 'r').length, 8, 'r 八個 bbox 錨點');
 });
 
 test('nearestSnap: 閾值內回最近候選', () => {
@@ -983,6 +983,43 @@ test('resolveEndpoints: obj anchor 目標不存在 → geom fallback', () => {
   });
   const e = resolveEndpoints(o, null, [o]);
   eq(e.from.x, 1); eq(e.from.y, 2);
+});
+
+test('objectSnapPoints: 形狀(rect) → 8 個 bbox 錨點帶 objId + relX/relY（Batch5 attach 到形狀）', () => {
+  const objs = [makeDrawObject({ id: 'r', tool: 'rect', geom: { x: 0, y: 0, w: 10, h: 10 } })];
+  const pts = objectSnapPoints(objs, null);
+  eq(pts.length, 8, 'rect 8 錨點');
+  assert(pts.every(p => p.objId === 'r'), '都來自 r');
+  assert(pts.every(p => typeof p.relX === 'number' && typeof p.relY === 'number'), '帶 relX/relY');
+  const top = pts.find(p => p.x === 5 && p.y === 0);
+  assert(top, '含上邊中點'); close(top.relX, 0.5); close(top.relY, 0);
+});
+test('objectSnapPoints: 混合 — line 給端點(which)、shape 給 bbox 錨點(relX/relY)', () => {
+  const objs = [
+    makeDrawObject({ id: 'l', tool: 'line', geom: { from: { x: 1, y: 1 }, to: { x: 2, y: 2 } } }),
+    makeDrawObject({ id: 'r', tool: 'ellipse', geom: { x: 0, y: 0, w: 4, h: 4 } }),
+  ];
+  const pts = objectSnapPoints(objs, null);
+  eq(pts.filter(p => p.which).length, 2, 'line 兩端點');
+  eq(pts.filter(p => p.relX != null).length, 8, 'ellipse 8 bbox 錨點');
+});
+test('resolveEndpoints: obj rel anchor → 用目標形狀 bbox + relX/relY', () => {
+  const box = makeDrawObject({ id: 'bx', tool: 'rect', geom: { x: 10, y: 20, w: 40, h: 60 } });
+  const o = makeDrawObject({
+    id: 'o', tool: 'arrow', geom: { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } },
+    endAnchors: { to: { kind: 'obj', objId: 'bx', relX: 0.5, relY: 0 } }, // 上邊中點
+  });
+  const e = resolveEndpoints(o, null, [box, o]);
+  eq(e.to.x, 30); eq(e.to.y, 20); // 10+0.5*40=30, 20+0*60=20
+});
+test('resolveEndpoints: obj rel anchor 隨目標移動而更新（live 跟隨）', () => {
+  const o = makeDrawObject({
+    id: 'o', tool: 'arrow', geom: { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } },
+    endAnchors: { to: { kind: 'obj', objId: 'bx', relX: 1, relY: 1 } }, // 右下角
+  });
+  const moved = makeDrawObject({ id: 'bx', tool: 'rect', geom: { x: 50, y: 50, w: 20, h: 20 } });
+  const e = resolveEndpoints(o, null, [moved, o]);
+  eq(e.to.x, 70); eq(e.to.y, 70); // 右下角 = 50+20,50+20
 });
 
 test('geomBBox: 對有 anchor 的 arrow 用注入的 resolver 端點', () => {
