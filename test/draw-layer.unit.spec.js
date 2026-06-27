@@ -16,6 +16,7 @@ import {
   reorderIds, reorderMany, rectsIntersect, marqueeSelect, applyStylePatch, eyedropperSupported,
   applyCommand, invertCommand, makeUndoStack,
   DEFAULT_DRAW_STYLE, DRAW_MODES, DRAW_TOOLS, MIN_DRAW_SIZE_PCT,
+  DRAW_FONT_SIZES,
   setEndpoint,
 } from '../src/draw-layer.js';
 
@@ -721,6 +722,36 @@ test('round-trip: image 物件在 round-trip 中被濾掉（vectors only）', ()
   const back = hydrateObjectsFromLocal(docs);
   eq(back.length, 1, 'image 不進 round-trip');
   eq(back[0].id, 'loc-rv', '只剩向量物件');
+});
+
+// ── DRAW_FONT_SIZES / normalizeStyle fontSize（Item 2 字體大小）────────────────
+console.log('\ndraw-layer unit — 字體大小（fontSize）:');
+
+test('DRAW_FONT_SIZES: 匯出陣列，含 4 個正整數', () => {
+  assert(Array.isArray(DRAW_FONT_SIZES), 'DRAW_FONT_SIZES 應為陣列');
+  eq(DRAW_FONT_SIZES.length, 4, '應有 4 個選項');
+  assert(DRAW_FONT_SIZES.every(n => typeof n === 'number' && n > 0), '每個選項應為正整數');
+});
+test('DRAW_FONT_SIZES: 包含 12/16/20/28', () => {
+  [12, 16, 20, 28].forEach(n => assert(DRAW_FONT_SIZES.includes(n), `應包含 ${n}`));
+});
+test('normalizeStyle: 無 fontSize → 回傳 DEFAULT_DRAW_STYLE.fontSize (16)', () => {
+  const s = makeDrawObject({ tool: 'text', geom: { x: 0, y: 0 }, text: 'hi' }).style;
+  eq(s.fontSize, DEFAULT_DRAW_STYLE.fontSize, 'fontSize 應等於預設值');
+  eq(DEFAULT_DRAW_STYLE.fontSize, 16, '預設 fontSize 應為 16');
+});
+test('normalizeStyle: 自訂 fontSize 保留', () => {
+  const obj = makeDrawObject({ tool: 'text', geom: { x: 0, y: 0 }, text: 'hi', style: { fontSize: 28 } });
+  eq(obj.style.fontSize, 28, 'fontSize 28 應被保留');
+});
+test('applyStylePatch: setFontSize 語意 — select 工具 + 選取 → 改選取物件 fontSize', () => {
+  const obj = makeDrawObject({ id: 'fs1', tool: 'text', geom: { x: 0, y: 0 }, text: 'A' });
+  const res = applyStylePatch(
+    { tool: 'select', selectedIds: ['fs1'], objects: [obj], defaultStyle: { ...DEFAULT_DRAW_STYLE } },
+    { fontSize: 28 }
+  );
+  eq(res.objects[0].style.fontSize, 28, '選取物件 fontSize 應更新為 28');
+  eq(res.defaultStyle.fontSize, 28, '預設 fontSize 也應更新');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

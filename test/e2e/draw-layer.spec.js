@@ -1729,6 +1729,91 @@ async function dragDraw(page, x1, y1, x2, y2) {
     });
   });
 
+  // ── Item 2：文字字體大小工具 ─────────────────────────────────────────────────
+  console.log('\ndraw-layer e2e — 文字字體大小:');
+
+  // 建一個 text 物件，回傳其 id 與渲染後的 <text> font-size 屬性。
+  async function drawTextAndGetFontSize() {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setTool('text'); });
+    await page.mouse.click(200, 200);
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.fill('.pc-draw-text-input', 'FontTest');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(50);
+    return page.evaluate(() => {
+      const o = window.__drawTest.api.getObjects().slice(-1)[0];
+      const t = document.querySelector(`#pc-draw text[data-id="${o.id}"]`);
+      return { id: o.id, fontSize: o.style.fontSize, domFontSize: t && t.getAttribute('font-size') };
+    });
+  }
+
+  await test('text 物件預設 font-size=16；<text> font-size 屬性反映 style.fontSize', async () => {
+    const r = await drawTextAndGetFontSize();
+    console.log('     default font-size:', JSON.stringify(r));
+    assert(r.fontSize === 16, `style.fontSize 預設應為 16，實際 ${r.fontSize}`);
+    assert(r.domFontSize === '16', `<text> font-size 屬性應為 16，實際 ${r.domFontSize}`);
+  });
+
+  await test('fontsize-menu popover 存在；含 4 個字體大小按鈕', async () => {
+    const r = await page.evaluate(() => {
+      const menu = document.querySelector('.pc-draw-popover[data-menu="fontsize"]');
+      const btns = menu ? [...menu.querySelectorAll('.pc-draw-fontsize')] : [];
+      return {
+        present: !!menu,
+        count: btns.length,
+        sizes: btns.map(b => Number(b.dataset.fontSize)),
+      };
+    });
+    console.log('     fontsize menu:', JSON.stringify(r));
+    assert(r.present, '應有 fontsize popover');
+    assert(r.count === 4, `應有 4 個字體大小按鈕，實際 ${r.count}`);
+    assert(JSON.stringify(r.sizes) === JSON.stringify([12, 16, 20, 28]),
+      `字體大小選項應為 [12,16,20,28]，實際 ${JSON.stringify(r.sizes)}`);
+  });
+
+  await test('select 工具 + 選取 text → 點 28px → <text> font-size 更新', async () => {
+    const before = await drawTextAndGetFontSize();
+    // 切 select，點物件
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.mouse.click(200, 200);
+    // 開 fontsize popover，點 28
+    await page.click('.pc-draw-tool[data-action="fontsize-menu"]');
+    await page.click('.pc-draw-popover[data-menu="fontsize"] .pc-draw-fontsize[data-font-size="28"]');
+    await page.waitForTimeout(30);
+    const after = await page.evaluate(id => {
+      const o = window.__drawTest.api.getObjects().find(o => o.id === id);
+      const t = document.querySelector(`#pc-draw text[data-id="${id}"]`);
+      return { fontSize: o && o.style.fontSize, domFontSize: t && t.getAttribute('font-size') };
+    }, before.id);
+    console.log('     font-size before/after:', JSON.stringify({ before: before.fontSize, ...after }));
+    assert(after.fontSize === 28, `style.fontSize 應更新為 28，實際 ${after.fontSize}`);
+    assert(after.domFontSize === '28', `<text> font-size 屬性應為 28，實際 ${after.domFontSize}`);
+  });
+
+  await test('新建 text 物件沿用目前 fontSize 預設（28 設好後再畫一個）', async () => {
+    // 承接上一個 test：DEFAULT_DRAW_STYLE.fontSize 應已被更新為 28
+    await page.evaluate(() => window.__drawTest.api.setTool('text'));
+    await page.mouse.click(350, 150);
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.fill('.pc-draw-text-input', 'NewText');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(40);
+    const r = await page.evaluate(() => {
+      const objs = window.__drawTest.api.getObjects();
+      const last = objs[objs.length - 1];
+      const t = document.querySelector(`#pc-draw text[data-id="${last.id}"]`);
+      return { fontSize: last.style.fontSize, domFontSize: t && t.getAttribute('font-size') };
+    });
+    console.log('     new text with prevailing fontSize:', JSON.stringify(r));
+    assert(r.fontSize === 28, `新建 text 應沿用 28，實際 ${r.fontSize}`);
+    assert(r.domFontSize === '28', `<text> font-size 屬性應為 28，實際 ${r.domFontSize}`);
+    // 清場 + 重設 fontSize 為預設 16，避免干擾後續 test
+    await page.evaluate(() => {
+      window.__drawTest.api.clear();
+      window.__drawTest.api.setFontSize(16);
+    });
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
