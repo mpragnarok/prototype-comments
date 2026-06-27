@@ -465,6 +465,7 @@ const DRAW_STYLES = `
   box-shadow: 0 6px 24px rgba(0,0,0,.35); font-family: system-ui, -apple-system, sans-serif;
 }
 .pc-draw-tool {
+  position: relative;
   width: 34px; height: 34px; border: none; border-radius: 8px; cursor: pointer;
   background: transparent; color: #e5e7eb; font-size: 16px; line-height: 1;
   display: flex; align-items: center; justify-content: center; transition: background .12s;
@@ -472,6 +473,12 @@ const DRAW_STYLES = `
 .pc-draw-tool:hover { background: #333; }
 .pc-draw-tool.active { background: #0FA0A0; color: #fff; }
 .pc-draw-tool svg { display: block; }
+/* 常駐數字快捷鍵徽章（Excalidraw 風格，右下角、不擋點擊、不位移圖示） */
+.pc-draw-kbd {
+  position: absolute; right: 3px; bottom: 1px; pointer-events: none;
+  font: 9px/1 system-ui, -apple-system, sans-serif; color: rgba(229,231,235,.55);
+}
+.pc-draw-tool.active .pc-draw-kbd { color: rgba(255,255,255,.7); }
 .pc-draw-sep { width: 1px; height: 22px; background: #3a3a3a; margin: 0 2px; }
 /* 顏色/線粗收進 popover，避免 pill 過長溢出 */
 .pc-draw-menu { position: relative; display: flex; align-items: center; }
@@ -1074,14 +1081,19 @@ function buildToolbar(state, actions) {
   return bar;
 }
 function appendSep(bar) { bar.appendChild(drawHtmlEl('div', 'pc-draw-sep')); }
+// 工具的數字快捷鍵（取自 TOOL_SHORTCUTS 單一真相，Excalidraw 風格徽章用）。
+function toolNumberKey(tool) {
+  return Object.keys(TOOL_SHORTCUTS).find(k => /^[0-9]$/.test(k) && TOOL_SHORTCUTS[k] === tool) || '';
+}
 function toolButton(tool, actions) {
   const b = drawHtmlEl('button', 'pc-draw-tool');
   b.dataset.tool = tool;
   const key = TOOL_KEY[tool];
   const label = (TOOL_LABELS_ZH[tool] || tool) + (key ? ` (${key})` : '');
-  b.title = label;                       // tooltip 含快捷鍵，供探索
+  b.title = label;                       // tooltip 含字母快捷鍵，供探索
   b.setAttribute('aria-label', label);
-  b.innerHTML = icon(tool);
+  const num = toolNumberKey(tool);
+  b.innerHTML = icon(tool) + (num ? `<span class="pc-draw-kbd" aria-hidden="true">${num}</span>` : ''); // 常駐數字徽章
   b.onclick = () => actions.setTool(tool);
   return b;
 }

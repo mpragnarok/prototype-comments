@@ -405,7 +405,8 @@ async function dragDraw(page, x1, y1, x2, y2) {
         actActions: acts.map(b => b.dataset.action).sort(),
         brushTypes: brushes.map(b => b.dataset.brush),
         allSvg,
-        noGlyphText: [...tools, ...acts].every(b => !b.textContent.trim()),
+        // acts 不含文字；tools 僅可含數字徽章（無 emoji/字母 glyph）
+        noGlyphText: acts.every(b => !b.textContent.trim()) && tools.every(b => /^\d?$/.test(b.textContent.trim())),
         zorderBtns: ['front', 'forward', 'backward', 'back'].filter(a => document.querySelector(`.pc-draw-toolbar .pc-draw-act[data-action="${a}"]`)).length,
         presetSwatches: document.querySelectorAll('.pc-draw-popover[data-menu="color"] .pc-draw-swatch[data-color]').length,
         widthOpts: document.querySelectorAll('.pc-draw-popover[data-menu="width"] .pc-draw-width').length,
@@ -603,6 +604,32 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(/\(V\)/.test(r.select), `select title 應含 (V)，實際 ${r.select}`);
     assert(/\(R\)/.test(r.rect), `rect title 應含 (R)，實際 ${r.rect}`);
     assert(/\(I\)/.test(r.eye), `eyedropper title 應含 (I)，實際 ${r.eye}`);
+  });
+
+  await test('常駐數字快捷鍵徽章：7 個工具鈕各帶正確數字、pointer-events:none', async () => {
+    const r = await page.evaluate(() => {
+      const want = { select: '1', rect: '2', ellipse: '4', arrow: '5', line: '6', pencil: '7', text: '8' };
+      const out = {};
+      let allPE = true, allVisible = true;
+      Object.keys(want).forEach(tool => {
+        const badge = document.querySelector(`.pc-draw-tool[data-tool="${tool}"] .pc-draw-kbd`);
+        out[tool] = badge ? badge.textContent.trim() : null;
+        if (!badge) { allVisible = false; return; }
+        const cs = getComputedStyle(badge);
+        if (cs.pointerEvents !== 'none') allPE = false;
+        if (cs.display === 'none' || cs.visibility === 'hidden') allVisible = false;
+      });
+      // off / 動作 / 筆刷 鈕不應有徽章
+      const offBadge = !!document.querySelector('.pc-draw-tool[data-tool="off"] .pc-draw-kbd');
+      const actBadge = !!document.querySelector('.pc-draw-act .pc-draw-kbd');
+      const brushBadge = !!document.querySelector('.pc-draw-brush .pc-draw-kbd');
+      return { out, allPE, allVisible, offBadge, actBadge, brushBadge, want };
+    });
+    console.log('     kbd badges:', JSON.stringify(r.out), 'pe-none:', r.allPE);
+    Object.entries(r.want).forEach(([tool, n]) => assert(r.out[tool] === n, `${tool} 徽章應為 ${n}，實際 ${r.out[tool]}`));
+    assert(r.allVisible, '徽章應可見');
+    assert(r.allPE, '徽章應 pointer-events:none');
+    assert(!r.offBadge && !r.actBadge && !r.brushBadge, 'off/動作/筆刷 鈕不應有徽章');
   });
 
   // ── Change 2/3：筆刷類型（pen/marker/highlighter）+ 頭尾漸細 ────────────────────
