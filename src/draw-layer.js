@@ -41,10 +41,11 @@ const ICON_PATHS = {
   text: 'M5 4v3h5.5v12h3V7H19V4z',                                                             // title
   rect: 'M18 4H6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H6V6h12v12z', // crop_square
   line: 'M19 13H5v-2h14v2z',                                                                   // remove (horizontal bar)
-  front: 'M3 13h2v-2H3v2zm0 4h2v-2H3v2zm2 4v-2H3c0 1.1.89 2 2 2zM3 9h2V7H3v2zm12 12h2v-2h-2v2zm4-18H9c-1.11 0-2 .9-2 2v10c0 1.1.89 2 2 2h10c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm0 12H9V5h10v10zm-8 6h2v-2h-2v2zm-4 0h2v-2H7v2z', // flip_to_front
-  back: 'M9 7H7v2h2V7zm0 4H7v2h2v-2zm0-8c-1.11 0-2 .9-2 2h2V3zm4 12h-2v2h2v-2zm6-12v2h2c0-1.1-.9-2-2-2zm-6 0h-2v2h2V3zM9 17v-2H7c0 1.1.89 2 2 2zm10-4h2v-2h-2v2zm0-4h2V7h-2v2zm0 8c1.1 0 2-.9 2-2h-2v2zM5 7H3v12c0 1.1.89 2 2 2h12v-2H5V7zm10-2h2V3h-2v2zm0 12h2v-2h-2v2z', // flip_to_back
-  forward: 'M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z',                       // arrow_upward
-  backward: 'M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z',                    // arrow_downward
+  front: 'M3 13h2v-2H3v2zm0 4h2v-2H3v2zm2 4v-2H3c0 1.1.89 2 2 2zM3 9h2V7H3v2zm12 12h2v-2h-2v2zm4-18H9c-1.11 0-2 .9-2 2v10c0 1.1.89 2 2 2h10c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm0 12H9V5h10v10zm-8 6h2v-2h-2v2zm-4 0h2v-2H7v2z', // flip_to_front（置頂）
+  back: 'M9 7H7v2h2V7zm0 4H7v2h2v-2zm0-8c-1.11 0-2 .9-2 2h2V3zm4 12h-2v2h2v-2zm6-12v2h2c0-1.1-.9-2-2-2zm-6 0h-2v2h2V3zM9 17v-2H7c0 1.1.89 2 2 2zm10-4h2v-2h-2v2zm0-4h2V7h-2v2zm0 8c1.1 0 2-.9 2-2h-2v2zM5 7H3v12c0 1.1.89 2 2 2h12v-2H5V7zm10-2h2V3h-2v2zm0 12h2v-2h-2v2z', // flip_to_back（置底）
+  // move_up / move_down：左側上/下箭頭 + 右側堆疊列 → 一眼讀作「在圖層堆疊中上/下移一層」，與 flip 置頂/底明顯區隔。
+  forward: 'M9 4L5 8h3v6h2V8h3zM15 5h6v2h-6zM15 9h6v2h-6zM15 13h6v2h-6zM15 17h6v2h-6z',           // move_up（上移一層）
+  backward: 'M9 20l-4-4h3v-6h2v6h3zM15 5h6v2h-6zM15 9h6v2h-6zM15 13h6v2h-6zM15 17h6v2h-6z',        // move_down（下移一層）
   delete: 'M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',       // delete
   undo: 'M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z', // undo
   redo: 'M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z', // redo
@@ -285,12 +286,20 @@ const DRAW_STYLES = `
   border: 2px solid transparent;
 }
 .pc-draw-swatch.active { border-color: #fff; box-shadow: 0 0 0 1px #0FA0A0; }
-.pc-draw-color-custom {
-  width: 22px; height: 22px; padding: 0; border: 2px solid #555; border-radius: 50%;
-  background: none; cursor: pointer; overflow: hidden;
+/* 第 9 顆：彩虹圓 + 「+」，明確邀請「挑自己的顏色」 */
+.pc-draw-custom-swatch {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  border-color: #fff; cursor: pointer; overflow: hidden;
+  background: conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
 }
-.pc-draw-color-custom::-webkit-color-swatch-wrapper { padding: 0; }
-.pc-draw-color-custom::-webkit-color-swatch { border: none; border-radius: 50%; }
+.pc-draw-custom-swatch::after {
+  content: '+'; font: bold 15px system-ui, sans-serif; color: #fff;
+  text-shadow: 0 0 2px rgba(0,0,0,.7); line-height: 1; pointer-events: none;
+}
+.pc-draw-color-custom {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; padding: 0; border: none; cursor: pointer;
+}
 .pc-draw-width {
   width: 30px; height: 30px; border: none; border-radius: 8px; cursor: pointer;
   background: transparent; display: flex; align-items: center; justify-content: center;
@@ -758,16 +767,23 @@ function colorMenu(actions) {
   const pop = drawHtmlEl('div', 'pc-draw-popover');
   pop.dataset.menu = 'color';
   DRAW_COLORS.forEach(c => pop.appendChild(swatchButton(c, actions)));
-  const custom = drawHtmlEl('input', 'pc-draw-color-custom');
-  custom.type = 'color';
-  custom.title = '更多顏色';
-  custom.setAttribute('aria-label', '更多顏色');
-  custom.dataset.action = 'custom-color';
-  custom.addEventListener('input', () => actions.setColor(custom.value));
-  pop.appendChild(custom);
+  pop.appendChild(customSwatch(actions)); // 第 9 顆：自訂調色盤
   wrap.appendChild(trigger);
   wrap.appendChild(pop);
   return wrap;
+}
+// 自訂顏色 swatch：彩虹圓 + 「+」，看起來像第 9 顆 swatch；點擊開原生 color picker。
+function customSwatch(actions) {
+  const label = drawHtmlEl('label', 'pc-draw-swatch pc-draw-custom-swatch');
+  label.title = '自訂顏色';
+  label.setAttribute('aria-label', '自訂顏色');
+  const custom = drawHtmlEl('input', 'pc-draw-color-custom');
+  custom.type = 'color';
+  custom.setAttribute('aria-label', '自訂顏色');
+  custom.dataset.action = 'custom-color';
+  custom.addEventListener('input', () => actions.setColor(custom.value));
+  label.appendChild(custom);
+  return label;
 }
 // 線粗 popover：thin → bold 的遞增粗條。
 function widthMenu(actions) {
@@ -818,7 +834,7 @@ function syncToolbar(bar, state, history) {
   const color = (DEFAULT_DRAW_STYLE.color || '').toLowerCase();
   const dot = bar.querySelector('.pc-draw-cur-color');
   if (dot) dot.style.background = DEFAULT_DRAW_STYLE.color;
-  bar.querySelectorAll('.pc-draw-swatch').forEach(b => {
+  bar.querySelectorAll('.pc-draw-swatch[data-color]').forEach(b => { // 排除無 data-color 的自訂 swatch
     b.classList.toggle('active', b.dataset.color.toLowerCase() === color);
   });
   bar.querySelectorAll('.pc-draw-width').forEach(b => {

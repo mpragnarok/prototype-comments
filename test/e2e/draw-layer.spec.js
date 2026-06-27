@@ -391,7 +391,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
         actActions: acts.map(b => b.dataset.action).sort(),
         allSvg,
         noGlyphText: [...tools, ...acts].every(b => !b.textContent.trim()), // 已無 emoji/字元
-        presetSwatches: document.querySelectorAll('.pc-draw-popover[data-menu="color"] .pc-draw-swatch').length,
+        presetSwatches: document.querySelectorAll('.pc-draw-popover[data-menu="color"] .pc-draw-swatch[data-color]').length,
         widthOpts: document.querySelectorAll('.pc-draw-popover[data-menu="width"] .pc-draw-width').length,
         hasCustom: !!document.querySelector('.pc-draw-color-custom[type="color"]'),
       };
@@ -403,6 +403,50 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.presetSwatches === 8, `應有 8 預設色，實際 ${r.presetSwatches}`);
     assert(r.widthOpts === 4, `應有 4 線寬，實際 ${r.widthOpts}`);
     assert(r.hasCustom, '應有自訂顏色 input');
+  });
+
+  await test('z-order 圖示：forward/backward 用 move_up/move_down（與 flip 置頂/底區隔）', async () => {
+    const r = await page.evaluate(() => {
+      const pathOf = a => {
+        const p = document.querySelector(`.pc-draw-act[data-action="${a}"] svg path`);
+        return p && p.getAttribute('d');
+      };
+      return { front: pathOf('front'), back: pathOf('back'), forward: pathOf('forward'), backward: pathOf('backward') };
+    });
+    console.log('     z-order icon d[0..14]:', JSON.stringify({
+      front: r.front && r.front.slice(0, 12), forward: r.forward && r.forward.slice(0, 12), backward: r.backward && r.backward.slice(0, 12),
+    }));
+    // forward/backward 改用堆疊列 icon（含右側 4 條列 "M15 5h6"），且四者互不相同
+    assert(r.forward.includes('M15 5h6') && r.backward.includes('M15 5h6'), 'forward/backward 應為 move_up/move_down（含堆疊列）');
+    assert(r.forward.startsWith('M9 4') && r.backward.startsWith('M9 20'), 'forward 上箭頭、backward 下箭頭');
+    const set = new Set([r.front, r.back, r.forward, r.backward]);
+    assert(set.size === 4, '四個 z-order 圖示應互不相同（一眼分辨 front vs forward）');
+  });
+
+  await test('自訂調色盤 swatch：popover 內第 9 顆、明顯可見、aria-label=自訂顏色', async () => {
+    await reset('rect');
+    await page.click('.pc-draw-tool[data-action="color-menu"]'); // 開色盤 popover
+    const r = await page.evaluate(() => {
+      const sw = document.querySelector('.pc-draw-popover[data-menu="color"] .pc-draw-custom-swatch');
+      const inp = sw && sw.querySelector('.pc-draw-color-custom[data-action="custom-color"]');
+      const rect = sw ? sw.getBoundingClientRect() : null;
+      const cs = sw ? getComputedStyle(sw) : null;
+      const allSwatches = [...document.querySelectorAll('.pc-draw-popover[data-menu="color"] .pc-draw-swatch')];
+      return {
+        present: !!sw, hasInput: !!inp,
+        visible: !!rect && rect.width > 8 && rect.height > 8 && cs.display !== 'none' && cs.visibility !== 'hidden' && cs.opacity !== '0',
+        ariaLabel: sw && sw.getAttribute('aria-label'),
+        total: allSwatches.length,
+        lastIsCustom: allSwatches.length > 0 && allSwatches[allSwatches.length - 1].classList.contains('pc-draw-custom-swatch'),
+        hasGradient: cs && /gradient/.test(cs.backgroundImage),
+      };
+    });
+    console.log('     custom swatch:', JSON.stringify(r));
+    assert(r.present && r.hasInput, '應有自訂顏色 swatch + <input type=color>');
+    assert(r.visible, '自訂顏色 swatch 在開啟的 popover 內應明顯可見');
+    assert(r.ariaLabel === '自訂顏色', `aria-label 應為「自訂顏色」，實際 ${r.ariaLabel}`);
+    assert(r.total === 9 && r.lastIsCustom, `應為第 9 顆（8 預設 + 自訂），實際 total=${r.total} lastIsCustom=${r.lastIsCustom}`);
+    assert(r.hasGradient, '自訂 swatch 應有彩虹漸層背景（邀請挑色）');
   });
 
   // ── Bug 1：繪圖工具啟用時 picker 只設預設、不回頭改選取；切繪圖工具會取消選取 ──
