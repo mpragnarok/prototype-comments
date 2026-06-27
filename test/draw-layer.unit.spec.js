@@ -15,6 +15,7 @@ import {
   reorderIds, reorderMany, rectsIntersect, marqueeSelect, applyStylePatch, eyedropperSupported,
   applyCommand, invertCommand, makeUndoStack,
   DEFAULT_DRAW_STYLE, DRAW_MODES, DRAW_TOOLS, MIN_DRAW_SIZE_PCT,
+  setEndpoint,
 } from '../src/draw-layer.js';
 
 let pass = 0, fail = 0;
@@ -649,6 +650,31 @@ test('makeUndoStack: 新 push 清空 redo 分支', () => {
 test('makeUndoStack: 空堆 undo/redo 回傳 null', () => {
   const s = makeUndoStack();
   eq(s.undo(), null); eq(s.redo(), null);
+});
+
+// ── setEndpoint（Phase A 端點拖曳純函式）─────────────────────────────────────
+console.log('\ndraw-layer unit — setEndpoint:');
+test('setEndpoint: 改 to 不動 from', () => {
+  const geom = { from: { x: 10, y: 20 }, to: { x: 50, y: 60 } };
+  const result = setEndpoint(geom, 'to', { x: 80, y: 90 });
+  eq(result.to.x, 80, 'to.x'); eq(result.to.y, 90, 'to.y');
+  eq(result.from.x, 10, 'from.x 不變'); eq(result.from.y, 20, 'from.y 不變');
+});
+test('setEndpoint: 改 from 不動 to', () => {
+  const geom = { from: { x: 10, y: 20 }, to: { x: 50, y: 60 } };
+  const result = setEndpoint(geom, 'from', { x: 1, y: 2 });
+  eq(result.from.x, 1, 'from.x'); eq(result.from.y, 2, 'from.y');
+  eq(result.to.x, 50, 'to.x 不變'); eq(result.to.y, 60, 'to.y 不變');
+});
+test('setEndpoint: 不改入參（immutable）', () => {
+  const geom = { from: { x: 10, y: 20 }, to: { x: 50, y: 60 } };
+  setEndpoint(geom, 'to', { x: 99, y: 99 });
+  eq(geom.to.x, 50, '原 geom.to.x 不變'); eq(geom.to.y, 60, '原 geom.to.y 不變');
+});
+test('setEndpoint: 回傳新物件（非同一參考）', () => {
+  const geom = { from: { x: 0, y: 0 }, to: { x: 1, y: 1 } };
+  const result = setEndpoint(geom, 'to', { x: 2, y: 2 });
+  assert(result !== geom, '應回傳新物件');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

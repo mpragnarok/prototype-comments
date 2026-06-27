@@ -1391,6 +1391,75 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.count === '0', `count 應為 0，實際 ${r.count}`);
   });
 
+  // ── Phase A：arrow/line 端點 handle + 拖曳重指向 ─────────────────────────────
+  console.log('\ndraw-layer e2e — Phase A 端點 handle:');
+
+  await test('選取 arrow → 出現 2 個 [data-endpoint] 圓 handle，無 [data-handle] bbox 角', async () => {
+    await reset('arrow');
+    await dragDraw(page, 100, 80, 300, 200);
+    // 切 select 工具後點 arrow 選取
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.mouse.click(200, 140);
+    await page.waitForTimeout(30);
+    const r = await page.evaluate(() => {
+      const endpoints = document.querySelectorAll('#pc-draw [data-endpoint]');
+      const handles = document.querySelectorAll('#pc-draw [data-handle]');
+      const objs = window.__drawTest.api.getObjects();
+      return {
+        endpointCount: endpoints.length,
+        handleCount: handles.length,
+        endpointValues: [...endpoints].map(el => el.getAttribute('data-endpoint')).sort(),
+        objTool: objs[0] && objs[0].tool,
+      };
+    });
+    console.log('     arrow selection handles:', JSON.stringify(r));
+    assert(r.objTool === 'arrow', `物件應為 arrow，實際 ${r.objTool}`);
+    assert(r.endpointCount === 2, `應有 2 個 data-endpoint handle，實際 ${r.endpointCount}`);
+    assert(r.handleCount === 0, `arrow 不應出現 data-handle bbox 角，實際 ${r.handleCount}`);
+    assert(r.endpointValues[0] === 'from' && r.endpointValues[1] === 'to', `data-endpoint 應為 from/to，實際 ${JSON.stringify(r.endpointValues)}`);
+  });
+
+  await test('拖曳 arrow to 端點 → geom.to 改變、geom.from 不變', async () => {
+    // 承接上一個 test：畫布有 1 個已選取的 arrow
+    const before = await page.evaluate(() => {
+      const o = window.__drawTest.api.getObjects()[0];
+      return { from: { ...o.geom.from }, to: { ...o.geom.to } };
+    });
+    // 找到 to handle 的 px 座標（cx/cy 屬性），拖往新位置
+    const toHandlePos = await page.evaluate(() => {
+      const el = document.querySelector('#pc-draw [data-endpoint="to"]');
+      return el ? { cx: parseFloat(el.getAttribute('cx')), cy: parseFloat(el.getAttribute('cy')) } : null;
+    });
+    assert(toHandlePos, 'to handle 應存在');
+    await page.mouse.move(toHandlePos.cx, toHandlePos.cy);
+    await page.mouse.down();
+    await page.mouse.move(toHandlePos.cx + 60, toHandlePos.cy + 40);
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    const after = await page.evaluate(() => {
+      const o = window.__drawTest.api.getObjects()[0];
+      return { from: { ...o.geom.from }, to: { ...o.geom.to } };
+    });
+    console.log('     before:', JSON.stringify(before), '→ after:', JSON.stringify(after));
+    assert(after.to.x !== before.to.x || after.to.y !== before.to.y, 'geom.to 應已改變');
+    assert(Math.abs(after.from.x - before.from.x) < 0.01 && Math.abs(after.from.y - before.from.y) < 0.01, 'geom.from 應不變');
+  });
+
+  await test('選取 rect → 出現 4 個 [data-handle] bbox 角，無 [data-endpoint]（非 regression）', async () => {
+    await reset('rect');
+    await dragDraw(page, 80, 80, 220, 180);
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.mouse.click(150, 130);
+    await page.waitForTimeout(30);
+    const r = await page.evaluate(() => ({
+      handleCount: document.querySelectorAll('#pc-draw [data-handle]').length,
+      endpointCount: document.querySelectorAll('#pc-draw [data-endpoint]').length,
+    }));
+    console.log('     rect selection handles:', JSON.stringify(r));
+    assert(r.handleCount === 4, `rect 應有 4 個 data-handle，實際 ${r.handleCount}`);
+    assert(r.endpointCount === 0, `rect 不應出現 data-endpoint，實際 ${r.endpointCount}`);
+  });
+
   // ── P7 團隊持久（Firestore 向量同步，用 mock firebase）─────────────────────────────
   // 在獨立分頁跑（避免與上方共用 #canvas 的 P1–P6 draw layer 互相干擾）。
   const teamPage = await browser.newPage({ viewport: { width: 800, height: 600 } });

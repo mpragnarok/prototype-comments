@@ -402,6 +402,11 @@ export function resizeBBox(oldBox, handle, p, minSize = MIN_DRAW_SIZE_PCT) {
   return box;
 }
 
+// 設定箭頭/線段的端點（immutable）。which ∈ 'from'|'to'。回傳新 geom，不改入參。
+export function setEndpoint(geom, which, p) {
+  return { ...geom, [which]: { x: p.x, y: p.y } };
+}
+
 // 兩個 box（{x,y,w,h}）是否相交（marquee 命中測試用）。
 export function rectsIntersect(a, b) {
   return !(a.x > b.x + b.w || a.x + a.w < b.x || a.y > b.y + b.h || a.y + a.h < b.y);
@@ -867,12 +872,23 @@ export function initDrawLayer(target, opts = {}) {
       const box = toPxBox(geomBBox(o), rect);
       g.appendChild(drawSvgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, fill: 'none', stroke: '#0FA0A0', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
     });
-    if (objs.length === 1) { // 縮放 handle 只在單選時出現
-      const box = toPxBox(geomBBox(objs[0]), rect);
-      ['nw', 'ne', 'se', 'sw'].forEach(name => {
-        const c = boxCorner(box, name);
-        g.appendChild(drawSvgEl('rect', { x: c.x - 4, y: c.y - 4, width: 8, height: 8, fill: '#fff', stroke: '#0FA0A0', 'stroke-width': 1, 'data-handle': name }));
-      });
+    if (objs.length === 1) { // handle 只在單選時出現
+      const o = objs[0];
+      if (o.tool === 'arrow' || o.tool === 'line') {
+        // 箭頭/線段：兩個圓端點 handle（取代 bbox 四角）
+        ['from', 'to'].forEach(which => {
+          const cx = pctToPx(o.geom[which].x, rect.width);
+          const cy = pctToPx(o.geom[which].y, rect.height);
+          g.appendChild(drawSvgEl('circle', { cx, cy, r: 4, fill: '#fff', stroke: '#0FA0A0', 'stroke-width': 1, 'data-endpoint': which }));
+        });
+      } else {
+        // 其餘工具：4 角縮放 handle（原行為不變）
+        const box = toPxBox(geomBBox(o), rect);
+        ['nw', 'ne', 'se', 'sw'].forEach(name => {
+          const c = boxCorner(box, name);
+          g.appendChild(drawSvgEl('rect', { x: c.x - 4, y: c.y - 4, width: 8, height: 8, fill: '#fff', stroke: '#0FA0A0', 'stroke-width': 1, 'data-handle': name }));
+        });
+      }
     }
     svg.appendChild(g);
   }
@@ -1007,6 +1023,9 @@ export function initDrawLayer(target, opts = {}) {
   // ── pointer：select 模式（選取 / 多選 / marquee / 移動 / 縮放）──────────────────
   function onSelectDown(e) {
     const rect = svg.getBoundingClientRect();
+    // 端點拖曳（arrow/line）：優先於 bbox handle 分支
+    const endpoint = e.target?.dataset?.endpoint;
+    if (endpoint && state.selectedIds.length === 1) { startEndpointDrag(e, endpoint, rect); return; }
     const handle = e.target && e.target.dataset ? e.target.dataset.handle : null;
     if (handle && state.selectedIds.length === 1) { startResize(e, handle, rect); return; }
     const p = clientToPct(e.clientX, e.clientY, rect);
@@ -1085,6 +1104,27 @@ export function initDrawLayer(target, opts = {}) {
       window.removeEventListener('pointermove', onMv);
       window.removeEventListener('pointerup', onUp);
       if (resized) commitChange(o.id, { geom: before }, { geom: o.geom });
+    };
+    window.addEventListener('pointermove', onMv);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  // 拖曳端點 handle → 重新指向端點（arrow/line 專用）。仿 startResize。
+  function startEndpointDrag(e, which, rect) {
+    const o = selectedObjects()[0];
+    if (!o) return;
+    const before = o.geom;
+    let moved = false;
+    const onMv = ev => {
+      const p = clientToPct(ev.clientX, ev.clientY, rect);
+      o.geom = setEndpoint(before, which, p);
+      moved = true;
+      render();
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMv);
+      window.removeEventListener('pointerup', onUp);
+      if (moved) commitChange(o.id, { geom: before }, { geom: o.geom });
     };
     window.addEventListener('pointermove', onMv);
     window.addEventListener('pointerup', onUp);
