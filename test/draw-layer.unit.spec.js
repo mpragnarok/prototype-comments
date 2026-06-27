@@ -7,7 +7,7 @@
 // overlay click：x% = (clientX-rect.left)/rect.width*100，toFixed(2)。
 import {
   pxToPct, pctToPx, clientToPct, rectFromPoints,
-  makeDrawObject, serializeDrawObject,
+  makeDrawObject, serializeDrawObject, drawingToDoc,
   geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath, diamondPoints, labelAnchor, imageGeom,
   cssSelectorFor, buildExport, annotationRows,
   taperScale, outlineWidths, taperedOutline, brushStyle, DRAW_BRUSHES,
@@ -82,6 +82,38 @@ test('serializeDrawObject: 精簡形狀（id/tool/geom/style），無 text 不�
 test('serializeDrawObject: text 工具保留 text', () => {
   const o = makeDrawObject({ id: 's2', tool: 'text', geom: { x: 1, y: 1 }, text: 'hi' });
   eq(serializeDrawObject(o).text, 'hi');
+});
+
+// ── P7 drawingToDoc（團隊模式 Firestore 向量序列化；純函式）─────────────────────────
+test('drawingToDoc: 保留向量欄位（id/tool/geom/style），round-trip geom/style', () => {
+  const o = makeDrawObject({ id: 'd1', tool: 'rect', geom: { x: 1, y: 2, w: 3, h: 4 }, style: { color: '#e03131', strokeWidth: 4 } });
+  const doc = drawingToDoc(o);
+  eq(doc.id, 'd1'); eq(doc.tool, 'rect');
+  eq(JSON.stringify(doc.geom), JSON.stringify({ x: 1, y: 2, w: 3, h: 4 }), 'geom round-trip');
+  eq(doc.style.color, '#e03131'); eq(doc.style.strokeWidth, 4);
+});
+test('drawingToDoc: text/label/anchor 一併輸出（皆向量、可 round-trip）', () => {
+  const o = { id: 'd2', tool: 'arrow', geom: { from: { x: 0, y: 0 }, to: { x: 5, y: 5 } }, style: { color: '#1971c2' }, text: '對齊', label: '右欄', anchor: '#price-card' };
+  const doc = drawingToDoc(o);
+  eq(doc.text, '對齊'); eq(doc.label, '右欄'); eq(doc.anchor, '#price-card');
+  eq(JSON.stringify(doc.geom), JSON.stringify(o.geom), 'arrow geom round-trip');
+});
+test('drawingToDoc: image 物件 → doc 不含 imageRef / dataURL（PNG 永不進 Firestore）', () => {
+  const o = makeDrawObject({ id: 'im1', tool: 'image', geom: { x: 0, y: 0, w: 30, h: 20 }, imageRef: 'data:image/png;base64,AAAA' });
+  const doc = drawingToDoc(o);
+  assert(!('imageRef' in doc), 'doc 不應含 imageRef');
+  const json = JSON.stringify(doc);
+  assert(!/dataURL|data:image|base64|AAAA/.test(json), `doc 不應出現任何 dataURL，實際 ${json}`);
+  eq(doc.id, 'im1'); eq(doc.tool, 'image'); // 仍保留向量 meta（geom/style）
+  eq(JSON.stringify(doc.geom), JSON.stringify({ x: 0, y: 0, w: 30, h: 20 }));
+});
+test('drawingToDoc: 省略未設欄位（無 text/label/anchor 不出現）', () => {
+  const doc = drawingToDoc(makeDrawObject({ id: 'd3', tool: 'ellipse', geom: { x: 0, y: 0, w: 5, h: 5 } }));
+  assert(!('text' in doc) && !('label' in doc) && !('anchor' in doc), '未設欄位不應出現');
+});
+test('drawingToDoc: z-order 一併輸出（已戳 z 時）', () => {
+  const doc = drawingToDoc({ id: 'd4', tool: 'rect', geom: {}, style: {}, z: 3 });
+  eq(doc.z, 3);
 });
 
 // ── 常數 sanity ──────────────────────────────────────────────────────────────

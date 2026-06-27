@@ -1391,6 +1391,126 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.count === '0', `count 應為 0，實際 ${r.count}`);
   });
 
+  // ── P7 團隊持久（Firestore 向量同步，用 mock firebase）─────────────────────────────
+  // 在獨立分頁跑（避免與上方共用 #canvas 的 P1–P6 draw layer 互相干擾）。
+  const teamPage = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  teamPage.on('pageerror', e => console.log('     [pageerror]', e.message));
+  teamPage.on('console', m => { if (m.type() === 'error') console.log('     [browser err]', m.text()); });
+  await teamPage.goto(`http://localhost:${PORT}/test/e2e/draw-layer-harness.html`);
+  await teamPage.waitForFunction(() => window.__drawTest && window.__drawTest.ready);
+
+  console.log('draw-layer P7 team-persistence e2e (mock firebase):');
+
+  await test('team 模式：init 即訂閱 drawings、畫 2 物件 → 各 save 一筆「向量 only」doc（無 dataURL）', async () => {
+    await teamPage.evaluate(() => window.__drawTest.initTeam({}));
+    // 畫 ellipse + rect（真實滑鼠拖曳 → create → 同步 Firestore）
+    await teamPage.evaluate(() => window.__teamApi.setTool('ellipse'));
+    await dragDraw(teamPage, 80, 80, 180, 160);
+    await teamPage.evaluate(() => window.__teamApi.setTool('rect'));
+    await dragDraw(teamPage, 250, 120, 360, 220);
+    await teamPage.waitForTimeout(50);
+    const r = await teamPage.evaluate(() => {
+      const docs = window.__teamFb.__docs();
+      return {
+        subscribeCalls: window.__teamSpy.__calls.subscribe,
+        saveCalls: window.__teamSpy.__calls.save,
+        docCount: docs.length,
+        tools: docs.map(d => d.tool).sort(),
+        anyDataUrl: JSON.stringify(docs).includes('data:image') || JSON.stringify(docs).includes('imageRef'),
+        sampleHasGeom: docs.every(d => d.geom && typeof d.geom === 'object'),
+      };
+    });
+    console.log('     team draw → store:', JSON.stringify(r));
+    assert(r.subscribeCalls === 1, `init 應訂閱一次 drawings，實際 ${r.subscribeCalls}`);
+    assert(r.saveCalls === 2, `畫 2 物件應 save 2 次，實際 ${r.saveCalls}`);
+    assert(r.docCount === 2, `Firestore 應有 2 筆 drawing doc，實際 ${r.docCount}`);
+    assert(JSON.stringify(r.tools) === JSON.stringify(['ellipse', 'rect']), `tools 應為 ellipse+rect，實際 ${JSON.stringify(r.tools)}`);
+    assert(!r.anyDataUrl, 'drawing docs 不應含 imageRef / dataURL（向量 only）');
+    assert(r.sampleHasGeom, '每筆 doc 應帶向量 geom');
+  });
+
+  await test('team 模式：seed 一筆 remote drawing → 即時併入畫面（teammate 同步）', async () => {
+    const r = await teamPage.evaluate(() => {
+      window.__teamFb.__seed({ id: 'remote-1', tool: 'rect', geom: { x: 5, y: 5, w: 20, h: 20 }, style: { color: '#2f9e44', strokeWidth: 2, fill: 'none' } });
+      return {
+        hasObj: window.__teamApi.getObjects().some(o => o.id === 'remote-1'),
+        rendered: !!document.querySelector('#pc-draw [data-id="remote-1"]'),
+        total: window.__teamApi.getObjects().length,
+      };
+    });
+    console.log('     after seed remote:', JSON.stringify(r));
+    assert(r.hasObj, 'remote drawing 應併入 getObjects()');
+    assert(r.rendered, 'remote drawing 應渲染到 #pc-draw（即時可見）');
+    assert(r.total === 3, `應有 2 本地 + 1 remote = 3 物件，實際 ${r.total}`);
+  });
+
+  await test('team 模式：貼圖 image 物件「不」進 Firestore（PNG 永不上 Firestore）', async () => {
+    const r = await teamPage.evaluate(() => {
+      const before = window.__teamFb.__docs().length;
+      const savesBefore = window.__teamSpy.__calls.save;
+      window.__teamApi.addImage('data:image/png;base64,IMGDATA', 120, 80, { x: 50, y: 50 });
+      const docs = window.__teamFb.__docs();
+      return {
+        added: docs.length - before,
+        saveDelta: window.__teamSpy.__calls.save - savesBefore,
+        hasImageDoc: docs.some(d => d.tool === 'image'),
+        anyImgData: JSON.stringify(docs).includes('IMGDATA'),
+        localHasImage: window.__teamApi.getObjects().some(o => o.tool === 'image'),
+      };
+    });
+    console.log('     after addImage:', JSON.stringify(r));
+    assert(r.added === 0, `image 不應新增 Firestore doc，實際新增 ${r.added}`);
+    assert(r.saveDelta === 0, 'image 不應觸發 store.save');
+    assert(!r.hasImageDoc, 'Firestore 不應有 image doc');
+    assert(!r.anyImgData, 'Firestore 不應出現任何圖片 dataURL');
+    assert(r.localHasImage, '本地仍應有 image 物件（只是不同步到 Firestore）');
+  });
+
+  await test('team 模式：刪除本地物件 → store.remove 被呼叫、Firestore doc 消失', async () => {
+    const r = await teamPage.evaluate(() => {
+      const target = window.__teamApi.getObjects().find(o => o.tool === 'ellipse'); // 第一筆本地 ellipse
+      const removeBefore = window.__teamSpy.__calls.remove;
+      const beforeCount = window.__teamFb.__docs().length;
+      window.__teamApi.select(target.id);
+      window.__teamApi.deleteSelected();
+      const docs = window.__teamFb.__docs();
+      return {
+        id: target.id,
+        removeDelta: window.__teamSpy.__calls.remove - removeBefore,
+        docDelta: beforeCount - docs.length,
+        stillThere: docs.some(d => d.id === target.id),
+      };
+    });
+    console.log('     after delete:', JSON.stringify(r));
+    assert(r.removeDelta === 1, `刪除應呼叫 store.remove 一次，實際 ${r.removeDelta}`);
+    assert(r.docDelta === 1, `Firestore 應少一筆 doc，實際 ${r.docDelta}`);
+    assert(!r.stillThere, '被刪 doc 應從 Firestore 消失');
+  });
+
+  await test('dev 模式（無 persist）：畫物件 → 對 store 0 呼叫（mock 完全沒被碰）', async () => {
+    const devPage = await browser.newPage({ viewport: { width: 800, height: 600 } });
+    await devPage.goto(`http://localhost:${PORT}/test/e2e/draw-layer-harness.html`);
+    await devPage.waitForFunction(() => window.__drawTest && window.__drawTest.ready);
+    await devPage.evaluate(() => window.__drawTest.initDevWithIdleSpy());
+    await devPage.evaluate(() => window.__drawTest.api.setTool('ellipse'));
+    await dragDraw(devPage, 80, 80, 180, 160);
+    await devPage.evaluate(() => window.__drawTest.api.setTool('rect'));
+    await dragDraw(devPage, 250, 120, 360, 220);
+    await devPage.waitForTimeout(50);
+    const r = await devPage.evaluate(() => ({
+      localObjs: window.__drawTest.api.getObjects().length,
+      calls: window.__idleSpy.__calls,
+      docCount: window.__idleFb.__docs().length,
+    }));
+    await devPage.close();
+    console.log('     dev (no persist):', JSON.stringify(r));
+    assert(r.localObjs === 2, `本地仍應畫出 2 物件，實際 ${r.localObjs}`);
+    assert(r.calls.subscribe === 0 && r.calls.save === 0 && r.calls.update === 0 && r.calls.remove === 0,
+      `dev 模式 store 應 0 呼叫，實際 ${JSON.stringify(r.calls)}`);
+    assert(r.docCount === 0, `dev 模式不應寫任何 Firestore doc，實際 ${r.docCount}`);
+  });
+
+  await teamPage.close();
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

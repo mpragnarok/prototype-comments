@@ -24,12 +24,48 @@
 
 <script type="module">
   import { initDrawLayer } from '/src/draw-layer.js';
+  import { createDrawingStore } from '/src/store.js';
+  import { createMockFirebase } from '/test/mock-firebase.js';
   // Mock 瀏覽器 EyeDropper API（playwright/Chromium 無此 API）→ 回傳可由測試設定的 hex。
   window.__eyedropHex = '#123456';
   window.EyeDropper = class { open() { return Promise.resolve({ sRGBHex: window.__eyedropHex }); } };
+
+  // P7 e2e helper：建一個會記錄呼叫次數的 spy store（dev 模式「0 store 呼叫」斷言用）。
+  function makeSpyStore(fb) {
+    const inner = createDrawingStore(fb, {}, 'proj-e2e');
+    const calls = { subscribe: 0, save: 0, update: 0, remove: 0 };
+    const spy = {
+      __calls: calls,
+      query: (...a) => inner.query(...a),
+      subscribe: (onChange, onErr) => { calls.subscribe++; return inner.subscribe(onChange, onErr); },
+      save: d => { calls.save++; return inner.save(d); },
+      update: (id, p) => { calls.update++; return inner.update(id, p); },
+      remove: id => { calls.remove++; return inner.remove(id); },
+    };
+    return spy;
+  }
+
   window.__drawTest = {
-    initDrawLayer,
+    initDrawLayer, createDrawingStore, createMockFirebase,
     init: (overrides = {}) => initDrawLayer('#canvas', overrides),
+    // 團隊模式：注入 mock firebase → spy store；回傳 { api, fb, spy } 供斷言。
+    initTeam: (mockInit = {}, overrides = {}) => {
+      const fb = createMockFirebase(mockInit);
+      const spy = makeSpyStore(fb);
+      window.__teamFb = fb; window.__teamSpy = spy;
+      const api = initDrawLayer('#canvas', { ...overrides, persist: spy });
+      window.__teamApi = api;
+      return { ok: true };
+    },
+    // dev 模式：建 spy store 但「不」傳給 draw-layer → 斷言它從未被碰。
+    initDevWithIdleSpy: (overrides = {}) => {
+      const fb = createMockFirebase({});
+      const spy = makeSpyStore(fb);
+      window.__idleFb = fb; window.__idleSpy = spy;
+      const api = initDrawLayer('#canvas', overrides); // 故意不帶 persist
+      window.__drawTest.api = api;
+      return { ok: true };
+    },
     setEyedropHex: (hex) => { window.__eyedropHex = hex; },
     ready: true,
   };

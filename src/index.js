@@ -22,7 +22,7 @@ async function loadFirebase() {
   const [
     { initializeApp, getApps, getApp },
     { getFirestore, collection, addDoc, onSnapshot, query, where,
-      serverTimestamp, deleteDoc, doc, updateDoc },
+      serverTimestamp, deleteDoc, doc, updateDoc, setDoc },
     { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged },
   ] = await Promise.all([
     import(`${FB_BASE}/firebase-app.js`),
@@ -32,7 +32,7 @@ async function loadFirebase() {
   return {
     initializeApp, getApps, getApp,
     getFirestore, collection, addDoc, onSnapshot, query, where,
-    serverTimestamp, deleteDoc, doc, updateDoc,
+    serverTimestamp, deleteDoc, doc, updateDoc, setDoc,
     getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
   };
 }

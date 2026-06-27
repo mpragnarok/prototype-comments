@@ -717,6 +717,32 @@ function createStore(fb, db, projectId) {
   };
 }
 
+// 團隊模式：向量繪圖物件的 Firestore store（draw-tooling plan §4.6）。
+// 與 comments 同 `projectId`，存在子集合 `prototype-comments/{projectId}/drawings`。
+// 與 createStore 的差異：
+//   - 用 setDoc 以「繪圖物件自己的 id」當 Firestore doc id → de-dupe / update / remove 全靠同一把 id，
+//     teammate 同步與本地 echo 都好對齊（不會因 auto-id 產生重複）。
+//   - **只存向量 strokes JSON**：呼叫端（draw-layer）負責用 drawingToDoc() 剝掉 imageRef/PNG dataURL，
+//     PNG 永不進 Firestore（需要時前端從向量即時重畫）。
+function createDrawingStore(fb, db, projectId) {
+  const col = () => fb.collection(db, 'prototype-comments', projectId, 'drawings');
+  const ref = id => fb.doc(db, 'prototype-comments', projectId, 'drawings', id);
+
+  return {
+    query:     (...constraints) => fb.query(col(), ...constraints),
+    // comments 的 subscribe 收外部 query；drawings 直接訂閱整個集合（呼叫端只要 onChange/onErr）。
+    subscribe: (onChange, onErr) => fb.onSnapshot(
+      fb.query(col()),
+      snap => onChange(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      onErr
+    ),
+    // drawObj 須已是向量精簡 doc（drawingToDoc 產物）；setDoc by id → upsert。
+    save:   drawObj => fb.setDoc(ref(drawObj.id), { ...drawObj, updatedAt: fb.serverTimestamp() }),
+    update: (id, patch) => fb.updateDoc(ref(id), { ...patch, updatedAt: fb.serverTimestamp() }),
+    remove: id => fb.deleteDoc(ref(id)),
+  };
+}
+
 function createNoteModule({
   store, getCurrentUser, getScreenId, engNoteSelector, getComments, noteKey, el, timeAgo,
   buildCommentItem, attachMentions,
@@ -919,6 +945,9 @@ function createNoteModule({
  *   draw.setMode('draw'); draw.setTool('select');
  *
  * P2 之後（不在本階段）：貼圖、selector 擷取(anchor)、PNG/JSON 匯出。
+ *
+ * P7 團隊持久（選用）：傳 opts.persist（{fb,db,projectId} 或 ready store）→ 把向量物件
+ * 同步到 Firestore `drawings` 子集合；不傳則 0 Firebase（dev 模式行為完全不變）。
  */
 
 // ── 常數 ────────────────────────────────────────────────────────────────────
@@ -1461,6 +1490,19 @@ function serializeDrawObject(obj) {
   return out;
 }
 
+// 團隊模式 Firestore 文件序列化（純函式，可單測）。
+// 與 serializeDrawObject 的關鍵差異：**故意不輸出 imageRef / PNG dataURL**
+//（plan §4.6：PNG 永不進 Firestore；image 物件於 sync 層整顆跳過，這裡即使被呼叫也保證無 dataURL）。
+// 只保留向量欄位：id / tool / geom / style（＋有意義時的 text / label / anchor / z）。
+function drawingToDoc(obj) {
+  const doc = { id: obj.id, tool: obj.tool, geom: obj.geom, style: obj.style };
+  if (obj.text != null) doc.text = obj.text;                       // 文字工具內容
+  if (obj.label != null && obj.label !== '') doc.label = obj.label; // 綁定標籤
+  if (obj.anchor != null) doc.anchor = obj.anchor;                 // elementFromPoint selector
+  if (obj.z != null) doc.z = obj.z;                                // z-order
+  return doc; // 注意：不含 imageRef / dataURL（PNG 永不進 Firestore）
+}
+
 // ── DOM helpers（draw 前綴避免 bundle 時與 index.js 同名 top-level 衝突）────────
 function drawSvgEl(tag, attrs = {}) {
   const n = document.createElementNS(SVG_NS, tag);
@@ -1640,6 +1682,10 @@ function initDrawLayer(target, opts = {}) {
     recordOpen: false, // P6 側邊標注紀錄抽屜開關（預設關 → 不打擾一般使用）
   };
   const history = makeUndoStack();
+  // ── P7 團隊持久（選用）：把 opts.persist 解析成 drawings store（ready store 或 {fb,db,projectId}）。
+  // 失敗或未提供 → drawStore = null → 一律走純本地（dev 模式 0 Firebase）。
+  const drawStore = resolveDrawStore(opts.persist);
+  let unsubDraw = null;   // remote 訂閱解除函式（destroy 時呼叫）
   let drag = null;    // 繪製中：{ tool, rect, start, points }
   const actions = { setMode, setTool, setBrush, setColor, setStrokeWidth, act, eyedropper: openEyedropper, closeContext: closeContextMenu, send: () => sendToAgent() };
   const toolbar = buildToolbar(state, actions);
@@ -1768,9 +1814,58 @@ function initDrawLayer(target, opts = {}) {
     history.push(cmd);
     if (cmd.type === 'create') state.selectedIds = [cmd.obj.id];
     render();
+    syncCommand(cmd); // P7：團隊模式才會真的寫 Firestore（drawStore 為 null 時 no-op）
   }
   // 物件已即時改好（拖曳預覽），只補登歷史（不重複 apply）。
-  function pushHistory(cmd) { history.push(cmd); render(); }
+  function pushHistory(cmd) { history.push(cmd); render(); syncCommand(cmd); }
+
+  // ── P7 團隊持久：把本地 command 反映到 Firestore（向量 only）。──────────────────
+  // 持久化失敗一律吞掉 → 本地永遠是 live session 的真相，不因網路/權限問題壞掉繪圖。
+  function syncCommand(cmd) {
+    if (!drawStore || !cmd) return;
+    try {
+      if (cmd.type === 'create') syncSaveObj(cmd.obj);
+      else if (cmd.type === 'update') syncSaveById(cmd.id);
+      else if (cmd.type === 'reorder') (cmd.after || []).forEach(syncSaveById); // z 變更 → 重存
+      else if (cmd.type === 'deleteMany') (cmd.items || []).forEach(it => syncRemoveObj(it.obj));
+      else if (cmd.type === 'batch') (cmd.cmds || []).forEach(syncCommand);
+    } catch (_) { /* 持久化失敗不影響本地繪圖 */ }
+  }
+  function syncSaveObj(obj) {
+    if (!drawStore || !obj || obj.tool === 'image') return; // 跳過貼圖：PNG/dataURL 不進 Firestore（plan §4.6）
+    try { Promise.resolve(drawStore.save(drawingToDoc(obj))).catch(() => {}); } catch (_) { /* ignore */ }
+  }
+  function syncSaveById(id) { const o = findById(state.objects, id); if (o) syncSaveObj(o); }
+  function syncRemoveObj(obj) {
+    if (!drawStore || !obj || obj.tool === 'image') return; // image 從未存過 → 不需刪
+    try { Promise.resolve(drawStore.remove(obj.id)).catch(() => {}); } catch (_) { /* ignore */ }
+  }
+
+  // remote 訂閱：teammate 的向量物件即時併入（只「新增」缺的 id，de-dupe，不覆蓋本地進行中物件）。
+  function startSync() {
+    if (!drawStore) return;
+    try { unsubDraw = drawStore.subscribe(onRemoteDrawings, () => { /* 訂閱錯誤 → 維持本地 */ }); }
+    catch (_) { unsubDraw = null; }
+  }
+  function onRemoteDrawings(remoteDocs) {
+    if (!Array.isArray(remoteDocs) || !remoteDocs.length) return;
+    const localIds = new Set(state.objects.map(o => o.id));
+    let changed = false;
+    remoteDocs.forEach(doc => {
+      if (!doc || doc.id == null || doc.tool === 'image') return;
+      if (localIds.has(doc.id)) return; // 已存在（含自己剛存的 echo）→ de-dupe、不 clobber 本地
+      state.objects.push(rehydrateDrawing(doc));
+      changed = true;
+    });
+    if (changed) render();
+  }
+  // Firestore doc（含 updatedAt 等 metadata）→ 乾淨 DrawObject（丟掉非向量欄位）。
+  function rehydrateDrawing(doc) {
+    const obj = makeDrawObject({ id: doc.id, tool: doc.tool, geom: doc.geom, style: doc.style, text: doc.text });
+    if (doc.label != null) obj.label = doc.label;
+    if (doc.anchor != null) obj.anchor = doc.anchor;
+    return obj;
+  }
   function commitChange(id, before, after) { pushHistory({ type: 'update', id, before, after }); }
   function doUndo() {
     const cmd = history.undo();
@@ -2195,6 +2290,7 @@ function initDrawLayer(target, opts = {}) {
 
   applyMode();
   render();
+  startSync(); // P7：團隊模式才訂閱 + 載入既有 drawings（dev 模式 drawStore=null → no-op）
 
   return {
     svg, host,
@@ -2231,9 +2327,24 @@ function initDrawLayer(target, opts = {}) {
       window.removeEventListener('resize', render);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('paste', onPaste);
+      if (typeof unsubDraw === 'function') { try { unsubDraw(); } catch (_) { /* ignore */ } }
       closeContextMenu();
     },
   };
+}
+
+// opts.persist → drawings store（純 wiring，可單測思路）。接受三種輸入：
+//   - falsy        → null（dev 模式，0 Firebase）
+//   - ready store  → 已有 subscribe/save → 直接用（呼叫端先 createDrawingStore）
+//   - {fb,db,projectId} → 用 createDrawingStore 現場建（team 模式便利寫法）
+// 任一步出錯都回 null → 退回純本地，永不讓持久化擋住繪圖。
+function resolveDrawStore(persist) {
+  if (!persist) return null;
+  try {
+    if (typeof persist.subscribe === 'function' && typeof persist.save === 'function') return persist;
+    if (persist.fb && persist.projectId != null) return createDrawingStore(persist.fb, persist.db, persist.projectId);
+  } catch (_) { /* ignore → null */ }
+  return null;
 }
 
 // 把 % box 換成 px box（選取框 / marquee 繪製）。
@@ -2659,7 +2770,7 @@ async function loadFirebase() {
   const [
     { initializeApp, getApps, getApp },
     { getFirestore, collection, addDoc, onSnapshot, query, where,
-      serverTimestamp, deleteDoc, doc, updateDoc },
+      serverTimestamp, deleteDoc, doc, updateDoc, setDoc },
     { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged },
   ] = await Promise.all([
     import(`${FB_BASE}/firebase-app.js`),
@@ -2669,7 +2780,7 @@ async function loadFirebase() {
   return {
     initializeApp, getApps, getApp,
     getFirestore, collection, addDoc, onSnapshot, query, where,
-    serverTimestamp, deleteDoc, doc, updateDoc,
+    serverTimestamp, deleteDoc, doc, updateDoc, setDoc,
     getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
   };
 }
