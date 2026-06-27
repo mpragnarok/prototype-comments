@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<!--
+  draw-layer-harness.html — e2e 載入頁，測 src/draw-layer.js（繪圖層骨架，P1）。
+  import 自 /src/（同 prod 服務路徑）。不需 firebase。
+  expose window.__drawTest 給 spec 注入/操作/斷言。
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>draw-layer e2e harness</title>
+<style>
+  html, body { margin: 0; }
+  /* designTarget：模擬被標注的畫布。固定大小方便 playwright 用視窗座標下筆。 */
+  #canvas { position: relative; width: 600px; height: 400px; background: #f3f4f6; margin: 0; }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <!-- 底層 app 元件（在 overlay 之下）：給 P4 elementFromPoint anchor 擷取測試用 -->
+  <div id="price-card" style="position:absolute; left:80px; top:60px; width:160px; height:120px; background:#ddd;"></div>
+  <div data-testid="sidebar" style="position:absolute; left:320px; top:60px; width:120px; height:200px; background:#eee;"></div>
+</div>
+
+<script type="module">
+  import { initDrawLayer } from '/src/draw-layer.js';
+  import { createDrawingStore } from '/src/store.js';
+  import { createMockFirebase } from '/test/mock-firebase.js';
+  // Mock 瀏覽器 EyeDropper API（playwright/Chromium 無此 API）→ 回傳可由測試設定的 hex。
+  window.__eyedropHex = '#123456';
+  window.EyeDropper = class { open() { return Promise.resolve({ sRGBHex: window.__eyedropHex }); } };
+
+  // P7 e2e helper：建一個會記錄呼叫次數的 spy store（dev 模式「0 store 呼叫」斷言用）。
+  function makeSpyStore(fb) {
+    const inner = createDrawingStore(fb, {}, 'proj-e2e');
+    const calls = { subscribe: 0, save: 0, update: 0, remove: 0 };
+    const spy = {
+      __calls: calls,
+      query: (...a) => inner.query(...a),
+      subscribe: (onChange, onErr) => { calls.subscribe++; return inner.subscribe(onChange, onErr); },
+      save: d => { calls.save++; return inner.save(d); },
+      update: (id, p) => { calls.update++; return inner.update(id, p); },
+      remove: id => { calls.remove++; return inner.remove(id); },
+    };
+    return spy;
+  }
+
+  window.__drawTest = {
+    initDrawLayer, createDrawingStore, createMockFirebase,
+    init: (overrides = {}) => initDrawLayer('#canvas', overrides),
+    // 團隊模式：注入 mock firebase → spy store；回傳 { api, fb, spy } 供斷言。
+    initTeam: (mockInit = {}, overrides = {}) => {
+      const fb = createMockFirebase(mockInit);
+      const spy = makeSpyStore(fb);
+      window.__teamFb = fb; window.__teamSpy = spy;
+      const api = initDrawLayer('#canvas', { ...overrides, persist: spy });
+      window.__teamApi = api;
+      return { ok: true };
+    },
+    // dev 模式：建 spy store 但「不」傳給 draw-layer → 斷言它從未被碰。
+    initDevWithIdleSpy: (overrides = {}) => {
+      const fb = createMockFirebase({});
+      const spy = makeSpyStore(fb);
+      window.__idleFb = fb; window.__idleSpy = spy;
+      const api = initDrawLayer('#canvas', overrides); // 故意不帶 persist
+      window.__drawTest.api = api;
+      return { ok: true };
+    },
+    setEyedropHex: (hex) => { window.__eyedropHex = hex; },
+    ready: true,
+  };
+</script>
+</body>
+</html>

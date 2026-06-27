@@ -20,6 +20,7 @@ files = [
     ('styles.js',        'lib'),
     ('store.js',         'lib'),
     ('note-comments.js', 'lib'),
+    ('draw-layer.js',    'lib'),
     ('index.js',         'entry'),
 ]
 
@@ -29,6 +30,8 @@ for fname, role in files:
         content = f.read()
 
     if role == 'lib':
+        # Strip lib→lib import lines (deps concatenated earlier → already in scope)
+        content = re.sub(r'^import\s+\{[^}]+\}\s+from\s+[\'"][^\'\"]+[\'"];?\n?', '', content, flags=re.MULTILINE)
         # Strip 'export ' prefix from top-level declarations
         content = re.sub(r'^export (const|function|async function|class) ', r'\1 ', content, flags=re.MULTILINE)
     else:

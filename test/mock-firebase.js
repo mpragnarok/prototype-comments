@@ -60,6 +60,11 @@ export function createMockFirebase(initial = {}) {
       emitSnap();
       return { id };
     },
+    // setDoc by ref（drawings store 用「繪圖物件 id」當 doc id → upsert）。
+    setDoc: async (ref, data) => {
+      state.docs.set(ref.__id, { ...data });
+      emitSnap();
+    },
     updateDoc: async (ref, data) => {
       const cur = state.docs.get(ref.__id) || {};
       state.docs.set(ref.__id, { ...cur, ...data });
