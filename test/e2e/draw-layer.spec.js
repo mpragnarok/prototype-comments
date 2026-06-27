@@ -1645,6 +1645,259 @@ async function dragDraw(page, x1, y1, x2, y2) {
   });
 
   await teamPage.close();
+
+  // ── Item 1：dev 模式 localStorage 持久化 ─────────────────────────────────────
+  // 使用主 page（已有 #canvas），注入 opts.projectId 區分 key，每個 test 自行清 key。
+  console.log('\ndraw-layer e2e — dev 模式 localStorage 持久化:');
+
+  const LOCAL_PROJ = 'e2e-local-persist';
+  const LOCAL_KEY  = 'pc-draw-local:' + LOCAL_PROJ;
+
+  // 清 key + destroy 舊 api + 建新 controller（同 projectId）。
+  async function initLocalPersist(overrides = {}) {
+    await page.evaluate(({ key, proj, extra }) => {
+      localStorage.removeItem(key);
+      try { if (window.__drawTest.api) window.__drawTest.api.destroy(); } catch (_) {}
+      window.__drawTest.api = window.__drawTest.init({ projectId: proj, ...extra });
+    }, { key: LOCAL_KEY, proj: LOCAL_PROJ, extra: overrides });
+  }
+
+  await test('畫 rect → localStorage 寫入序列化資料', async () => {
+    await initLocalPersist();
+    await page.evaluate(() => window.__drawTest.api.setTool('rect'));
+    await dragDraw(page, 50, 50, 150, 130);
+    const stored = await page.evaluate(k => localStorage.getItem(k), LOCAL_KEY);
+    assert(stored !== null, 'localStorage 應有資料');
+    const docs = JSON.parse(stored);
+    assert(Array.isArray(docs) && docs.length === 1 && docs[0].tool === 'rect',
+      `應序列化 1 筆 rect，實際 ${JSON.stringify(docs)}`);
+  });
+
+  await test('重新 initDrawLayer 同 projectId → 物件從 localStorage 還原並渲染', async () => {
+    // 不清 key（承接上一個 test 留下的 rect）
+    await page.evaluate(proj => {
+      try { window.__drawTest.api.destroy(); } catch (_) {}
+      window.__drawTest.api = window.__drawTest.init({ projectId: proj });
+    }, LOCAL_PROJ);
+    const r = await page.evaluate(() => ({
+      objs: window.__drawTest.api.getObjects(),
+      domRects: document.querySelectorAll('#pc-draw > rect').length,
+    }));
+    assert(r.objs.length === 1 && r.objs[0].tool === 'rect',
+      `重新 init 後應還原 1 筆 rect，實際 ${JSON.stringify(r.objs.map(o => o.tool))}`);
+    assert(r.domRects >= 1, `DOM 應渲染 rect，實際 ${r.domRects}`);
+  });
+
+  await test('image 物件不進 localStorage（vectors only）', async () => {
+    await initLocalPersist();
+    const PNG_TINY = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    await page.evaluate(d => window.__drawTest.api.addImage(d, 1, 1, null), PNG_TINY);
+    const stored = await page.evaluate(k => localStorage.getItem(k), LOCAL_KEY);
+    const docs = stored ? JSON.parse(stored) : [];
+    assert(!docs.some(d => d.tool === 'image'),
+      `image 物件不應進 localStorage，實際 ${JSON.stringify(docs)}`);
+  });
+
+  await test('opts.persistLocal=false → localStorage 不寫入', async () => {
+    const noKey = 'pc-draw-local:e2e-no-persist';
+    await page.evaluate(k => {
+      localStorage.removeItem(k);
+      try { window.__drawTest.api.destroy(); } catch (_) {}
+      window.__drawTest.api = window.__drawTest.init({ projectId: 'e2e-no-persist', persistLocal: false });
+    }, noKey);
+    await page.evaluate(() => window.__drawTest.api.setTool('rect'));
+    await dragDraw(page, 50, 50, 130, 110);
+    const stored = await page.evaluate(k => localStorage.getItem(k), noKey);
+    assert(stored === null, 'persistLocal=false 應不寫入 localStorage');
+    await page.evaluate(() => { localStorage.removeItem('pc-draw-local:e2e-no-persist'); });
+  });
+
+  await test('clear() 後 localStorage 更新為空陣列', async () => {
+    await initLocalPersist();
+    await page.evaluate(() => window.__drawTest.api.setTool('rect'));
+    await dragDraw(page, 50, 50, 150, 130);
+    await page.evaluate(() => window.__drawTest.api.clear());
+    const stored = await page.evaluate(k => localStorage.getItem(k), LOCAL_KEY);
+    const docs = stored ? JSON.parse(stored) : null;
+    assert(Array.isArray(docs) && docs.length === 0, `clear 後 localStorage 應為空陣列，實際 ${JSON.stringify(docs)}`);
+    // 清理
+    await page.evaluate(k => localStorage.removeItem(k), LOCAL_KEY);
+    // 還原：重建 default controller 給後續 test 用
+    await page.evaluate(() => {
+      try { window.__drawTest.api.destroy(); } catch (_) {}
+      window.__drawTest.api = window.__drawTest.init();
+    });
+  });
+
+  // ── Item 2：文字字體大小工具 ─────────────────────────────────────────────────
+  console.log('\ndraw-layer e2e — 文字字體大小:');
+
+  // 建一個 text 物件，回傳其 id 與渲染後的 <text> font-size 屬性。
+  async function drawTextAndGetFontSize() {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setTool('text'); });
+    await page.mouse.click(200, 200);
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.fill('.pc-draw-text-input', 'FontTest');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(50);
+    return page.evaluate(() => {
+      const o = window.__drawTest.api.getObjects().slice(-1)[0];
+      const t = document.querySelector(`#pc-draw text[data-id="${o.id}"]`);
+      return { id: o.id, fontSize: o.style.fontSize, domFontSize: t && t.getAttribute('font-size') };
+    });
+  }
+
+  await test('text 物件預設 font-size=16；<text> font-size 屬性反映 style.fontSize', async () => {
+    const r = await drawTextAndGetFontSize();
+    console.log('     default font-size:', JSON.stringify(r));
+    assert(r.fontSize === 16, `style.fontSize 預設應為 16，實際 ${r.fontSize}`);
+    assert(r.domFontSize === '16', `<text> font-size 屬性應為 16，實際 ${r.domFontSize}`);
+  });
+
+  await test('fontsize-menu popover 存在；含 4 個字體大小按鈕', async () => {
+    const r = await page.evaluate(() => {
+      const menu = document.querySelector('.pc-draw-popover[data-menu="fontsize"]');
+      const btns = menu ? [...menu.querySelectorAll('.pc-draw-fontsize')] : [];
+      return {
+        present: !!menu,
+        count: btns.length,
+        sizes: btns.map(b => Number(b.dataset.fontSize)),
+      };
+    });
+    console.log('     fontsize menu:', JSON.stringify(r));
+    assert(r.present, '應有 fontsize popover');
+    assert(r.count === 4, `應有 4 個字體大小按鈕，實際 ${r.count}`);
+    assert(JSON.stringify(r.sizes) === JSON.stringify([12, 16, 20, 28]),
+      `字體大小選項應為 [12,16,20,28]，實際 ${JSON.stringify(r.sizes)}`);
+  });
+
+  await test('select 工具 + 選取 text → 點 28px → <text> font-size 更新', async () => {
+    const before = await drawTextAndGetFontSize();
+    // 切 select，點物件
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.mouse.click(200, 200);
+    // 開 fontsize popover，點 28
+    await page.click('.pc-draw-tool[data-action="fontsize-menu"]');
+    await page.click('.pc-draw-popover[data-menu="fontsize"] .pc-draw-fontsize[data-font-size="28"]');
+    await page.waitForTimeout(30);
+    const after = await page.evaluate(id => {
+      const o = window.__drawTest.api.getObjects().find(o => o.id === id);
+      const t = document.querySelector(`#pc-draw text[data-id="${id}"]`);
+      return { fontSize: o && o.style.fontSize, domFontSize: t && t.getAttribute('font-size') };
+    }, before.id);
+    console.log('     font-size before/after:', JSON.stringify({ before: before.fontSize, ...after }));
+    assert(after.fontSize === 28, `style.fontSize 應更新為 28，實際 ${after.fontSize}`);
+    assert(after.domFontSize === '28', `<text> font-size 屬性應為 28，實際 ${after.domFontSize}`);
+  });
+
+  await test('新建 text 物件沿用目前 fontSize 預設（28 設好後再畫一個）', async () => {
+    // 承接上一個 test：DEFAULT_DRAW_STYLE.fontSize 應已被更新為 28
+    await page.evaluate(() => window.__drawTest.api.setTool('text'));
+    await page.mouse.click(350, 150);
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.fill('.pc-draw-text-input', 'NewText');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(40);
+    const r = await page.evaluate(() => {
+      const objs = window.__drawTest.api.getObjects();
+      const last = objs[objs.length - 1];
+      const t = document.querySelector(`#pc-draw text[data-id="${last.id}"]`);
+      return { fontSize: last.style.fontSize, domFontSize: t && t.getAttribute('font-size') };
+    });
+    console.log('     new text with prevailing fontSize:', JSON.stringify(r));
+    assert(r.fontSize === 28, `新建 text 應沿用 28，實際 ${r.fontSize}`);
+    assert(r.domFontSize === '28', `<text> font-size 屬性應為 28，實際 ${r.domFontSize}`);
+    // 清場 + 重設 fontSize 為預設 16，避免干擾後續 test
+    await page.evaluate(() => {
+      window.__drawTest.api.clear();
+      window.__drawTest.api.setFontSize(16);
+    });
+  });
+
+  // ── Item 3：快捷鍵 onKey DOM 觸發（補 resolveShortcut 之外的 wiring）──────────
+  // 前方「鍵盤快捷鍵」section 已覆蓋 o/r/7/v/a/R/3/d/7/p/i/Ctrl；
+  // 此 section 補上 l→line、t→text、2→rect、1→select 以及 dispatchEvent guard。
+  console.log('\ndraw-layer e2e — 快捷鍵 onKey wiring（Item 3 補完）:');
+
+  async function resetForShortcut() {
+    await page.evaluate(() => {
+      window.__drawTest.api.clear();
+      window.__drawTest.api.setMode('draw'); // onKey 要求 mode=draw
+    });
+  }
+
+  await test('onKey wiring: l → line', async () => {
+    await resetForShortcut();
+    await page.keyboard.press('l');
+    const tool = await page.evaluate(() => window.__drawTest.api.getTool());
+    assert(tool === 'line', `l 應切 line，實際 ${tool}`);
+  });
+
+  await test('onKey wiring: t → text', async () => {
+    await resetForShortcut();
+    await page.keyboard.press('t');
+    const tool = await page.evaluate(() => window.__drawTest.api.getTool());
+    assert(tool === 'text', `t 應切 text，實際 ${tool}`);
+    // 關閉可能出現的 text input 避免後續 test 受干擾
+    await page.keyboard.press('Escape');
+  });
+
+  await test('onKey wiring: 2 → rect（數字鍵）', async () => {
+    await resetForShortcut();
+    await page.keyboard.press('2');
+    const tool = await page.evaluate(() => window.__drawTest.api.getTool());
+    assert(tool === 'rect', `2 應切 rect，實際 ${tool}`);
+  });
+
+  await test('onKey wiring: 1 → select（數字鍵）', async () => {
+    await resetForShortcut();
+    await page.keyboard.press('1');
+    const tool = await page.evaluate(() => window.__drawTest.api.getTool());
+    assert(tool === 'select', `1 應切 select，實際 ${tool}`);
+  });
+
+  await test('guard: dispatchEvent 目標為 INPUT → 工具不切換（isTyping 判斷）', async () => {
+    // 在 #canvas 內插入一個暫時 input，focus 後 dispatchEvent → onKey 應判斷 isTyping() 而跳過。
+    await page.evaluate(() => {
+      window.__drawTest.api.setTool('select');
+      window.__drawTest.api.setMode('draw');
+    });
+    const toolBefore = await page.evaluate(() => window.__drawTest.api.getTool());
+    await page.evaluate(() => {
+      const inp = document.createElement('input');
+      inp.id = '__guard-test-input';
+      inp.style.cssText = 'position:absolute;left:-999px;'; // 畫面外但可 focus
+      document.body.appendChild(inp);
+      inp.focus();
+      // 直接用 dispatchEvent（不透過 playwright keyboard）確保 target === input
+      inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true, cancelable: true }));
+    });
+    const toolAfter = await page.evaluate(() => window.__drawTest.api.getTool());
+    await page.evaluate(() => { const inp = document.getElementById('__guard-test-input'); if (inp) inp.remove(); });
+    console.log(`     dispatchEvent guard: before=${toolBefore} after=${toolAfter}`);
+    assert(toolAfter === toolBefore, `INPUT 為焦點時 keydown 不應切工具，tool=${toolAfter}`);
+  });
+
+  await test('guard: TEXTAREA 為焦點時同樣不切工具', async () => {
+    await page.evaluate(() => {
+      window.__drawTest.api.setTool('select');
+      window.__drawTest.api.setMode('draw');
+    });
+    const toolBefore = await page.evaluate(() => window.__drawTest.api.getTool());
+    await page.evaluate(() => {
+      const ta = document.createElement('textarea');
+      ta.id = '__guard-test-ta';
+      ta.style.cssText = 'position:absolute;left:-999px;';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', bubbles: true, cancelable: true }));
+    });
+    const toolAfter = await page.evaluate(() => window.__drawTest.api.getTool());
+    await page.evaluate(() => { const ta = document.getElementById('__guard-test-ta'); if (ta) ta.remove(); });
+    console.log(`     TEXTAREA guard: before=${toolBefore} after=${toolAfter}`);
+    assert(toolAfter === toolBefore, `TEXTAREA 為焦點時 keydown 不應切工具，tool=${toolAfter}`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
