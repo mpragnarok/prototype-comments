@@ -925,13 +925,38 @@ function createNoteModule({
 const DRAW_MODES = ['comment', 'draw', 'off'];
 const DRAW_TOOLS = ['select', 'ellipse', 'arrow', 'pencil', 'text', 'rect', 'line'];
 const DEFAULT_DRAW_STYLE = { color: '#E5484D', strokeWidth: 2, fill: 'none' };
-const DRAW_COLORS = ['#E5484D', '#0066FF', '#F5A623', '#111111']; // red / blue / amber / black
-const DRAW_STROKE_WIDTHS = [2, 4, 8];
+// Excalidraw/Figma 風格預設色（8 色）＋ picker 另附 <input type=color> 自訂任意 hex。
+const DRAW_COLORS = ['#1e1e1e', '#e03131', '#2f9e44', '#1971c2', '#f08c00', '#9c36b5', '#0c8599', '#868e96'];
+const DRAW_STROKE_WIDTHS = [1, 2, 4, 6]; // thin → bold
 const MIN_DRAW_SIZE_PCT = 1; // 縮放最小尺寸（% 座標）
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const TOOL_LABELS = { select: '↖', ellipse: '◯', arrow: '↗', pencil: '✎', text: 'T', rect: '▭', line: '╱' };
 const HANDLE_FIXED = { nw: 'se', ne: 'sw', se: 'nw', sw: 'ne' };
+
+// Material Icons 官方 24px path data（與 MUI 同一套圖示，inline SVG，不引 React/@mui）。
+const ICON_PATHS = {
+  select: 'M21 3L3 10.53v.98l6.84 2.65L12.48 21h.98L21 3z',                                   // near_me
+  ellipse: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z', // circle (outlined)
+  arrow: 'M6 6v2h8.59L5 17.59 6.41 19 16 9.41V18h2V6z',                                        // arrow_outward
+  pencil: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z', // edit
+  text: 'M5 4v3h5.5v12h3V7H19V4z',                                                             // title
+  rect: 'M18 4H6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H6V6h12v12z', // crop_square
+  line: 'M19 13H5v-2h14v2z',                                                                   // remove (horizontal bar)
+  front: 'M3 13h2v-2H3v2zm0 4h2v-2H3v2zm2 4v-2H3c0 1.1.89 2 2 2zM3 9h2V7H3v2zm12 12h2v-2h-2v2zm4-18H9c-1.11 0-2 .9-2 2v10c0 1.1.89 2 2 2h10c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm0 12H9V5h10v10zm-8 6h2v-2h-2v2zm-4 0h2v-2H7v2z', // flip_to_front
+  back: 'M9 7H7v2h2V7zm0 4H7v2h2v-2zm0-8c-1.11 0-2 .9-2 2h2V3zm4 12h-2v2h2v-2zm6-12v2h2c0-1.1-.9-2-2-2zm-6 0h-2v2h2V3zM9 17v-2H7c0 1.1.89 2 2 2zm10-4h2v-2h-2v2zm0-4h2V7h-2v2zm0 8c1.1 0 2-.9 2-2h-2v2zM5 7H3v12c0 1.1.89 2 2 2h12v-2H5V7zm10-2h2V3h-2v2zm0 12h2v-2h-2v2z', // flip_to_back
+  forward: 'M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z',                       // arrow_upward
+  backward: 'M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z',                    // arrow_downward
+  delete: 'M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',       // delete
+  undo: 'M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z', // undo
+  redo: 'M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z', // redo
+  lineWeight: 'M3 17h18v-2H3v2zm0 3h18v-1H3v1zm0-7h18v-3H3v3zm0-9v4h18V4H3z',                    // line_weight
+  close: 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z', // close
+};
+
+// 一個 Material 圖示 → inline SVG 字串（currentColor → 跟著 active/hover 文字色變化）。
+function icon(name, size = 20) {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor" aria-hidden="true"><path d="${ICON_PATHS[name]}"/></svg>`;
+}
 
 // ── 純函式（單元測試對象，無 DOM 依賴）──────────────────────────────────────
 // px → viewport-%（沿用 index.js overlay click 的 toFixed(2) 慣例）。
@@ -1144,12 +1169,29 @@ const DRAW_STYLES = `
 }
 .pc-draw-tool:hover { background: #333; }
 .pc-draw-tool.active { background: #0FA0A0; color: #fff; }
+.pc-draw-tool svg { display: block; }
 .pc-draw-sep { width: 1px; height: 22px; background: #3a3a3a; margin: 0 2px; }
+/* 顏色/線粗收進 popover，避免 pill 過長溢出 */
+.pc-draw-menu { position: relative; display: flex; align-items: center; }
+.pc-draw-cur-color { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #555; display: block; }
+.pc-draw-popover {
+  position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+  display: none; flex-wrap: wrap; gap: 8px; width: 152px; box-sizing: border-box;
+  background: #1e1e1e; padding: 10px; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.4);
+}
+.pc-draw-popover-width { width: auto; flex-wrap: nowrap; }
+.pc-draw-menu.open .pc-draw-popover { display: flex; }
 .pc-draw-swatch {
-  width: 20px; height: 20px; border-radius: 50%; padding: 0; cursor: pointer;
+  width: 22px; height: 22px; border-radius: 50%; padding: 0; cursor: pointer;
   border: 2px solid transparent;
 }
 .pc-draw-swatch.active { border-color: #fff; box-shadow: 0 0 0 1px #0FA0A0; }
+.pc-draw-color-custom {
+  width: 22px; height: 22px; padding: 0; border: 2px solid #555; border-radius: 50%;
+  background: none; cursor: pointer; overflow: hidden;
+}
+.pc-draw-color-custom::-webkit-color-swatch-wrapper { padding: 0; }
+.pc-draw-color-custom::-webkit-color-swatch { border: none; border-radius: 50%; }
 .pc-draw-width {
   width: 30px; height: 30px; border: none; border-radius: 8px; cursor: pointer;
   background: transparent; display: flex; align-items: center; justify-content: center;
@@ -1562,25 +1604,25 @@ function ensureArrowMarker(svg, color) {
   return id;
 }
 
-// ── 工具列 UI ───────────────────────────────────────────────────────────────
+// ── 工具列 UI（Material 圖示 + 顏色/線粗 popover）────────────────────────────
 function buildToolbar(state, actions) {
   const bar = drawHtmlEl('div', 'pc-draw-toolbar');
   bar.id = 'pc-draw-toolbar';
   DRAW_TOOLS.forEach(tool => bar.appendChild(toolButton(tool, actions)));
   appendSep(bar);
-  DRAW_COLORS.forEach(color => bar.appendChild(swatchButton(color, actions)));
+  bar.appendChild(colorMenu(actions));
+  bar.appendChild(widthMenu(actions));
   appendSep(bar);
-  DRAW_STROKE_WIDTHS.forEach(w => bar.appendChild(widthButton(w, actions)));
+  // z-order（icon 名 === action 名）＋ delete
+  ['front', 'forward', 'backward', 'back', 'delete'].forEach(a => bar.appendChild(actButton(a, actions)));
   appendSep(bar);
-  [['front', '⤒'], ['forward', '↑'], ['backward', '↓'], ['back', '⤓'], ['delete', '🗑']]
-    .forEach(([a, l]) => bar.appendChild(actButton(a, l, actions)));
-  appendSep(bar);
-  [['undo', '⟲'], ['redo', '⟳']].forEach(([a, l]) => bar.appendChild(actButton(a, l, actions)));
+  ['undo', 'redo'].forEach(a => bar.appendChild(actButton(a, actions)));
   appendSep(bar);
   const off = drawHtmlEl('button', 'pc-draw-tool');
   off.dataset.tool = 'off';
   off.title = '結束繪圖（放行 app 點擊）';
-  off.textContent = '✕';
+  off.setAttribute('aria-label', '結束繪圖');
+  off.innerHTML = icon('close');
   off.onclick = () => actions.setMode('off');
   bar.appendChild(off);
   return bar;
@@ -1590,15 +1632,71 @@ function toolButton(tool, actions) {
   const b = drawHtmlEl('button', 'pc-draw-tool');
   b.dataset.tool = tool;
   b.title = tool;
-  b.textContent = TOOL_LABELS[tool] || tool;
+  b.setAttribute('aria-label', tool);
+  b.innerHTML = icon(tool);
   b.onclick = () => actions.setTool(tool);
   return b;
+}
+function actButton(action, actions) {
+  const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-act');
+  b.dataset.action = action;
+  b.title = action;
+  b.setAttribute('aria-label', action);
+  b.innerHTML = icon(action);
+  b.onclick = () => actions.act(action);
+  return b;
+}
+
+// 顏色 popover：8 預設色 swatch ＋ <input type=color> 自訂任意 hex。
+function colorMenu(actions) {
+  const wrap = drawHtmlEl('div', 'pc-draw-menu');
+  const trigger = drawHtmlEl('button', 'pc-draw-tool pc-draw-trigger');
+  trigger.dataset.action = 'color-menu';
+  trigger.title = '顏色';
+  trigger.setAttribute('aria-label', '顏色');
+  trigger.appendChild(drawHtmlEl('span', 'pc-draw-cur-color'));
+  trigger.onclick = () => togglePopover(wrap);
+  const pop = drawHtmlEl('div', 'pc-draw-popover');
+  pop.dataset.menu = 'color';
+  DRAW_COLORS.forEach(c => pop.appendChild(swatchButton(c, actions)));
+  const custom = drawHtmlEl('input', 'pc-draw-color-custom');
+  custom.type = 'color';
+  custom.title = '更多顏色';
+  custom.setAttribute('aria-label', '更多顏色');
+  custom.dataset.action = 'custom-color';
+  custom.addEventListener('input', () => actions.setColor(custom.value));
+  pop.appendChild(custom);
+  wrap.appendChild(trigger);
+  wrap.appendChild(pop);
+  return wrap;
+}
+// 線粗 popover：thin → bold 的遞增粗條。
+function widthMenu(actions) {
+  const wrap = drawHtmlEl('div', 'pc-draw-menu');
+  const trigger = drawHtmlEl('button', 'pc-draw-tool pc-draw-trigger');
+  trigger.dataset.action = 'width-menu';
+  trigger.title = '線粗';
+  trigger.setAttribute('aria-label', '線粗');
+  trigger.innerHTML = icon('lineWeight');
+  trigger.onclick = () => togglePopover(wrap);
+  const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-width');
+  pop.dataset.menu = 'width';
+  DRAW_STROKE_WIDTHS.forEach(w => pop.appendChild(widthButton(w, actions)));
+  wrap.appendChild(trigger);
+  wrap.appendChild(pop);
+  return wrap;
+}
+function togglePopover(wrap) {
+  const bar = wrap.closest('.pc-draw-toolbar');
+  if (bar) bar.querySelectorAll('.pc-draw-menu.open').forEach(m => { if (m !== wrap) m.classList.remove('open'); });
+  wrap.classList.toggle('open');
 }
 function swatchButton(color, actions) {
   const b = drawHtmlEl('button', 'pc-draw-swatch');
   b.dataset.color = color;
   b.style.background = color;
   b.title = color;
+  b.setAttribute('aria-label', color);
   b.onclick = () => actions.setColor(color);
   return b;
 }
@@ -1606,18 +1704,11 @@ function widthButton(w, actions) {
   const b = drawHtmlEl('button', 'pc-draw-width');
   b.dataset.width = w;
   b.title = w + 'px';
+  b.setAttribute('aria-label', w + 'px');
   const dot = drawHtmlEl('span');
-  dot.style.cssText = `display:block;width:16px;height:${Math.min(w, 8)}px;border-radius:4px;background:#e5e7eb;`;
+  dot.style.cssText = `display:block;width:18px;height:${Math.min(w, 10)}px;border-radius:4px;background:#e5e7eb;`;
   b.appendChild(dot);
   b.onclick = () => actions.setStrokeWidth(w);
-  return b;
-}
-function actButton(action, label, actions) {
-  const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-act');
-  b.dataset.action = action;
-  b.title = action;
-  b.textContent = label;
-  b.onclick = () => actions.act(action);
   return b;
 }
 
@@ -1626,6 +1717,8 @@ function syncToolbar(bar, state, history) {
     b.classList.toggle('active', state.mode === 'draw' && b.dataset.tool === state.tool);
   });
   const color = (DEFAULT_DRAW_STYLE.color || '').toLowerCase();
+  const dot = bar.querySelector('.pc-draw-cur-color');
+  if (dot) dot.style.background = DEFAULT_DRAW_STYLE.color;
   bar.querySelectorAll('.pc-draw-swatch').forEach(b => {
     b.classList.toggle('active', b.dataset.color.toLowerCase() === color);
   });
@@ -1633,7 +1726,7 @@ function syncToolbar(bar, state, history) {
     b.classList.toggle('active', Number(b.dataset.width) === DEFAULT_DRAW_STYLE.strokeWidth);
   });
   const hasSel = !!state.selectedId;
-  bar.querySelectorAll('[data-action]').forEach(b => {
+  bar.querySelectorAll('.pc-draw-act').forEach(b => {
     const a = b.dataset.action;
     const enabled = a === 'undo' ? (history && history.canUndo()) : a === 'redo' ? (history && history.canRedo()) : hasSel;
     b.disabled = !enabled;

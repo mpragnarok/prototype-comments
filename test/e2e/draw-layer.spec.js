@@ -333,11 +333,12 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(redone === 0, 'Ctrl+Shift+Z 應重做');
   });
 
-  await test('color picker（select 工具 + 選取）：swatch → 選取物件 stroke 變色 + 新物件沿用', async () => {
+  await test('color picker（popover swatch，select 工具 + 選取）：擴充預設色 → 選取物件變色 + 新物件沿用', async () => {
     await reset('rect');
     await dragDraw(page, 100, 80, 200, 180); // 自動選取，tool 仍為 rect
     await page.evaluate(() => window.__drawTest.api.setTool('select')); // 切 select（保留選取）
-    await page.click('.pc-draw-swatch[data-color="#0066FF"]');
+    await page.click('.pc-draw-tool[data-action="color-menu"]'); // 開色盤 popover
+    await page.click('.pc-draw-popover[data-menu="color"] .pc-draw-swatch[data-color="#2f9e44"]'); // 擴充綠
     const r = await page.evaluate(() => {
       const o = window.__drawTest.api.getObjects()[0];
       const el = document.querySelector('#pc-draw > rect');
@@ -348,22 +349,60 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await dragDraw(page, 300, 100, 380, 200);
     const next = await page.evaluate(() => window.__drawTest.api.getObjects().slice(-1)[0].style.color);
     console.log('     color picker:', JSON.stringify(r), 'new obj color:', next);
-    assert(r.color === '#0066FF', `選取物件 style.color 應變藍，實際 ${r.color}`);
-    assert(r.stroke === '#0066FF', `SVG stroke 應變藍，實際 ${r.stroke}`);
-    assert(next === '#0066FF', `新物件應沿用新預設色，實際 ${next}`);
+    assert(r.color === '#2f9e44', `選取物件 style.color 應變綠，實際 ${r.color}`);
+    assert(r.stroke === '#2f9e44', `SVG stroke 應變綠，實際 ${r.stroke}`);
+    assert(next === '#2f9e44', `新物件應沿用新預設色，實際 ${next}`);
   });
 
-  await test('strokeWidth picker（select 工具 + 選取）：8px → 選取物件線寬改變', async () => {
+  await test('custom color（<input type=color>）：設任意 hex → 下一個新物件沿用', async () => {
+    await reset('rect'); // 繪圖工具啟用 → custom color 只設預設
+    await page.evaluate(() => {
+      const inp = document.querySelector('.pc-draw-color-custom');
+      inp.value = '#abcdef';
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await dragDraw(page, 120, 90, 220, 190); // 新物件應為自訂色
+    const c = await page.evaluate(() => window.__drawTest.api.getObjects().slice(-1)[0].style.color);
+    console.log('     custom color new obj:', c);
+    assert(c === '#abcdef', `自訂色應套到新物件，實際 ${c}`);
+  });
+
+  await test('strokeWidth picker（popover，select 工具 + 選取）：較粗線寬 → 選取物件線寬改變', async () => {
     await reset('rect');
     await dragDraw(page, 100, 80, 200, 180);
     await page.evaluate(() => window.__drawTest.api.setTool('select'));
-    await page.click('.pc-draw-width[data-width="8"]');
+    await page.click('.pc-draw-tool[data-action="width-menu"]'); // 開線粗 popover
+    await page.click('.pc-draw-popover[data-menu="width"] .pc-draw-width[data-width="6"]'); // 最粗
     const r = await page.evaluate(() => ({
       sw: window.__drawTest.api.getObjects()[0].style.strokeWidth,
       domSw: document.querySelector('#pc-draw > rect').getAttribute('stroke-width'),
     }));
     console.log('     strokeWidth picker:', JSON.stringify(r));
-    assert(r.sw === 8 && r.domSw === '8', `線寬應為 8，實際 ${JSON.stringify(r)}`);
+    assert(r.sw === 6 && r.domSw === '6', `線寬應為 6，實際 ${JSON.stringify(r)}`);
+  });
+
+  await test('toolbar 圖示化：每顆鈕為 inline <svg> + 具 aria-label（穩定 hook）', async () => {
+    const r = await page.evaluate(() => {
+      const tools = [...document.querySelectorAll('.pc-draw-tool[data-tool]')];
+      const acts = [...document.querySelectorAll('.pc-draw-act')];
+      const allSvg = [...tools, ...acts].every(b => b.querySelector('svg') && b.getAttribute('aria-label'));
+      return {
+        toolCount: tools.length,
+        actActions: acts.map(b => b.dataset.action).sort(),
+        allSvg,
+        noGlyphText: [...tools, ...acts].every(b => !b.textContent.trim()), // 已無 emoji/字元
+        presetSwatches: document.querySelectorAll('.pc-draw-popover[data-menu="color"] .pc-draw-swatch').length,
+        widthOpts: document.querySelectorAll('.pc-draw-popover[data-menu="width"] .pc-draw-width').length,
+        hasCustom: !!document.querySelector('.pc-draw-color-custom[type="color"]'),
+      };
+    });
+    console.log('     icons/aria:', JSON.stringify(r));
+    assert(r.allSvg, '每顆工具/動作鈕應為 inline svg + aria-label');
+    assert(r.noGlyphText, '不應再有 emoji/字元 glyph');
+    assert(r.actActions.join(',') === 'back,backward,delete,forward,front,redo,undo', `z-order/刪除/undo-redo action 應齊全，實際 ${r.actActions}`);
+    assert(r.presetSwatches === 8, `應有 8 預設色，實際 ${r.presetSwatches}`);
+    assert(r.widthOpts === 4, `應有 4 線寬，實際 ${r.widthOpts}`);
+    assert(r.hasCustom, '應有自訂顏色 input');
   });
 
   // ── Bug 1：繪圖工具啟用時 picker 只設預設、不回頭改選取；切繪圖工具會取消選取 ──
