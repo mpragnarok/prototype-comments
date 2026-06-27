@@ -1814,6 +1814,90 @@ async function dragDraw(page, x1, y1, x2, y2) {
     });
   });
 
+  // ── Item 3：快捷鍵 onKey DOM 觸發（補 resolveShortcut 之外的 wiring）──────────
+  // 前方「鍵盤快捷鍵」section 已覆蓋 o/r/7/v/a/R/3/d/7/p/i/Ctrl；
+  // 此 section 補上 l→line、t→text、2→rect、1→select 以及 dispatchEvent guard。
+  console.log('\ndraw-layer e2e — 快捷鍵 onKey wiring（Item 3 補完）:');
+
+  async function resetForShortcut() {
+    await page.evaluate(() => {
+      window.__drawTest.api.clear();
+      window.__drawTest.api.setMode('draw'); // onKey 要求 mode=draw
+    });
+  }
+
+  await test('onKey wiring: l → line', async () => {
+    await resetForShortcut();
+    await page.keyboard.press('l');
+    const tool = await page.evaluate(() => window.__drawTest.api.getTool());
+    assert(tool === 'line', `l 應切 line，實際 ${tool}`);
+  });
+
+  await test('onKey wiring: t → text', async () => {
+    await resetForShortcut();
+    await page.keyboard.press('t');
+    const tool = await page.evaluate(() => window.__drawTest.api.getTool());
+    assert(tool === 'text', `t 應切 text，實際 ${tool}`);
+    // 關閉可能出現的 text input 避免後續 test 受干擾
+    await page.keyboard.press('Escape');
+  });
+
+  await test('onKey wiring: 2 → rect（數字鍵）', async () => {
+    await resetForShortcut();
+    await page.keyboard.press('2');
+    const tool = await page.evaluate(() => window.__drawTest.api.getTool());
+    assert(tool === 'rect', `2 應切 rect，實際 ${tool}`);
+  });
+
+  await test('onKey wiring: 1 → select（數字鍵）', async () => {
+    await resetForShortcut();
+    await page.keyboard.press('1');
+    const tool = await page.evaluate(() => window.__drawTest.api.getTool());
+    assert(tool === 'select', `1 應切 select，實際 ${tool}`);
+  });
+
+  await test('guard: dispatchEvent 目標為 INPUT → 工具不切換（isTyping 判斷）', async () => {
+    // 在 #canvas 內插入一個暫時 input，focus 後 dispatchEvent → onKey 應判斷 isTyping() 而跳過。
+    await page.evaluate(() => {
+      window.__drawTest.api.setTool('select');
+      window.__drawTest.api.setMode('draw');
+    });
+    const toolBefore = await page.evaluate(() => window.__drawTest.api.getTool());
+    await page.evaluate(() => {
+      const inp = document.createElement('input');
+      inp.id = '__guard-test-input';
+      inp.style.cssText = 'position:absolute;left:-999px;'; // 畫面外但可 focus
+      document.body.appendChild(inp);
+      inp.focus();
+      // 直接用 dispatchEvent（不透過 playwright keyboard）確保 target === input
+      inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true, cancelable: true }));
+    });
+    const toolAfter = await page.evaluate(() => window.__drawTest.api.getTool());
+    await page.evaluate(() => { const inp = document.getElementById('__guard-test-input'); if (inp) inp.remove(); });
+    console.log(`     dispatchEvent guard: before=${toolBefore} after=${toolAfter}`);
+    assert(toolAfter === toolBefore, `INPUT 為焦點時 keydown 不應切工具，tool=${toolAfter}`);
+  });
+
+  await test('guard: TEXTAREA 為焦點時同樣不切工具', async () => {
+    await page.evaluate(() => {
+      window.__drawTest.api.setTool('select');
+      window.__drawTest.api.setMode('draw');
+    });
+    const toolBefore = await page.evaluate(() => window.__drawTest.api.getTool());
+    await page.evaluate(() => {
+      const ta = document.createElement('textarea');
+      ta.id = '__guard-test-ta';
+      ta.style.cssText = 'position:absolute;left:-999px;';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', bubbles: true, cancelable: true }));
+    });
+    const toolAfter = await page.evaluate(() => window.__drawTest.api.getTool());
+    await page.evaluate(() => { const ta = document.getElementById('__guard-test-ta'); if (ta) ta.remove(); });
+    console.log(`     TEXTAREA guard: before=${toolBefore} after=${toolAfter}`);
+    assert(toolAfter === toolBefore, `TEXTAREA 為焦點時 keydown 不應切工具，tool=${toolAfter}`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
