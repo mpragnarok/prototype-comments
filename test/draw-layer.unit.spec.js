@@ -9,6 +9,7 @@ import {
   pxToPct, pctToPx, clientToPct, rectFromPoints,
   makeDrawObject, serializeDrawObject,
   geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath,
+  taperScale, outlineWidths, taperedOutline, brushStyle, DRAW_BRUSHES,
   reorderIds, reorderMany, rectsIntersect, marqueeSelect, applyStylePatch, eyedropperSupported,
   applyCommand, invertCommand, makeUndoStack,
   DEFAULT_DRAW_STYLE, DRAW_MODES, DRAW_TOOLS, MIN_DRAW_SIZE_PCT,
@@ -202,6 +203,51 @@ test('reorderIds: 不存在的 id → 原序回傳（新陣列）', () => {
   const out = reorderIds(src, 'z', 'front');
   eq(JSON.stringify(out), JSON.stringify(['a', 'b']));
   assert(out !== src, '應回傳新陣列');
+});
+
+// ── Change 2/3: 筆刷 brushStyle + serialize + 漸細外框 ───────────────────────────
+test('brushStyle: pen/marker 為填充、highlighter 半透明描邊', () => {
+  assert(brushStyle('pen').fill === true && brushStyle('pen').opacity === 1, 'pen 不透明填充');
+  assert(brushStyle('marker').fill === true, 'marker 填充');
+  const h = brushStyle('highlighter');
+  assert(h.fill === false, 'highlighter 描邊');
+  assert(h.opacity >= 0.35 && h.opacity <= 0.45, `highlighter opacity 約 0.35–0.45，實際 ${h.opacity}`);
+  assert(h.blend === 'multiply', 'highlighter 用 multiply');
+});
+test('brushStyle: 未知筆刷 → 退回 pen', () => eq(brushStyle('???'), brushStyle('pen')));
+test('DRAW_BRUSHES 常數齊全', () => ['pen', 'marker', 'highlighter'].forEach(t => assert(DRAW_BRUSHES.includes(t), t)));
+test('serialize: 自由筆帶 brushType（style.brushType）', () => {
+  const o = makeDrawObject({ id: 'p1', tool: 'pencil', geom: { points: [[1, 1], [2, 2]] }, style: { brushType: 'marker' } });
+  eq(o.style.brushType, 'marker');
+  eq(serializeDrawObject(o).style.brushType, 'marker', 'serialize 應含 brushType');
+});
+
+test('taperScale: 端點 0、中段 1、頭尾線性升', () => {
+  eq(taperScale(0, 0.15), 0);
+  eq(taperScale(1, 0.15), 0);
+  eq(taperScale(0.5, 0.15), 1);
+  close(taperScale(0.075, 0.15), 0.5, '頭段一半 → 0.5');
+});
+test('outlineWidths: 端點比中段細（pen，minScale 0）', () => {
+  const pts = [[0, 0], [10, 0], [20, 0], [30, 0], [40, 0]];
+  const w = outlineWidths(pts, 10, { taperFrac: 0.2, minScale: 0 });
+  const mid = w[Math.floor(w.length / 2)];
+  assert(w[0] < mid && w[w.length - 1] < mid, `頭尾應比中段細，實際 ${JSON.stringify(w)}`);
+  assert(Math.abs(mid - 10) < 1e-6, `中段應為 baseWidth，實際 ${mid}`);
+});
+test('outlineWidths: marker minScale 0.5 → 端點仍有一半寬（漸細較少）', () => {
+  const pts = [[0, 0], [10, 0], [20, 0], [30, 0]];
+  const w = outlineWidths(pts, 10, { taperFrac: 0.12, minScale: 0.5 });
+  assert(w[0] >= 5 - 1e-6, `marker 端點應 >= 半寬（minScale 0.5），實際 ${w[0]}`);
+});
+test('taperedOutline: >=2 點 → 封閉外框（M…L…Z）', () => {
+  const d = taperedOutline([[0, 0], [10, 0], [20, 0]], 10, { taperFrac: 0.2 });
+  assert(/^M /.test(d) && / L /.test(d) && /Z$/.test(d), `應為 M…L…Z，實際 ${d}`);
+});
+test('taperedOutline: 邊界 0/1 點', () => {
+  eq(taperedOutline([], 10), '');
+  const dot = taperedOutline([[5, 5]], 10);
+  assert(/^M /.test(dot) && /Z$/.test(dot), `單點應為封閉圓點，實際 ${dot}`);
 });
 
 // ── Feature A: marquee 命中測試（rect ∩ bbox → ids）──────────────────────────────

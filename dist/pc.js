@@ -953,12 +953,29 @@ const ICON_PATHS = {
   lineWeight: 'M3 17h18v-2H3v2zm0 3h18v-1H3v1zm0-7h18v-3H3v3zm0-9v4h18V4H3z',                    // line_weight
   close: 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z', // close
   colorize: 'M20.71 5.63l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-3.12 3.12-1.93-1.91-1.41 1.41 1.42 1.42L3 16.25V21h4.75l8.92-8.92 1.42 1.42 1.41-1.41-1.92-1.92 3.12-3.12c.4-.4.4-1.03.01-1.4zM6.92 19L5 17.08l8.06-8.06 1.92 1.92L6.92 19z', // colorize（吸管）
+  brush: 'M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37l-1.34-1.34c-.39-.39-1.02-.39-1.41 0L9 12.25 11.75 15l8.96-8.96c.39-.39.39-1.02 0-1.41z', // brush（麥克筆）
+  highlighter: 'M17.75 7L14 3.25l-10 10V17h3.75l10-10zm2.96-2.96c.39-.39.39-1.02 0-1.41L18.37.29c-.2-.2-.45-.29-.71-.29s-.51.1-.7.29L15 2.25 18.75 6l1.96-1.96zM0 20h24v4H0z', // border_color（螢光筆）
 };
 
 // 一個 Material 圖示 → inline SVG 字串（currentColor → 跟著 active/hover 文字色變化）。
 function icon(name, size = 20) {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor" aria-hidden="true"><path d="${ICON_PATHS[name]}"/></svg>`;
 }
+
+// 筆刷類型（自由筆 pencil 的 brushType）。
+const DRAW_BRUSHES = ['pen', 'marker', 'highlighter'];
+const BRUSH_LABELS = { pen: '鋼筆', marker: '麥克筆', highlighter: '螢光筆' };
+const BRUSH_ICON = { pen: 'pencil', marker: 'brush', highlighter: 'highlighter' };
+
+// 各筆刷的渲染參數（純資料，可單測）：
+//   fill=true → 變寬度填充外框（pen/marker，頭尾漸細）；fill=false → 等寬描邊（highlighter，半透明）。
+//   widthMul = 相對 strokeWidth 的倍率；taperFrac = 頭尾各佔幾成做漸細；minScale = 端點最小寬度比例。
+const BRUSH_RENDER = {
+  pen: { fill: true, widthMul: 1.8, taperFrac: 0.18, minScale: 0, opacity: 1, blend: 'normal' },
+  marker: { fill: true, widthMul: 3.2, taperFrac: 0.12, minScale: 0.5, opacity: 1, blend: 'normal' },
+  highlighter: { fill: false, widthMul: 5, taperFrac: 0, minScale: 1, opacity: 0.4, blend: 'multiply' },
+};
+function brushStyle(brushType) { return BRUSH_RENDER[brushType] || BRUSH_RENDER.pen; }
 
 // ── 純函式（單元測試對象，無 DOM 依賴）──────────────────────────────────────
 // px → viewport-%（沿用 index.js overlay click 的 toFixed(2) 慣例）。
@@ -1028,6 +1045,62 @@ function freehandPath(points, minDist = 1.5) {
   }
   const last = pts[pts.length - 1];
   return d + ` L ${r(last[0])} ${r(last[1])}`; // 收尾接到最後一個採樣點
+}
+
+// 漸細係數：t（0..1 弧長位置）→ 0..1。頭尾各佔 taperFrac 從 0 線性升到 1，中段恆 1。
+function taperScale(t, taperFrac = 0.15) {
+  const f = taperFrac <= 0 ? 1e-4 : taperFrac;
+  if (t < f) return t / f;
+  if (t > 1 - f) return (1 - t) / f;
+  return 1;
+}
+
+// 每個中心線點的線寬（依弧長位置漸細）。純函式，供 taperedOutline 與單測使用。
+function outlineWidths(points, baseWidth, opts = {}) {
+  const taperFrac = opts.taperFrac ?? 0.15;
+  const minScale = opts.minScale ?? 0;
+  const pts = thinPoints(points, 0.5);
+  const n = pts.length;
+  if (n === 0) return [];
+  if (n === 1) return [baseWidth];
+  const len = [0];
+  let total = 0;
+  for (let i = 1; i < n; i++) { total += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); len.push(total); }
+  if (!total) total = 1;
+  return len.map(L => baseWidth * (minScale + (1 - minScale) * taperScale(L / total, taperFrac)));
+}
+
+// 頭尾漸細的「填充外框」path（pen/marker 用）：沿中心線兩側依 outlineWidths 偏移，
+// 去程走一側、回程走另一側、封閉成多邊形。純函式 → SVG <path> 的 d（M…L…Z）。
+function taperedOutline(points, baseWidth, opts = {}) {
+  const pts = thinPoints(points, 0.5);
+  const r = v => Math.round(v * 100) / 100;
+  const n = pts.length;
+  if (n === 0) return '';
+  if (n === 1) { // 單點 → 圓點
+    const rad = baseWidth / 2, [x, y] = pts[0];
+    return `M ${r(x - rad)} ${r(y)} a ${r(rad)} ${r(rad)} 0 1 0 ${r(2 * rad)} 0 a ${r(rad)} ${r(rad)} 0 1 0 ${r(-2 * rad)} 0 Z`;
+  }
+  const widths = outlineWidths(points, baseWidth, opts);
+  const left = [], right = [];
+  for (let i = 0; i < n; i++) {
+    const dir = pointDir(pts, i);
+    const nx = -dir.y, ny = dir.x; // 法線
+    const w = widths[i] / 2;
+    left.push([pts[i][0] + nx * w, pts[i][1] + ny * w]);
+    right.push([pts[i][0] - nx * w, pts[i][1] - ny * w]);
+  }
+  let d = `M ${r(left[0][0])} ${r(left[0][1])}`;
+  for (let i = 1; i < n; i++) d += ` L ${r(left[i][0])} ${r(left[i][1])}`;
+  for (let i = n - 1; i >= 0; i--) d += ` L ${r(right[i][0])} ${r(right[i][1])}`;
+  return d + ' Z';
+}
+// 第 i 點的單位切線（用前後鄰點方向）。
+function pointDir(pts, i) {
+  const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const m = Math.hypot(dx, dy) || 1;
+  return { x: dx / m, y: dy / m };
 }
 
 // 任一物件 → 其 % bounding box（選取框 / 命中測試 / 縮放重映射用）。
@@ -1217,11 +1290,13 @@ function makeUndoStack() {
 }
 
 function normalizeStyle(style = {}) {
-  return {
+  const out = {
     color: style.color || DEFAULT_DRAW_STYLE.color,
     strokeWidth: style.strokeWidth ?? DEFAULT_DRAW_STYLE.strokeWidth,
     fill: style.fill || DEFAULT_DRAW_STYLE.fill,
   };
+  if (style.brushType) out.brushType = style.brushType; // 自由筆刷類型（pen/marker/highlighter）
+  return out;
 }
 
 let _idSeq = 0;
@@ -1366,10 +1441,11 @@ function initDrawLayer(target, opts = {}) {
     draft: null,      // 進行中的 DrawObject（尚未送出）
     selectedIds: [],  // 多選：目前選取的物件 id 集合（陣列保序）
     marquee: null,    // 進行中的橡皮筋框 {x,y,w,h}（% 座標）
+    brushType: 'pen', // 自由筆刷類型 pen/marker/highlighter
   };
   const history = makeUndoStack();
   let drag = null;    // 繪製中：{ tool, rect, start, points }
-  const actions = { setMode, setTool, setColor, setStrokeWidth, act, eyedropper: openEyedropper, closeContext: closeContextMenu };
+  const actions = { setMode, setTool, setBrush, setColor, setStrokeWidth, act, eyedropper: openEyedropper, closeContext: closeContextMenu };
   const toolbar = buildToolbar(state, actions);
   document.body.appendChild(toolbar);
   const contextMenu = buildContextMenu(actions);
@@ -1399,6 +1475,11 @@ function initDrawLayer(target, opts = {}) {
     if (tool !== 'select') state.selectedIds = []; // 切到繪圖工具 → 取消選取（避免新物件被回頭改色）
     setMode('draw'); // 任何工具（含 select）都進 draw → SVG 吃事件
     render();
+  }
+  function setBrush(type) {
+    if (!DRAW_BRUSHES.includes(type)) return;
+    state.brushType = type;
+    setTool('pencil'); // 選筆刷即切到自由筆
   }
 
   function stampZ() { state.objects.forEach((o, i) => { o.z = i; }); }
@@ -1610,7 +1691,8 @@ function initDrawLayer(target, opts = {}) {
     if (state.tool === 'text') { startTextInput(e.clientX, e.clientY, rect); return; }
     const p = clientToPct(e.clientX, e.clientY, rect);
     drag = { tool: state.tool, rect, start: p, points: [[p.x, p.y]] };
-    state.draft = makeDrawObject({ tool: state.tool, geom: initialGeom(state.tool, p), style: opts.style });
+    const style = state.tool === 'pencil' ? { ...(opts.style || {}), brushType: state.brushType } : opts.style;
+    state.draft = makeDrawObject({ tool: state.tool, geom: initialGeom(state.tool, p), style });
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
   }
@@ -1791,7 +1873,21 @@ function renderObject(o, rect, svg) {
   }
   if (o.tool === 'pencil') {
     const ptsPx = (o.geom.points || []).map(([x, y]) => [pctToPx(x, rect.width), pctToPx(y, rect.height)]);
-    return drawSvgEl('path', { d: freehandPath(ptsPx), stroke: s.color, 'stroke-width': s.strokeWidth, fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+    const brush = o.style.brushType || 'pen';
+    const cfg = brushStyle(brush);
+    const base = (s.strokeWidth || 2) * cfg.widthMul;
+    if (!cfg.fill) { // highlighter：等寬描邊、半透明、flat cap、multiply
+      return drawSvgEl('path', {
+        d: freehandPath(ptsPx), stroke: s.color, 'stroke-width': base, fill: 'none',
+        'stroke-linecap': 'butt', 'stroke-linejoin': 'round', opacity: cfg.opacity,
+        style: 'mix-blend-mode:' + cfg.blend, 'data-brush': brush,
+      });
+    }
+    // pen / marker：頭尾漸細的填充外框（fill=色、無 stroke）
+    return drawSvgEl('path', {
+      d: taperedOutline(ptsPx, base, { taperFrac: cfg.taperFrac, minScale: cfg.minScale }),
+      fill: s.color, stroke: 'none', opacity: cfg.opacity, 'stroke-linejoin': 'round', 'data-brush': brush,
+    });
   }
   const t = drawSvgEl('text', { x: pctToPx(o.geom.x, rect.width), y: pctToPx(o.geom.y, rect.height), fill: s.color, 'font-size': 14, 'font-family': 'system-ui, sans-serif' });
   t.textContent = o.text || '';
@@ -1830,8 +1926,10 @@ function buildToolbar(state, actions) {
   bar.appendChild(colorMenu(actions));
   bar.appendChild(widthMenu(actions));
   appendSep(bar);
-  // z-order（icon 名 === action 名）＋ delete
-  ['front', 'forward', 'backward', 'back', 'delete'].forEach(a => bar.appendChild(actButton(a, actions)));
+  // 筆刷類型（pen / marker / highlighter）—— 取代原本的 z-order 按鈕（z-order 已移到右鍵選單）
+  DRAW_BRUSHES.forEach(t => bar.appendChild(brushButton(t, actions)));
+  appendSep(bar);
+  bar.appendChild(actButton('delete', actions)); // 刪除（z-order 不再放工具列）
   appendSep(bar);
   ['undo', 'redo'].forEach(a => bar.appendChild(actButton(a, actions)));
   appendSep(bar);
@@ -1861,6 +1959,15 @@ function actButton(action, actions) {
   b.setAttribute('aria-label', action);
   b.innerHTML = icon(action);
   b.onclick = () => actions.act(action);
+  return b;
+}
+function brushButton(type, actions) {
+  const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-brush');
+  b.dataset.brush = type;
+  b.title = BRUSH_LABELS[type];
+  b.setAttribute('aria-label', BRUSH_LABELS[type]);
+  b.innerHTML = icon(BRUSH_ICON[type]);
+  b.onclick = () => actions.setBrush(type);
   return b;
 }
 
@@ -1977,7 +2084,10 @@ function syncToolbar(bar, state, history) {
   bar.querySelectorAll('.pc-draw-width').forEach(b => {
     b.classList.toggle('active', Number(b.dataset.width) === DEFAULT_DRAW_STYLE.strokeWidth);
   });
-  const hasSel = !!state.selectedId;
+  bar.querySelectorAll('.pc-draw-brush').forEach(b => {
+    b.classList.toggle('active', state.tool === 'pencil' && b.dataset.brush === state.brushType);
+  });
+  const hasSel = state.selectedIds.length > 0;
   bar.querySelectorAll('.pc-draw-act').forEach(b => {
     const a = b.dataset.action;
     const enabled = a === 'undo' ? (history && history.canUndo()) : a === 'redo' ? (history && history.canRedo()) : hasSel;

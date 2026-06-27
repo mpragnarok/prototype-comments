@@ -111,7 +111,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(/arrowhead/.test(r.marker || ''), 'arrow 應帶箭頭 marker-end');
   });
 
-  await test('pencil 工具 → 自由筆畫出平滑 <path>（Q 曲線 + round cap，非 polyline）', async () => {
+  await test('pencil 工具（預設 pen 筆刷）→ 填充外框 <path>（fill=色、無 stroke、封閉），非 polyline', async () => {
     await page.click('.pc-draw-tool[data-tool="pencil"]');
     await page.mouse.move(100, 260);
     await page.mouse.down();
@@ -119,20 +119,24 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.mouse.up();
     const r = await page.evaluate(() => {
       const p = document.querySelector('#pc-draw path[data-id]'); // 物件 path（排除 <defs> 內的箭頭 marker path）
+      const o = window.__drawTest.api.getObjects().slice(-1)[0];
       return {
         paths: document.querySelectorAll('#pc-draw path[data-id]').length,
         polylines: document.querySelectorAll('#pc-draw polyline').length,
         d: p ? p.getAttribute('d') : null,
-        cap: p ? p.getAttribute('stroke-linecap') : null,
-        join: p ? p.getAttribute('stroke-linejoin') : null,
-        tool: window.__drawTest.api.getObjects().slice(-1)[0].tool,
-        geomPts: window.__drawTest.api.getObjects().slice(-1)[0].geom.points.length,
+        fill: p ? p.getAttribute('fill') : null,
+        stroke: p ? p.getAttribute('stroke') : null,
+        brush: p ? p.getAttribute('data-brush') : null,
+        styleBrush: o.style.brushType,
+        tool: o.tool,
+        geomPts: o.geom.points.length,
       };
     });
     console.log('     pencil drawn:', JSON.stringify(r));
     assert(r.paths === 1 && r.polylines === 0, `自由筆應渲染為 <path> 非 polyline，實際 paths=${r.paths} polylines=${r.polylines}`);
-    assert(/^M /.test(r.d) && / Q /.test(r.d), `path d 應為 M…Q… 平滑曲線，實際 ${r.d}`);
-    assert(r.cap === 'round' && r.join === 'round', `應 round linecap/linejoin，實際 cap=${r.cap} join=${r.join}`);
+    assert(r.fill && r.fill !== 'none' && r.stroke === 'none', `pen 應為填充外框（fill=色、stroke=none），實際 fill=${r.fill} stroke=${r.stroke}`);
+    assert(/^M /.test(r.d) && / L /.test(r.d) && /Z\s*$/.test(r.d), `pen 外框應為封閉多邊形（M…L…Z），實際 ${r.d}`);
+    assert(r.brush === 'pen' && r.styleBrush === 'pen', `預設筆刷應為 pen，實際 dom=${r.brush} style=${r.styleBrush}`);
     assert(r.tool === 'pencil' && r.geomPts >= 3, 'geom 仍為 {points:[…]}（render 變了、模型不變）');
   });
 
@@ -391,42 +395,41 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.sw === 6 && r.domSw === '6', `線寬應為 6，實際 ${JSON.stringify(r)}`);
   });
 
-  await test('toolbar 圖示化：每顆鈕為 inline <svg> + 具 aria-label（穩定 hook）', async () => {
+  await test('toolbar 圖示化：每顆鈕為 inline <svg> + aria-label；z-order 鈕已移除、改放筆刷', async () => {
     const r = await page.evaluate(() => {
       const tools = [...document.querySelectorAll('.pc-draw-tool[data-tool]')];
       const acts = [...document.querySelectorAll('.pc-draw-act')];
-      const allSvg = [...tools, ...acts].every(b => b.querySelector('svg') && b.getAttribute('aria-label'));
+      const brushes = [...document.querySelectorAll('.pc-draw-brush[data-brush]')];
+      const allSvg = [...tools, ...acts, ...brushes].every(b => b.querySelector('svg') && b.getAttribute('aria-label'));
       return {
-        toolCount: tools.length,
         actActions: acts.map(b => b.dataset.action).sort(),
+        brushTypes: brushes.map(b => b.dataset.brush),
         allSvg,
-        noGlyphText: [...tools, ...acts].every(b => !b.textContent.trim()), // 已無 emoji/字元
+        noGlyphText: [...tools, ...acts].every(b => !b.textContent.trim()),
+        zorderBtns: ['front', 'forward', 'backward', 'back'].filter(a => document.querySelector(`.pc-draw-toolbar .pc-draw-act[data-action="${a}"]`)).length,
         presetSwatches: document.querySelectorAll('.pc-draw-popover[data-menu="color"] .pc-draw-swatch[data-color]').length,
         widthOpts: document.querySelectorAll('.pc-draw-popover[data-menu="width"] .pc-draw-width').length,
-        hasCustom: !!document.querySelector('.pc-draw-color-custom[type="color"]'),
       };
     });
     console.log('     icons/aria:', JSON.stringify(r));
-    assert(r.allSvg, '每顆工具/動作鈕應為 inline svg + aria-label');
+    assert(r.allSvg, '每顆工具/動作/筆刷鈕應為 inline svg + aria-label');
     assert(r.noGlyphText, '不應再有 emoji/字元 glyph');
-    assert(r.actActions.join(',') === 'back,backward,delete,forward,front,redo,undo', `z-order/刪除/undo-redo action 應齊全，實際 ${r.actActions}`);
+    assert(r.actActions.join(',') === 'delete,redo,undo', `工具列動作鈕應只剩 delete/undo/redo，實際 ${r.actActions}`);
+    assert(r.zorderBtns === 0, `工具列不應再有 z-order 按鈕，實際 ${r.zorderBtns}`);
+    assert(r.brushTypes.join(',') === 'pen,marker,highlighter', `應有 3 個筆刷鈕，實際 ${r.brushTypes}`);
     assert(r.presetSwatches === 8, `應有 8 預設色，實際 ${r.presetSwatches}`);
     assert(r.widthOpts === 4, `應有 4 線寬，實際 ${r.widthOpts}`);
-    assert(r.hasCustom, '應有自訂顏色 input');
   });
 
-  await test('z-order 圖示：forward/backward 用 move_up/move_down（與 flip 置頂/底區隔）', async () => {
+  await test('z-order 圖示（右鍵選單）：forward/backward 用 move_up/move_down（與 flip 置頂/底區隔）', async () => {
     const r = await page.evaluate(() => {
       const pathOf = a => {
-        const p = document.querySelector(`.pc-draw-act[data-action="${a}"] svg path`);
+        const p = document.querySelector(`#pc-draw-context .pc-draw-context-item[data-action="${a}"] svg path`);
         return p && p.getAttribute('d');
       };
       return { front: pathOf('front'), back: pathOf('back'), forward: pathOf('forward'), backward: pathOf('backward') };
     });
-    console.log('     z-order icon d[0..14]:', JSON.stringify({
-      front: r.front && r.front.slice(0, 12), forward: r.forward && r.forward.slice(0, 12), backward: r.backward && r.backward.slice(0, 12),
-    }));
-    // forward/backward 改用堆疊列 icon（含右側 4 條列 "M15 5h6"），且四者互不相同
+    console.log('     ctx z-order icon d:', JSON.stringify({ forward: r.forward && r.forward.slice(0, 12), backward: r.backward && r.backward.slice(0, 12) }));
     assert(r.forward.includes('M15 5h6') && r.backward.includes('M15 5h6'), 'forward/backward 應為 move_up/move_down（含堆疊列）');
     assert(r.forward.startsWith('M9 4') && r.backward.startsWith('M9 20'), 'forward 上箭頭、backward 下箭頭');
     const set = new Set([r.front, r.back, r.forward, r.backward]);
@@ -525,6 +528,89 @@ async function dragDraw(page, x1, y1, x2, y2) {
     r.forEach((a, i) => assert(a.markerFill === a.stroke, `箭頭 ${i} marker fill(${a.markerFill}) 應 === stroke(${a.stroke})`));
     const colors = r.map(a => a.stroke).sort();
     assert(colors[0] === '#0066FF' && colors[1] === '#111111', `兩箭頭應為藍/黑兩色，實際 ${JSON.stringify(colors)}`);
+  });
+
+  // ── Change 2/3：筆刷類型（pen/marker/highlighter）+ 頭尾漸細 ────────────────────
+  console.log('\ndraw-layer e2e — 筆刷類型 / 漸細:');
+
+  // 用某筆刷畫一條自由筆，回傳該物件 path 的屬性。
+  async function drawBrush(brush) {
+    await page.evaluate(() => window.__drawTest.api.clear());
+    await page.click(`.pc-draw-brush[data-brush="${brush}"]`); // 選筆刷（會切到 pencil）
+    await page.mouse.move(120, 250);
+    await page.mouse.down();
+    for (const [x, y] of [[160, 252], [200, 248], [240, 250], [280, 249], [320, 251]]) await page.mouse.move(x, y);
+    await page.mouse.up();
+    return page.evaluate(() => {
+      const p = document.querySelector('#pc-draw path[data-id]');
+      const o = window.__drawTest.api.getObjects().slice(-1)[0];
+      return {
+        d: p && p.getAttribute('d'), fill: p && p.getAttribute('fill'), stroke: p && p.getAttribute('stroke'),
+        sw: p && p.getAttribute('stroke-width'), opacity: p && p.getAttribute('opacity'),
+        cap: p && p.getAttribute('stroke-linecap'), style: p && p.getAttribute('style'),
+        brushAttr: p && p.getAttribute('data-brush'), styleBrush: o.style.brushType,
+        bbox: p ? (() => { const b = p.getBBox(); return { w: b.width, h: b.height }; })() : null,
+      };
+    });
+  }
+
+  await test('筆刷 active 狀態：選 marker → 該筆刷鈕 active', async () => {
+    await page.click('.pc-draw-brush[data-brush="marker"]');
+    const r = await page.evaluate(() => ({
+      tool: window.__drawTest.api.getTool(),
+      active: document.querySelector('.pc-draw-brush[data-brush="marker"]').classList.contains('active'),
+      penActive: document.querySelector('.pc-draw-brush[data-brush="pen"]').classList.contains('active'),
+    }));
+    console.log('     brush active:', JSON.stringify(r));
+    assert(r.tool === 'pencil', '選筆刷應切到 pencil 工具');
+    assert(r.active && !r.penActive, 'marker 鈕 active、pen 不 active');
+  });
+
+  await test('pen 筆刷：填充外框 + 頭尾漸細（端點窄於中段）', async () => {
+    const r = await drawBrush('pen');
+    console.log('     pen:', JSON.stringify({ ...r, d: undefined }));
+    assert(r.fill && r.fill !== 'none' && r.stroke === 'none', `pen 填充外框，實際 fill=${r.fill} stroke=${r.stroke}`);
+    assert(/Z\s*$/.test(r.d), 'pen 外框封閉(Z)');
+    assert(r.brushAttr === 'pen' && r.styleBrush === 'pen', 'brushType=pen');
+    // 漸細結構：解析 d 的 y 座標，量「靠端點」與「靠中段」的上下緣寬度
+    const taper = await page.evaluate(() => {
+      const d = document.querySelector('#pc-draw path[data-id]').getAttribute('d');
+      const nums = d.match(/-?\d+(\.\d+)?/g).map(Number);
+      const pts = []; for (let i = 0; i < nums.length - 1; i += 2) pts.push([nums[i], nums[i + 1]]);
+      const half = Math.floor(pts.length / 2);
+      const fwd = pts.slice(0, half), bwd = pts.slice(half).reverse(); // 上緣 / 下緣（回程反轉對齊）
+      const widthAt = i => Math.abs(fwd[i][1] - bwd[i][1]);
+      const n = fwd.length;
+      return { endW: (widthAt(0) + widthAt(n - 1)) / 2, midW: widthAt(Math.floor(n / 2)) };
+    });
+    console.log('     pen taper end/mid:', JSON.stringify(taper));
+    assert(taper.midW > taper.endW + 1, `中段應比端點寬（漸細），end=${taper.endW} mid=${taper.midW}`);
+  });
+
+  await test('marker 筆刷：填充外框、比 pen 粗、漸細較少（端點仍有寬度）', async () => {
+    const pen = await drawBrush('pen');
+    const marker = await drawBrush('marker');
+    console.log('     marker bbox vs pen:', JSON.stringify({ pen: pen.bbox, marker: marker.bbox }));
+    assert(marker.fill && marker.fill !== 'none' && marker.stroke === 'none', 'marker 填充外框');
+    assert(marker.brushAttr === 'marker', 'brushType=marker');
+    assert(marker.bbox.h > pen.bbox.h, `marker 應比 pen 粗（bbox 高），pen=${pen.bbox.h} marker=${marker.bbox.h}`);
+  });
+
+  await test('highlighter 筆刷：等寬描邊、半透明、無 Z、multiply', async () => {
+    const r = await drawBrush('highlighter');
+    console.log('     highlighter:', JSON.stringify({ ...r, d: undefined }));
+    assert(r.stroke && r.stroke !== 'none' && r.fill === 'none', `highlighter 應描邊（stroke=色、fill=none），實際 stroke=${r.stroke} fill=${r.fill}`);
+    assert(Number(r.opacity) > 0 && Number(r.opacity) < 1, `應半透明，實際 opacity=${r.opacity}`);
+    assert(!/Z\s*$/.test(r.d), 'highlighter 為描邊中心線、非封閉外框（無 Z）');
+    assert(/multiply/.test(r.style || ''), 'highlighter 應 mix-blend-mode:multiply');
+    assert(Number(r.sw) > 0, '應有等寬 stroke-width');
+  });
+
+  await test('筆刷 brushType 進 serialize（getObjects）', async () => {
+    await drawBrush('highlighter');
+    const o = await page.evaluate(() => window.__drawTest.api.getObjects().slice(-1)[0]);
+    console.log('     serialize brush:', JSON.stringify(o.style));
+    assert(o.style.brushType === 'highlighter', `serialize 應含 brushType，實際 ${o.style.brushType}`);
   });
 
   // ── Feature A：marquee 多選 + 右鍵 z-order 選單 ──────────────────────────────
