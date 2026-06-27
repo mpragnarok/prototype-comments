@@ -996,6 +996,39 @@ function geomFromDrag(tool, a, b) {
   return { x: b.x, y: b.y }; // text 等：落點即位置
 }
 
+// 抽稀：丟掉與上一個保留點距離 < minDist 的密集點（保留首尾），讓平滑曲線乾淨。
+function thinPoints(points, minDist) {
+  if (!points || points.length <= 2) return (points || []).slice();
+  const out = [points[0]];
+  let last = points[0];
+  for (let i = 1; i < points.length - 1; i++) {
+    const dx = points[i][0] - last[0], dy = points[i][1] - last[1];
+    if (dx * dx + dy * dy >= minDist * minDist) { out.push(points[i]); last = points[i]; }
+  }
+  out.push(points[points.length - 1]);
+  return out;
+}
+
+// 自由筆平滑（Excalidraw 風格手繪感）：二次貝茲「中點平滑」——
+// 每段以「採樣點」當控制點、以「相鄰兩採樣點的中點」當端點 → 連續、無稜角。
+// 純函式：input 為 px 點陣列 [[x,y]…]，回傳 SVG <path> 的 d 字串（M … Q … L …）。
+function freehandPath(points, minDist = 1.5) {
+  const pts = thinPoints(points, minDist);
+  const r = n => Math.round(n * 100) / 100;
+  if (pts.length === 0) return '';
+  const p0 = pts[0];
+  if (pts.length === 1) return `M ${r(p0[0])} ${r(p0[1])}`;                              // 單點 → round cap 顯示一個點
+  if (pts.length === 2) return `M ${r(p0[0])} ${r(p0[1])} L ${r(pts[1][0])} ${r(pts[1][1])}`; // 兩點 → 直線
+  let d = `M ${r(p0[0])} ${r(p0[1])}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const xc = (pts[i][0] + pts[i + 1][0]) / 2;
+    const yc = (pts[i][1] + pts[i + 1][1]) / 2;
+    d += ` Q ${r(pts[i][0])} ${r(pts[i][1])} ${r(xc)} ${r(yc)}`;
+  }
+  const last = pts[pts.length - 1];
+  return d + ` L ${r(last[0])} ${r(last[1])}`; // 收尾接到最後一個採樣點
+}
+
 // 任一物件 → 其 % bounding box（選取框 / 命中測試 / 縮放重映射用）。
 function geomBBox(o) {
   const g = o.geom;
@@ -1582,8 +1615,8 @@ function renderObject(o, rect, svg) {
     return drawSvgEl('line', attrs);
   }
   if (o.tool === 'pencil') {
-    const pts = (o.geom.points || []).map(([x, y]) => `${pctToPx(x, rect.width)},${pctToPx(y, rect.height)}`).join(' ');
-    return drawSvgEl('polyline', { points: pts, stroke: s.color, 'stroke-width': s.strokeWidth, fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+    const ptsPx = (o.geom.points || []).map(([x, y]) => [pctToPx(x, rect.width), pctToPx(y, rect.height)]);
+    return drawSvgEl('path', { d: freehandPath(ptsPx), stroke: s.color, 'stroke-width': s.strokeWidth, fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
   }
   const t = drawSvgEl('text', { x: pctToPx(o.geom.x, rect.width), y: pctToPx(o.geom.y, rect.height), fill: s.color, 'font-size': 14, 'font-family': 'system-ui, sans-serif' });
   t.textContent = o.text || '';

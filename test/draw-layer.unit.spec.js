@@ -8,7 +8,7 @@
 import {
   pxToPct, pctToPx, clientToPct, rectFromPoints,
   makeDrawObject, serializeDrawObject,
-  geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox,
+  geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath,
   reorderIds, applyCommand, invertCommand, makeUndoStack,
   DEFAULT_DRAW_STYLE, DRAW_MODES, DRAW_TOOLS, MIN_DRAW_SIZE_PCT,
 } from '../src/draw-layer.js';
@@ -148,6 +148,39 @@ test('resizeBBox: 過小拖曳 → 夾到 MIN_DRAW_SIZE_PCT', () => {
   const b = resizeBBox({ x: 10, y: 10, w: 20, h: 20 }, 'se', { x: 10.1, y: 10.1 });
   assert(b.w >= MIN_DRAW_SIZE_PCT, `w 應 >= ${MIN_DRAW_SIZE_PCT}，實際 ${b.w}`);
   assert(b.h >= MIN_DRAW_SIZE_PCT, `h 應 >= ${MIN_DRAW_SIZE_PCT}，實際 ${b.h}`);
+});
+
+// ── P2 freehandPath（自由筆平滑：點 → SVG path d）──────────────────────────────
+test('freehandPath: 0 點 → 空字串', () => eq(freehandPath([]), ''));
+test('freehandPath: 1 點 → 只有 M（round cap 顯示一點）', () => {
+  const d = freehandPath([[10, 20]]);
+  assert(/^M /.test(d), `應以 M 起頭，實際 ${d}`);
+  assert(!/[QCL]/.test(d), `單點不應有曲線/線段指令，實際 ${d}`);
+});
+test('freehandPath: 2 點 → M … L（直線）', () => {
+  const d = freehandPath([[0, 0], [10, 10]]);
+  assert(/^M 0 0 L 10 10$/.test(d), `兩點應為直線，實際 ${d}`);
+});
+test('freehandPath: >=3 點 → 起 M、含 Q 二次曲線、收 L', () => {
+  const d = freehandPath([[0, 0], [10, 0], [20, 10], [30, 0]], 0); // minDist=0 不抽稀
+  assert(d.startsWith('M 0 0'), `應 M 起頭，實際 ${d}`);
+  assert(d.includes(' Q '), `應含 Q 二次貝茲指令，實際 ${d}`);
+  assert(/ L [\d.]+ [\d.]+$/.test(d), `應以 L 收到最後一點，實際 ${d}`);
+  // 控制點為採樣點、端點為中點：第一段 Q 控制 (10,0)、端點為 (10,0)與(20,10)的中點 (15,5)
+  assert(d.includes('Q 10 0 15 5'), `中點平滑公式不符，實際 ${d}`);
+});
+test('freehandPath: 密集點抽稀（< minDist 丟棄，保留首尾）', () => {
+  // 一串近乎重疊的點 + 一個遠點；minDist=1.5 → 只剩首、遠點、尾
+  const dense = [[0, 0], [0.2, 0], [0.4, 0], [50, 0], [50, 0.1]];
+  const d = freehandPath(dense, 1.5);
+  assert(d.startsWith('M 0 0'), `首點保留，實際 ${d}`);
+  assert(d.includes('50'), `遠點應保留，實際 ${d}`);
+});
+test('freehandPath: 不改入參（純函式）', () => {
+  const src = [[1, 1], [2, 2], [3, 3]];
+  const copy = JSON.stringify(src);
+  freehandPath(src);
+  eq(JSON.stringify(src), copy, 'freehandPath 不應改動入參');
 });
 
 // ── P2 reorderIds（z-order 純重排）──────────────────────────────────────────────

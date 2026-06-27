@@ -111,19 +111,29 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(/arrowhead/.test(r.marker || ''), 'arrow 應帶箭頭 marker-end');
   });
 
-  await test('pencil 工具 → 自由筆畫出 <polyline>（多點）', async () => {
+  await test('pencil 工具 → 自由筆畫出平滑 <path>（Q 曲線 + round cap，非 polyline）', async () => {
     await page.click('.pc-draw-tool[data-tool="pencil"]');
     await page.mouse.move(100, 260);
     await page.mouse.down();
     for (const [x, y] of [[140, 300], [180, 270], [220, 320], [260, 280]]) await page.mouse.move(x, y);
     await page.mouse.up();
     const r = await page.evaluate(() => {
-      const pl = document.querySelector('#pc-draw polyline');
-      return { polylines: document.querySelectorAll('#pc-draw polyline').length, pts: pl ? pl.getAttribute('points').trim().split(/\s+/).length : 0 };
+      const p = document.querySelector('#pc-draw path[data-id]'); // 物件 path（排除 <defs> 內的箭頭 marker path）
+      return {
+        paths: document.querySelectorAll('#pc-draw path[data-id]').length,
+        polylines: document.querySelectorAll('#pc-draw polyline').length,
+        d: p ? p.getAttribute('d') : null,
+        cap: p ? p.getAttribute('stroke-linecap') : null,
+        join: p ? p.getAttribute('stroke-linejoin') : null,
+        tool: window.__drawTest.api.getObjects().slice(-1)[0].tool,
+        geomPts: window.__drawTest.api.getObjects().slice(-1)[0].geom.points.length,
+      };
     });
     console.log('     pencil drawn:', JSON.stringify(r));
-    assert(r.polylines === 1, `應有 1 條 polyline，實際 ${r.polylines}`);
-    assert(r.pts >= 3, `polyline 應有多個點，實際 ${r.pts}`);
+    assert(r.paths === 1 && r.polylines === 0, `自由筆應渲染為 <path> 非 polyline，實際 paths=${r.paths} polylines=${r.polylines}`);
+    assert(/^M /.test(r.d) && / Q /.test(r.d), `path d 應為 M…Q… 平滑曲線，實際 ${r.d}`);
+    assert(r.cap === 'round' && r.join === 'round', `應 round linecap/linejoin，實際 cap=${r.cap} join=${r.join}`);
+    assert(r.tool === 'pencil' && r.geomPts >= 3, 'geom 仍為 {points:[…]}（render 變了、模型不變）');
   });
 
   await test('text 工具 → 點畫布、輸入、Enter → <text> 落地', async () => {
