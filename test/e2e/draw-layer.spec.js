@@ -112,7 +112,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
   });
 
   await test('pencil 工具（預設 pen 筆刷）→ 填充外框 <path>（fill=色、無 stroke、封閉），非 polyline', async () => {
-    await page.click('.pc-draw-tool[data-tool="pencil"]');
+    await page.click('.pc-draw-brush[data-brush="pen"]'); // 無獨立鉛筆鈕；pen 筆刷＝自由筆
     await page.mouse.move(100, 260);
     await page.mouse.down();
     for (const [x, y] of [[140, 300], [180, 270], [220, 320], [260, 280]]) await page.mouse.move(x, y);
@@ -222,6 +222,30 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.lines === 1, `應有 1 條 line，實際 ${r.lines}`);
     assert(!r.marker, 'line 不應帶箭頭 marker-end');
     assert(r.tool === 'line', 'getObjects 應為 line');
+  });
+
+  await test('diamond 工具 → 拉出 <polygon>（4 點菱形），可選取/移動', async () => {
+    await reset('diamond');
+    await dragDraw(page, 100, 80, 220, 200);
+    const r = await page.evaluate(() => {
+      const poly = document.querySelector('#pc-draw polygon');
+      const o = window.__drawTest.api.getObjects()[0];
+      return {
+        polys: document.querySelectorAll('#pc-draw polygon').length,
+        pts: poly ? poly.getAttribute('points').trim().split(/\s+/).length : 0,
+        tool: o.tool, geom: o.geom,
+      };
+    });
+    console.log('     diamond drawn:', JSON.stringify(r));
+    assert(r.polys === 1 && r.pts === 4, `應為 1 個 4 點 polygon，實際 polys=${r.polys} pts=${r.pts}`);
+    assert(r.tool === 'diamond' && r.geom.w > 0 && r.geom.h > 0, 'getObjects 應為 diamond + 正寬高');
+    // 可選取 + 移動
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    const before = await page.evaluate(() => window.__drawTest.api.getObjects()[0].geom);
+    await dragDraw(page, 160, 140, 240, 220); // 從中心拖
+    const after = await page.evaluate(() => ({ geom: window.__drawTest.api.getObjects()[0].geom, sel: window.__drawTest.api.getSelectedIds().length }));
+    console.log('     diamond move:', before.x, '→', after.geom.x, 'sel:', after.sel);
+    assert(after.geom.x > before.x + 1 && after.geom.y > before.y + 1, 'diamond 可被選取並移動');
   });
 
   await test('select → 點空白處取消選取、點物件選取（顯示選取框 + handle）', async () => {
@@ -606,30 +630,78 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(/\(I\)/.test(r.eye), `eyedropper title 應含 (I)，實際 ${r.eye}`);
   });
 
-  await test('常駐數字快捷鍵徽章：7 個工具鈕各帶正確數字、pointer-events:none', async () => {
+  await test('常駐數字快捷鍵徽章：工具列 1-8 連續、7 在 pen 筆刷、pointer-events:none', async () => {
     const r = await page.evaluate(() => {
-      const want = { select: '1', rect: '2', ellipse: '4', arrow: '5', line: '6', pencil: '7', text: '8' };
+      // 工具鈕（data-tool）的徽章
+      const want = { select: '1', rect: '2', diamond: '3', ellipse: '4', arrow: '5', line: '6', text: '8' };
       const out = {};
       let allPE = true, allVisible = true;
-      Object.keys(want).forEach(tool => {
-        const badge = document.querySelector(`.pc-draw-tool[data-tool="${tool}"] .pc-draw-kbd`);
-        out[tool] = badge ? badge.textContent.trim() : null;
+      const check = badge => {
         if (!badge) { allVisible = false; return; }
         const cs = getComputedStyle(badge);
         if (cs.pointerEvents !== 'none') allPE = false;
         if (cs.display === 'none' || cs.visibility === 'hidden') allVisible = false;
+      };
+      Object.keys(want).forEach(tool => {
+        const badge = document.querySelector(`.pc-draw-tool[data-tool="${tool}"] .pc-draw-kbd`);
+        out[tool] = badge ? badge.textContent.trim() : null;
+        check(badge);
       });
-      // off / 動作 / 筆刷 鈕不應有徽章
+      // 7 在 pen 筆刷；marker/highlighter 無徽章
+      const penBadge = document.querySelector('.pc-draw-brush[data-brush="pen"] .pc-draw-kbd');
+      out.pen = penBadge ? penBadge.textContent.trim() : null;
+      check(penBadge);
+      const markerBadge = !!document.querySelector('.pc-draw-brush[data-brush="marker"] .pc-draw-kbd');
+      const hlBadge = !!document.querySelector('.pc-draw-brush[data-brush="highlighter"] .pc-draw-kbd');
+      // 工具列上所有徽章依 DOM 順序
+      const order = [...document.querySelectorAll('.pc-draw-toolbar .pc-draw-kbd')].map(b => b.textContent.trim());
+      // 確認沒有獨立鉛筆工具鈕
+      const pencilToolBtn = !!document.querySelector('.pc-draw-tool[data-tool="pencil"]');
       const offBadge = !!document.querySelector('.pc-draw-tool[data-tool="off"] .pc-draw-kbd');
       const actBadge = !!document.querySelector('.pc-draw-act .pc-draw-kbd');
-      const brushBadge = !!document.querySelector('.pc-draw-brush .pc-draw-kbd');
-      return { out, allPE, allVisible, offBadge, actBadge, brushBadge, want };
+      return { out, allPE, allVisible, markerBadge, hlBadge, order, pencilToolBtn, offBadge, actBadge, want };
     });
-    console.log('     kbd badges:', JSON.stringify(r.out), 'pe-none:', r.allPE);
+    console.log('     kbd badges:', JSON.stringify(r.out), 'order:', JSON.stringify(r.order));
     Object.entries(r.want).forEach(([tool, n]) => assert(r.out[tool] === n, `${tool} 徽章應為 ${n}，實際 ${r.out[tool]}`));
-    assert(r.allVisible, '徽章應可見');
-    assert(r.allPE, '徽章應 pointer-events:none');
-    assert(!r.offBadge && !r.actBadge && !r.brushBadge, 'off/動作/筆刷 鈕不應有徽章');
+    assert(r.out.pen === '7', `pen 筆刷徽章應為 7，實際 ${r.out.pen}`);
+    assert(r.allVisible && r.allPE, `徽章應可見且 pointer-events:none（visible=${r.allVisible} pe=${r.allPE}）`);
+    assert(!r.markerBadge && !r.hlBadge, 'marker/highlighter 不應有徽章');
+    assert(r.order.join(',') === '1,2,3,4,5,6,7,8', `工具列徽章應依序 1-8，實際 ${r.order}`);
+    assert(!r.pencilToolBtn, '不應有獨立 pencil 工具鈕（改由筆刷代表）');
+    assert(!r.offBadge && !r.actBadge, 'off/動作 鈕不應有徽章');
+  });
+
+  await test('工具列 DOM 順序（含菱形、筆刷群、無獨立鉛筆）', async () => {
+    const r = await page.evaluate(() => {
+      const bar = document.getElementById('pc-draw-toolbar');
+      // 工具鈕(data-tool, 排除 off) 與 筆刷鈕(data-brush) 依 DOM 順序的序列
+      const seq = [...bar.querySelectorAll('.pc-draw-tool[data-tool]:not([data-tool="off"]), .pc-draw-brush[data-brush]')]
+        .map(b => b.dataset.tool || ('brush:' + b.dataset.brush));
+      return { seq };
+    });
+    console.log('     toolbar seq:', JSON.stringify(r.seq));
+    const expected = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'brush:pen', 'brush:marker', 'brush:highlighter', 'text'];
+    assert(r.seq.join(',') === expected.join(','), `工具列順序不符，實際 ${r.seq}`);
+  });
+
+  await test('快捷鍵 3 / d → diamond；7 / p → 自由筆(pencil) 且 brush=pen', async () => {
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.keyboard.press('3');
+    const three = await page.evaluate(() => window.__drawTest.api.getTool());
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.keyboard.press('d');
+    const dKey = await page.evaluate(() => window.__drawTest.api.getTool());
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.keyboard.press('7');
+    const sevenTool = await page.evaluate(() => window.__drawTest.api.getTool());
+    const penActive = await page.evaluate(() => document.querySelector('.pc-draw-brush[data-brush="pen"]').classList.contains('active'));
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.keyboard.press('p');
+    const pTool = await page.evaluate(() => window.__drawTest.api.getTool());
+    console.log('     3/d/7/p →', JSON.stringify({ three, dKey, sevenTool, penActive, pTool }));
+    assert(three === 'diamond' && dKey === 'diamond', `3/d 應切 diamond，實際 ${three}/${dKey}`);
+    assert(sevenTool === 'pencil' && pTool === 'pencil', `7/p 應切自由筆，實際 ${sevenTool}/${pTool}`);
+    assert(penActive, '7 應啟用 pen 筆刷');
   });
 
   // ── Change 2/3：筆刷類型（pen/marker/highlighter）+ 頭尾漸細 ────────────────────

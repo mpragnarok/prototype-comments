@@ -22,7 +22,7 @@
 
 // ── 常數 ────────────────────────────────────────────────────────────────────
 export const DRAW_MODES = ['comment', 'draw', 'off'];
-export const DRAW_TOOLS = ['select', 'ellipse', 'arrow', 'pencil', 'text', 'rect', 'line'];
+export const DRAW_TOOLS = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'pencil', 'text'];
 export const DEFAULT_DRAW_STYLE = { color: '#E5484D', strokeWidth: 2, fill: 'none' };
 // Excalidraw/Figma 風格預設色（8 色）＋ picker 另附 <input type=color> 自訂任意 hex。
 export const DRAW_COLORS = ['#1e1e1e', '#e03131', '#2f9e44', '#1971c2', '#f08c00', '#9c36b5', '#0c8599', '#868e96'];
@@ -40,6 +40,7 @@ const ICON_PATHS = {
   pencil: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z', // edit
   text: 'M5 4v3h5.5v12h3V7H19V4z',                                                             // title
   rect: 'M18 4H6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H6V6h12v12z', // crop_square
+  diamond: 'M12 2L22 12 12 22 2 12z',                                                          // 菱形（Material 無乾淨菱形，自繪）
   line: 'M19 13H5v-2h14v2z',                                                                   // remove (horizontal bar)
   front: 'M3 13h2v-2H3v2zm0 4h2v-2H3v2zm2 4v-2H3c0 1.1.89 2 2 2zM3 9h2V7H3v2zm12 12h2v-2h-2v2zm4-18H9c-1.11 0-2 .9-2 2v10c0 1.1.89 2 2 2h10c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm0 12H9V5h10v10zm-8 6h2v-2h-2v2zm-4 0h2v-2H7v2z', // flip_to_front（置頂）
   back: 'M9 7H7v2h2V7zm0 4H7v2h2v-2zm0-8c-1.11 0-2 .9-2 2h2V3zm4 12h-2v2h2v-2zm6-12v2h2c0-1.1-.9-2-2-2zm-6 0h-2v2h2V3zM9 17v-2H7c0 1.1.89 2 2 2zm10-4h2v-2h-2v2zm0-4h2V7h-2v2zm0 8c1.1 0 2-.9 2-2h-2v2zM5 7H3v12c0 1.1.89 2 2 2h12v-2H5V7zm10-2h2V3h-2v2zm0 12h2v-2h-2v2z', // flip_to_back（置底）
@@ -81,6 +82,7 @@ export function brushStyle(brushType) { return BRUSH_RENDER[brushType] || BRUSH_
 export const TOOL_SHORTCUTS = {
   1: 'select', v: 'select',
   2: 'rect', r: 'rect',
+  3: 'diamond', d: 'diamond',
   4: 'ellipse', o: 'ellipse',
   5: 'arrow', a: 'arrow',
   6: 'line', l: 'line',
@@ -89,8 +91,8 @@ export const TOOL_SHORTCUTS = {
   i: 'eyedropper',
 };
 // 工具的中文標籤與主要字母提示（tooltip / aria）。
-const TOOL_LABELS_ZH = { select: '選取', ellipse: '橢圓', arrow: '箭頭', pencil: '自由筆', text: '文字', rect: '矩形', line: '直線' };
-const TOOL_KEY = { select: 'V', rect: 'R', ellipse: 'O', arrow: 'A', line: 'L', pencil: 'P', text: 'T' };
+const TOOL_LABELS_ZH = { select: '選取', ellipse: '橢圓', arrow: '箭頭', pencil: '自由筆', text: '文字', rect: '矩形', diamond: '菱形', line: '直線' };
+const TOOL_KEY = { select: 'V', rect: 'R', diamond: 'D', ellipse: 'O', arrow: 'A', line: 'L', pencil: 'P', text: 'T' };
 
 // key（單鍵）→ 工具名 / 'eyedropper' / null。大小寫不敏感。純函式。
 export function resolveShortcut(key) {
@@ -128,9 +130,19 @@ export function rectFromPoints(a, b) {
   };
 }
 
+// 菱形（rhombus）四頂點：內接於 bbox（上、右、下、左中點）。純函式，px 或 % 皆可。
+export function diamondPoints(box) {
+  return [
+    [box.x + box.w / 2, box.y],
+    [box.x + box.w, box.y + box.h / 2],
+    [box.x + box.w / 2, box.y + box.h],
+    [box.x, box.y + box.h / 2],
+  ];
+}
+
 // 一次拖曳（起點 a、終點 b）→ 某工具的幾何（box 類 / 端點類）。pencil 另走累點邏輯。
 export function geomFromDrag(tool, a, b) {
-  if (tool === 'ellipse' || tool === 'rect') return rectFromPoints(a, b);
+  if (tool === 'ellipse' || tool === 'rect' || tool === 'diamond') return rectFromPoints(a, b);
   if (tool === 'arrow' || tool === 'line') return { from: { ...a }, to: { ...b } };
   return { x: b.x, y: b.y }; // text 等：落點即位置
 }
@@ -227,7 +239,7 @@ function pointDir(pts, i) {
 // 任一物件 → 其 % bounding box（選取框 / 命中測試 / 縮放重映射用）。
 export function geomBBox(o) {
   const g = o.geom;
-  if (o.tool === 'ellipse' || o.tool === 'rect') return { x: g.x, y: g.y, w: g.w, h: g.h };
+  if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond') return { x: g.x, y: g.y, w: g.w, h: g.h };
   if (o.tool === 'arrow' || o.tool === 'line') return rectFromPoints(g.from, g.to);
   if (o.tool === 'pencil') {
     const xs = g.points.map(p => p[0]), ys = g.points.map(p => p[1]);
@@ -244,7 +256,7 @@ export function translateGeom(o, dx, dy) {
   if (o.tool === 'arrow' || o.tool === 'line')
     return { from: { x: g.from.x + dx, y: g.from.y + dy }, to: { x: g.to.x + dx, y: g.to.y + dy } };
   if (o.tool === 'pencil') return { points: g.points.map(([x, y]) => [x + dx, y + dy]) };
-  if (o.tool === 'ellipse' || o.tool === 'rect') return { x: g.x + dx, y: g.y + dy, w: g.w, h: g.h };
+  if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond') return { x: g.x + dx, y: g.y + dy, w: g.w, h: g.h };
   return { x: g.x + dx, y: g.y + dy }; // text
 }
 
@@ -258,7 +270,7 @@ export function remapGeom(o, oldBox, newBox) {
   if (o.tool === 'arrow' || o.tool === 'line')
     return { from: { x: mx(g.from.x), y: my(g.from.y) }, to: { x: mx(g.to.x), y: my(g.to.y) } };
   if (o.tool === 'pencil') return { points: g.points.map(([x, y]) => [mx(x), my(y)]) };
-  if (o.tool === 'ellipse' || o.tool === 'rect') return { x: newBox.x, y: newBox.y, w: newBox.w, h: newBox.h };
+  if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond') return { x: newBox.x, y: newBox.y, w: newBox.w, h: newBox.h };
   return { x: mx(g.x), y: my(g.y) }; // text
 }
 
@@ -887,6 +899,7 @@ export function initDrawLayer(target, opts = {}) {
       if (action) {
         e.preventDefault();
         if (action === 'eyedropper') openEyedropper();
+        else if (action === 'pencil') setBrush('pen'); // 7/P → 自由筆（預設 pen）
         else setTool(action);
       }
     }
@@ -964,7 +977,7 @@ function findById(objects, id) { return objects.find(o => o.id === id); }
 
 // ── 幾何（依工具，% 座標）──────────────────────────────────────────────────
 function initialGeom(tool, p) {
-  if (tool === 'ellipse' || tool === 'rect') return { x: p.x, y: p.y, w: 0, h: 0 };
+  if (tool === 'ellipse' || tool === 'rect' || tool === 'diamond') return { x: p.x, y: p.y, w: 0, h: 0 };
   if (tool === 'arrow' || tool === 'line') return { from: { ...p }, to: { ...p } };
   if (tool === 'pencil') return { points: [[p.x, p.y]] };
   return { x: p.x, y: p.y };
@@ -975,7 +988,7 @@ function updateGeom(drag, p) {
 }
 // 判斷物件是否「真的畫了」（避免單點 click 留下空物件）。
 function isDrawn(o) {
-  if (o.tool === 'ellipse' || o.tool === 'rect') return o.geom.w > 0.2 || o.geom.h > 0.2;
+  if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond') return o.geom.w > 0.2 || o.geom.h > 0.2;
   if (o.tool === 'arrow' || o.tool === 'line') { const g = o.geom; return Math.abs(g.to.x - g.from.x) > 0.2 || Math.abs(g.to.y - g.from.y) > 0.2; }
   if (o.tool === 'pencil') return (o.geom.points || []).length > 1;
   return true; // text 由 input commit 控制
@@ -998,6 +1011,12 @@ function renderObject(o, rect, svg) {
       x: pctToPx(g.x, rect.width), y: pctToPx(g.y, rect.height),
       width: pctToPx(g.w, rect.width), height: pctToPx(g.h, rect.height), ...stroke,
     });
+  }
+  if (o.tool === 'diamond') {
+    const g = o.geom;
+    const box = { x: pctToPx(g.x, rect.width), y: pctToPx(g.y, rect.height), w: pctToPx(g.w, rect.width), h: pctToPx(g.h, rect.height) };
+    const pts = diamondPoints(box).map(([x, y]) => `${x},${y}`).join(' ');
+    return drawSvgEl('polygon', { points: pts, ...stroke });
   }
   if (o.tool === 'arrow' || o.tool === 'line') {
     const g = o.geom;
@@ -1056,18 +1075,21 @@ function ensureArrowMarker(svg, color) {
 }
 
 // ── 工具列 UI（Material 圖示 + 顏色/線粗 popover）────────────────────────────
+// 工具列上的工具排序（Excalidraw 數字順序）；pencil 槽位用 3 個筆刷取代（無獨立鉛筆鈕）。
+const TOOLBAR_TOOL_ORDER = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'pencil', 'text'];
 function buildToolbar(state, actions) {
   const bar = drawHtmlEl('div', 'pc-draw-toolbar');
   bar.id = 'pc-draw-toolbar';
-  DRAW_TOOLS.forEach(tool => bar.appendChild(toolButton(tool, actions)));
+  // 1 select · 2 rect · 3 diamond · 4 ellipse · 5 arrow · 6 line · 7 [pen marker highlighter] · 8 text
+  TOOLBAR_TOOL_ORDER.forEach(tool => {
+    if (tool === 'pencil') DRAW_BRUSHES.forEach(t => bar.appendChild(brushButton(t, actions))); // 7：筆刷群＝自由筆
+    else bar.appendChild(toolButton(tool, actions));
+  });
   appendSep(bar);
   bar.appendChild(colorMenu(actions));
   bar.appendChild(widthMenu(actions));
   appendSep(bar);
-  // 筆刷類型（pen / marker / highlighter）—— 取代原本的 z-order 按鈕（z-order 已移到右鍵選單）
-  DRAW_BRUSHES.forEach(t => bar.appendChild(brushButton(t, actions)));
-  appendSep(bar);
-  bar.appendChild(actButton('delete', actions)); // 刪除（z-order 不再放工具列）
+  bar.appendChild(actButton('delete', actions)); // 刪除（z-order 已移到右鍵選單）
   appendSep(bar);
   ['undo', 'redo'].forEach(a => bar.appendChild(actButton(a, actions)));
   appendSep(bar);
@@ -1109,9 +1131,10 @@ function actButton(action, actions) {
 function brushButton(type, actions) {
   const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-brush');
   b.dataset.brush = type;
-  b.title = BRUSH_LABELS[type];
+  b.title = BRUSH_LABELS[type] + (type === 'pen' ? ' (P)' : ''); // pen 是自由筆主鍵
   b.setAttribute('aria-label', BRUSH_LABELS[type]);
-  b.innerHTML = icon(BRUSH_ICON[type]);
+  const num = type === 'pen' ? toolNumberKey('pencil') : ''; // 數字徽章「7」只放在 pen（自由筆代表）
+  b.innerHTML = icon(BRUSH_ICON[type]) + (num ? `<span class="pc-draw-kbd" aria-hidden="true">${num}</span>` : '');
   b.onclick = () => actions.setBrush(type);
   return b;
 }

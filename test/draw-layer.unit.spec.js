@@ -8,7 +8,7 @@
 import {
   pxToPct, pctToPx, clientToPct, rectFromPoints,
   makeDrawObject, serializeDrawObject,
-  geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath,
+  geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath, diamondPoints,
   taperScale, outlineWidths, taperedOutline, brushStyle, DRAW_BRUSHES,
   TOOL_SHORTCUTS, resolveShortcut,
   reorderIds, reorderMany, rectsIntersect, marqueeSelect, applyStylePatch, eyedropperSupported,
@@ -212,9 +212,13 @@ test('TOOL_SHORTCUTS: 每個工具都可達（含數字+字母）', () => {
   DRAW_TOOLS.forEach(t => assert(reachable.has(t), `工具 ${t} 應有快捷鍵`));
   assert(reachable.has('eyedropper'), 'eyedropper 應可達');
 });
-test('TOOL_SHORTCUTS: 期望的數字+字母對映', () => {
-  const expect = { 1: 'select', v: 'select', 2: 'rect', r: 'rect', 4: 'ellipse', o: 'ellipse', 5: 'arrow', a: 'arrow', 6: 'line', l: 'line', 7: 'pencil', p: 'pencil', 8: 'text', t: 'text', i: 'eyedropper' };
+test('TOOL_SHORTCUTS: 期望的數字+字母對映（含 diamond 3/D）', () => {
+  const expect = { 1: 'select', v: 'select', 2: 'rect', r: 'rect', 3: 'diamond', d: 'diamond', 4: 'ellipse', o: 'ellipse', 5: 'arrow', a: 'arrow', 6: 'line', l: 'line', 7: 'pencil', p: 'pencil', 8: 'text', t: 'text', i: 'eyedropper' };
   Object.entries(expect).forEach(([k, v]) => eq(TOOL_SHORTCUTS[k], v, `key ${k}`));
+});
+test('TOOL_SHORTCUTS: 數字 1-8 連續對應工具列順序（無缺號）', () => {
+  const byNum = { 1: 'select', 2: 'rect', 3: 'diamond', 4: 'ellipse', 5: 'arrow', 6: 'line', 7: 'pencil', 8: 'text' };
+  for (let n = 1; n <= 8; n++) eq(TOOL_SHORTCUTS[n], byNum[n], `數字 ${n}`);
 });
 test('TOOL_SHORTCUTS: 無重複/衝突的鍵（key 唯一）', () => {
   const keys = Object.keys(TOOL_SHORTCUTS);
@@ -227,7 +231,8 @@ test('resolveShortcut: 大小寫不敏感 + 未知/null → null', () => {
   eq(resolveShortcut('v'), 'select');
   eq(resolveShortcut('i'), 'eyedropper');
   eq(resolveShortcut('z'), null, 'z 是 undo、非工具');
-  eq(resolveShortcut('3'), null, 'diamond 尚未實作');
+  eq(resolveShortcut('3'), 'diamond', '3 → diamond');
+  eq(resolveShortcut('d'), 'diamond', 'd → diamond');
   eq(resolveShortcut('9'), null, 'image 尚未實作');
   eq(resolveShortcut(null), null);
 });
@@ -247,6 +252,24 @@ test('serialize: 自由筆帶 brushType（style.brushType）', () => {
   const o = makeDrawObject({ id: 'p1', tool: 'pencil', geom: { points: [[1, 1], [2, 2]] }, style: { brushType: 'marker' } });
   eq(o.style.brushType, 'marker');
   eq(serializeDrawObject(o).style.brushType, 'marker', 'serialize 應含 brushType');
+});
+
+// ── Change 1: diamond 工具 ──────────────────────────────────────────────────────
+test('diamondPoints: 內接 bbox 的四頂點（上右下左中點）', () => {
+  const pts = diamondPoints({ x: 0, y: 0, w: 20, h: 10 });
+  eq(JSON.stringify(pts), JSON.stringify([[10, 0], [20, 5], [10, 10], [0, 5]]));
+});
+test('diamond: geomFromDrag / geomBBox / 平移 與 rect 同邏輯', () => {
+  eq(JSON.stringify(geomFromDrag('diamond', { x: 60, y: 50 }, { x: 10, y: 20 })), JSON.stringify({ x: 10, y: 20, w: 50, h: 30 }));
+  const b = geomBBox({ tool: 'diamond', geom: { x: 3, y: 4, w: 5, h: 6 } });
+  eq(JSON.stringify(b), JSON.stringify({ x: 3, y: 4, w: 5, h: 6 }));
+  const t = translateGeom({ tool: 'diamond', geom: { x: 1, y: 1, w: 2, h: 2 } }, 5, 5);
+  eq(t.x, 6); eq(t.y, 6); eq(t.w, 2);
+});
+test('diamond: DRAW_TOOLS 含 diamond、serialize 保留 tool', () => {
+  assert(DRAW_TOOLS.includes('diamond'), 'DRAW_TOOLS 應含 diamond');
+  const o = makeDrawObject({ id: 'dm1', tool: 'diamond', geom: { x: 1, y: 1, w: 4, h: 4 } });
+  eq(serializeDrawObject(o).tool, 'diamond');
 });
 
 test('taperScale: 端點 0、中段 1、頭尾線性升', () => {
