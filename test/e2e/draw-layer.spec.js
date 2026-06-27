@@ -527,6 +527,163 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(colors[0] === '#0066FF' && colors[1] === '#111111', `兩箭頭應為藍/黑兩色，實際 ${JSON.stringify(colors)}`);
   });
 
+  // ── Feature A：marquee 多選 + 右鍵 z-order 選單 ──────────────────────────────
+  console.log('\ndraw-layer e2e — Feature A 多選 / marquee / 右鍵選單:');
+
+  // 畫兩個 rect、回 select 工具、清空選取。回傳兩物件 id。
+  async function twoRectsThenSelect() {
+    await reset('rect');
+    await dragDraw(page, 60, 60, 140, 140);    // A
+    await dragDraw(page, 300, 240, 380, 320);  // B
+    await page.evaluate(() => { window.__drawTest.api.setTool('select'); window.__drawTest.api.select(null); });
+    return page.evaluate(() => window.__drawTest.api.getObjects().map(o => o.id));
+  }
+
+  await test('marquee：空白起拖框住兩物件 → 兩個都被選取', async () => {
+    await twoRectsThenSelect();
+    await dragDraw(page, 20, 20, 420, 360); // 大框涵蓋 A、B
+    const r = await page.evaluate(() => ({
+      ids: window.__drawTest.api.getSelectedIds(),
+      boxes: document.querySelectorAll('.pc-draw-selection rect:not([data-handle])').length,
+      marqueeGone: !document.querySelector('.pc-draw-marquee'),
+    }));
+    console.log('     marquee select:', JSON.stringify(r));
+    assert(r.ids.length === 2, `marquee 應選到 2 個，實際 ${r.ids.length}`);
+    assert(r.boxes === 2, `應有 2 個選取框，實際 ${r.boxes}`);
+    assert(r.marqueeGone, '放開後橡皮筋框應移除');
+  });
+
+  await test('Shift+click：加選 / 減選切換', async () => {
+    const ids = await twoRectsThenSelect();
+    await page.mouse.click(100, 100); // 單選 A
+    const after1 = await page.evaluate(() => window.__drawTest.api.getSelectedIds());
+    await page.keyboard.down('Shift');
+    await page.mouse.click(340, 280); // Shift+click B → 加選
+    const after2 = await page.evaluate(() => window.__drawTest.api.getSelectedIds());
+    await page.mouse.click(340, 280); // Shift+click B 再一次 → 減選
+    const after3 = await page.evaluate(() => window.__drawTest.api.getSelectedIds());
+    await page.keyboard.up('Shift');
+    console.log('     shift-click:', JSON.stringify({ after1, after2, after3 }));
+    assert(after1.length === 1 && after1[0] === ids[0], '單選 A');
+    assert(after2.length === 2, 'Shift+click 加選 B → 2 個');
+    assert(after3.length === 1 && after3[0] === ids[0], 'Shift+click 再點 B → 減選回 1 個');
+  });
+
+  await test('多選 move：拖其中一個 → 全部一起位移', async () => {
+    await twoRectsThenSelect();
+    await dragDraw(page, 20, 20, 420, 360); // marquee 選兩個
+    const before = await page.evaluate(() => window.__drawTest.api.getObjects().map(o => ({ id: o.id, x: o.geom.x, y: o.geom.y })));
+    await dragDraw(page, 100, 100, 160, 160); // 拖 A（已選）→ 兩個都移
+    const after = await page.evaluate(() => window.__drawTest.api.getObjects().map(o => ({ id: o.id, x: o.geom.x, y: o.geom.y })));
+    console.log('     multi-move before/after:', JSON.stringify({ before, after }));
+    after.forEach((a, i) => {
+      assert(a.x > before[i].x + 1 && a.y > before[i].y + 1, `物件 ${a.id} 應一起右下位移`);
+    });
+  });
+
+  await test('多選 delete：刪除全部選取', async () => {
+    await twoRectsThenSelect();
+    await dragDraw(page, 20, 20, 420, 360); // 選兩個
+    const n0 = await page.evaluate(() => window.__drawTest.api.getSelectedIds().length);
+    await page.evaluate(() => window.__drawTest.api.deleteSelected());
+    const after = await page.evaluate(() => ({ objs: window.__drawTest.api.getObjects().length, dom: document.querySelectorAll('#pc-draw [data-id]').length }));
+    await page.evaluate(() => window.__drawTest.api.undo()); // undo 應一次還原兩個
+    const undone = await page.evaluate(() => window.__drawTest.api.getObjects().length);
+    console.log('     multi-delete n0/after/undone:', n0, JSON.stringify(after), undone);
+    assert(n0 === 2, '選取 2 個');
+    assert(after.objs === 0 && after.dom === 0, 'delete 應清空兩個 + DOM');
+    assert(undone === 2, 'undo 一次還原兩個（deleteMany）');
+  });
+
+  await test('右鍵 context menu：開選單 + 「置頂」對整個選取重排 SVG DOM', async () => {
+    const ids = await twoRectsThenSelect(); // [A, B]，A 在底層
+    await page.mouse.click(100, 100); // 選 A（底層）
+    await page.mouse.click(100, 100, { button: 'right' }); // 右鍵 A → 開選單
+    const menu = await page.evaluate(() => {
+      const m = document.getElementById('pc-draw-context');
+      return {
+        open: m.classList.contains('open'),
+        items: [...m.querySelectorAll('.pc-draw-context-item')].map(b => b.dataset.action),
+        labels: [...m.querySelectorAll('.pc-draw-context-item')].map(b => b.getAttribute('aria-label')),
+      };
+    });
+    await page.click('#pc-draw-context .pc-draw-context-item[data-action="front"]'); // 置頂
+    const r = await page.evaluate(() => ({
+      menuClosed: !document.getElementById('pc-draw-context').classList.contains('open'),
+      domOrder: [...document.querySelectorAll('#pc-draw [data-id]')].map(e => e.dataset.id),
+    }));
+    console.log('     context menu:', JSON.stringify(menu), 'after front:', JSON.stringify(r));
+    assert(menu.open, '右鍵應開啟 context menu');
+    assert(menu.items.join(',') === 'front,forward,backward,back,delete', `選單項目應齊全，實際 ${menu.items}`);
+    assert(menu.labels.join(',') === '置頂,上移一層,下移一層,置底,刪除', `選單中文標籤，實際 ${menu.labels}`);
+    assert(r.domOrder[r.domOrder.length - 1] === ids[0], '「置頂」後 A 應排到 SVG 最後（最上層）');
+    assert(r.menuClosed, '點項目後選單關閉');
+  });
+
+  await test('右鍵 context menu：Esc 關閉 + 原生 contextmenu 被攔截', async () => {
+    await twoRectsThenSelect();
+    await page.mouse.click(100, 100); // 選 A
+    await page.mouse.click(100, 100, { button: 'right' });
+    const opened = await page.evaluate(() => document.getElementById('pc-draw-context').classList.contains('open'));
+    await page.keyboard.press('Escape');
+    const closed = await page.evaluate(() => !document.getElementById('pc-draw-context').classList.contains('open'));
+    console.log('     esc-close opened/closed:', opened, closed);
+    assert(opened, '右鍵開啟');
+    assert(closed, 'Esc 關閉');
+  });
+
+  await test('單選回歸：單點物件仍只選一個（含 handle）', async () => {
+    await twoRectsThenSelect();
+    await page.mouse.click(100, 100); // 點 A
+    const r = await page.evaluate(() => ({
+      ids: window.__drawTest.api.getSelectedIds(),
+      single: window.__drawTest.api.getSelected(),
+      handles: document.querySelectorAll('.pc-draw-selection rect[data-handle]').length,
+    }));
+    console.log('     single-select regression:', JSON.stringify(r));
+    assert(r.ids.length === 1 && r.single === r.ids[0], '單點 → 只選一個');
+    assert(r.handles === 4, '單選顯示 4 個縮放 handle');
+  });
+
+  // ── Feature B：吸管 eyedropper ────────────────────────────────────────────────
+  console.log('\ndraw-layer e2e — Feature B 吸管:');
+
+  await test('eyedropper 按鈕：存在於色盤 popover + aria-label（mock EyeDropper 已支援）', async () => {
+    await reset('rect');
+    await page.click('.pc-draw-tool[data-action="color-menu"]'); // 開色盤
+    const r = await page.evaluate(() => {
+      const b = document.querySelector('.pc-draw-popover[data-menu="color"] .pc-draw-eyedropper[data-action="eyedropper"]');
+      return { present: !!b, aria: b && b.getAttribute('aria-label'), hidden: b && (b.disabled || getComputedStyle(b).display === 'none'), hasSvg: b && !!b.querySelector('svg') };
+    });
+    console.log('     eyedropper btn:', JSON.stringify(r));
+    assert(r.present && r.hasSvg, '應有吸管按鈕 + svg 圖示');
+    assert(r.aria === '取樣顏色', `aria-label 應為 取樣顏色，實際 ${r.aria}`);
+    assert(!r.hidden, 'mock EyeDropper 支援 → 不應隱藏/disabled');
+  });
+
+  await test('eyedropper 取樣：picked hex → 下一個新物件沿用（繪圖工具）', async () => {
+    await reset('rect');
+    await page.evaluate(() => window.__drawTest.setEyedropHex('#7ac943'));
+    await page.evaluate(() => window.__drawTest.api.eyedropper()); // 走 EyeDropper mock → setColor
+    await page.waitForTimeout(20);
+    await dragDraw(page, 120, 90, 220, 190);
+    const c = await page.evaluate(() => window.__drawTest.api.getObjects().slice(-1)[0].style.color);
+    console.log('     eyedropper new obj color:', c);
+    assert(c === '#7ac943', `吸管取樣色應套到新物件，實際 ${c}`);
+  });
+
+  await test('eyedropper 取樣：select + 選取 → 改選取物件顏色', async () => {
+    await reset('rect');
+    await dragDraw(page, 100, 80, 200, 180);
+    await page.evaluate(() => window.__drawTest.api.setTool('select')); // 保留選取
+    await page.evaluate(() => window.__drawTest.setEyedropHex('#ff8800'));
+    await page.evaluate(() => window.__drawTest.api.eyedropper());
+    await page.waitForTimeout(20);
+    const c = await page.evaluate(() => window.__drawTest.api.getObjects()[0].style.color);
+    console.log('     eyedropper restyle selected:', c);
+    assert(c === '#ff8800', `吸管應改選取物件顏色，實際 ${c}`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

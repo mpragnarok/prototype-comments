@@ -9,7 +9,8 @@ import {
   pxToPct, pctToPx, clientToPct, rectFromPoints,
   makeDrawObject, serializeDrawObject,
   geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath,
-  reorderIds, applyCommand, invertCommand, makeUndoStack,
+  reorderIds, reorderMany, rectsIntersect, marqueeSelect, applyStylePatch, eyedropperSupported,
+  applyCommand, invertCommand, makeUndoStack,
   DEFAULT_DRAW_STYLE, DRAW_MODES, DRAW_TOOLS, MIN_DRAW_SIZE_PCT,
 } from '../src/draw-layer.js';
 
@@ -201,6 +202,89 @@ test('reorderIds: 不存在的 id → 原序回傳（新陣列）', () => {
   const out = reorderIds(src, 'z', 'front');
   eq(JSON.stringify(out), JSON.stringify(['a', 'b']));
   assert(out !== src, '應回傳新陣列');
+});
+
+// ── Feature A: marquee 命中測試（rect ∩ bbox → ids）──────────────────────────────
+test('rectsIntersect: 相交 / 不相交', () => {
+  assert(rectsIntersect({ x: 0, y: 0, w: 10, h: 10 }, { x: 5, y: 5, w: 10, h: 10 }), '應相交');
+  assert(!rectsIntersect({ x: 0, y: 0, w: 5, h: 5 }, { x: 10, y: 10, w: 5, h: 5 }), '應不相交');
+  assert(rectsIntersect({ x: 0, y: 0, w: 5, h: 5 }, { x: 5, y: 0, w: 5, h: 5 }), '邊緣接觸視為相交');
+});
+test('marqueeSelect: 回傳框內/相交物件的 id', () => {
+  const objs = [
+    { id: 'a', tool: 'rect', geom: { x: 0, y: 0, w: 10, h: 10 } },
+    { id: 'b', tool: 'rect', geom: { x: 50, y: 50, w: 10, h: 10 } },
+    { id: 'c', tool: 'rect', geom: { x: 5, y: 5, w: 4, h: 4 } },
+  ];
+  const hits = marqueeSelect(objs, { x: -1, y: -1, w: 20, h: 20 }); // 涵蓋 a、c，不含 b
+  eq(JSON.stringify(hits), JSON.stringify(['a', 'c']));
+});
+
+// ── Feature A: 多選 z-order（保留相對順序）────────────────────────────────────────
+test('reorderMany front/back: 整組移到尾/頭、保相對序', () => {
+  eq(JSON.stringify(reorderMany(['a', 'b', 'c', 'd'], ['a', 'c'], 'front')), JSON.stringify(['b', 'd', 'a', 'c']));
+  eq(JSON.stringify(reorderMany(['a', 'b', 'c', 'd'], ['b', 'd'], 'back')), JSON.stringify(['b', 'd', 'a', 'c']));
+});
+test('reorderMany forward/backward: 整組上/下移一步、不互相穿越', () => {
+  eq(JSON.stringify(reorderMany(['a', 'b', 'c', 'd'], ['b', 'c'], 'forward')), JSON.stringify(['a', 'd', 'b', 'c']));
+  eq(JSON.stringify(reorderMany(['a', 'b', 'c', 'd'], ['b', 'c'], 'backward')), JSON.stringify(['b', 'c', 'a', 'd']));
+});
+test('reorderMany 單選 → 與 reorderIds 等價（回歸保護）', () => {
+  ['front', 'back', 'forward', 'backward'].forEach(op => {
+    eq(JSON.stringify(reorderMany(['a', 'b', 'c'], ['b'], op)), JSON.stringify(reorderIds(['a', 'b', 'c'], 'b', op)), op);
+  });
+});
+
+// ── Feature A/B: applyStylePatch（picker / eyedropper 共用，作用於多選）──────────────
+const styleObjs = () => ([
+  { id: 'a', tool: 'rect', geom: {}, style: { color: '#000', strokeWidth: 2, fill: 'none' } },
+  { id: 'b', tool: 'rect', geom: {}, style: { color: '#000', strokeWidth: 2, fill: 'none' } },
+]);
+test('applyStylePatch: 繪圖工具啟用 → 只改預設、物件與 cmds 不動', () => {
+  const objs = styleObjs();
+  const res = applyStylePatch({ tool: 'rect', selectedIds: ['a'], objects: objs, defaultStyle: { ...DEFAULT_DRAW_STYLE } }, { color: '#abcdef' });
+  eq(res.defaultStyle.color, '#abcdef');
+  eq(res.objects[0].style.color, '#000', '繪圖工具不該改既有物件');
+  eq(res.cmds.length, 0);
+});
+test('applyStylePatch: select 工具 + 多選 → 改所有選取物件、產生 update cmds', () => {
+  const objs = styleObjs();
+  const res = applyStylePatch({ tool: 'select', selectedIds: ['a', 'b'], objects: objs, defaultStyle: { ...DEFAULT_DRAW_STYLE } }, { color: '#ff0000' });
+  eq(res.objects[0].style.color, '#ff0000');
+  eq(res.objects[1].style.color, '#ff0000');
+  eq(res.cmds.length, 2, '兩個選取物件各一條 update cmd');
+  eq(res.cmds[0].after.style.color, '#ff0000');
+});
+test('applyStylePatch: select 但無選取 → 只改預設', () => {
+  const res = applyStylePatch({ tool: 'select', selectedIds: [], objects: styleObjs(), defaultStyle: { ...DEFAULT_DRAW_STYLE } }, { strokeWidth: 6 });
+  eq(res.defaultStyle.strokeWidth, 6);
+  eq(res.cmds.length, 0);
+});
+
+// ── Feature B: eyedropper feature-detect ────────────────────────────────────────
+test('eyedropperSupported: 偵測 win.EyeDropper', () => {
+  assert(eyedropperSupported({ EyeDropper: function () {} }), '有 EyeDropper → true');
+  assert(!eyedropperSupported({}), '無 → false');
+  assert(!eyedropperSupported(undefined), 'undefined win → false');
+});
+
+// ── Feature A: batch / deleteMany command（apply/invert）──────────────────────────
+test('command batch: apply 依序、invert 反序還原', () => {
+  const o1 = { id: 'a', tool: 'rect', geom: { x: 0 }, style: {} };
+  const cmd = { type: 'batch', cmds: [
+    { type: 'update', id: 'a', before: { geom: { x: 0 } }, after: { geom: { x: 5 } } },
+    { type: 'update', id: 'a', before: { geom: { x: 5 } }, after: { geom: { x: 9 } } },
+  ] };
+  eq(applyCommand([o1], cmd)[0].geom.x, 9);
+  eq(invertCommand(applyCommand([o1], cmd), cmd)[0].geom.x, 0);
+});
+test('command deleteMany: apply 移除多個、invert 依原 index 還原', () => {
+  const objs = ['a', 'b', 'c', 'd', 'e'].map(id => ({ id, tool: 'rect', geom: {}, style: {} }));
+  const cmd = { type: 'deleteMany', items: [{ obj: objs[1], index: 1 }, { obj: objs[3], index: 3 }] };
+  const after = applyCommand(objs, cmd);
+  eq(JSON.stringify(after.map(o => o.id)), JSON.stringify(['a', 'c', 'e']));
+  const back = invertCommand(after, cmd);
+  eq(JSON.stringify(back.map(o => o.id)), JSON.stringify(['a', 'b', 'c', 'd', 'e']), '還原回原位置');
 });
 
 // ── P2 applyCommand / invertCommand（undo-redo 純邏輯）──────────────────────────

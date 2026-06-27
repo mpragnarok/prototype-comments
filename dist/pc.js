@@ -952,6 +952,7 @@ const ICON_PATHS = {
   redo: 'M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z', // redo
   lineWeight: 'M3 17h18v-2H3v2zm0 3h18v-1H3v1zm0-7h18v-3H3v3zm0-9v4h18V4H3z',                    // line_weight
   close: 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z', // close
+  colorize: 'M20.71 5.63l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-3.12 3.12-1.93-1.91-1.41 1.41 1.42 1.42L3 16.25V21h4.75l8.92-8.92 1.42 1.42 1.41-1.41-1.92-1.92 3.12-3.12c.4-.4.4-1.03.01-1.4zM6.92 19L5 17.08l8.06-8.06 1.92 1.92L6.92 19z', // colorize（吸管）
 };
 
 // 一個 Material 圖示 → inline SVG 字串（currentColor → 跟著 active/hover 文字色變化）。
@@ -1086,6 +1087,16 @@ function resizeBBox(oldBox, handle, p, minSize = MIN_DRAW_SIZE_PCT) {
   return box;
 }
 
+// 兩個 box（{x,y,w,h}）是否相交（marquee 命中測試用）。
+function rectsIntersect(a, b) {
+  return !(a.x > b.x + b.w || a.x + a.w < b.x || a.y > b.y + b.h || a.y + a.h < b.y);
+}
+
+// marquee（橡皮筋框）→ 命中的物件 id（bbox 與框相交者）。純函式。
+function marqueeSelect(objects, mrect) {
+  return objects.filter(o => rectsIntersect(geomBBox(o), mrect)).map(o => o.id);
+}
+
 // z-order：把 id 在 id 陣列中往前/後/頂/底重排（陣列尾＝最上層）。回傳新陣列。
 function reorderIds(ids, id, op) {
   const i = ids.indexOf(id);
@@ -1098,6 +1109,55 @@ function reorderIds(ids, id, op) {
   else if (op === 'backward') next.splice(Math.max(i - 1, 0), 0, id);
   else next.splice(i, 0, id);
   return next;
+}
+
+// 多選 z-order：整組一起移動，保留它們彼此的相對順序。回傳新 id 陣列。
+function reorderMany(ids, selectedIds, op) {
+  const selSet = new Set(selectedIds);
+  const sel = ids.filter(id => selSet.has(id)); // 依現有 z 順序保相對序
+  if (!sel.length) return ids.slice();
+  const rest = ids.filter(id => !selSet.has(id));
+  if (op === 'front') return [...rest, ...sel];
+  if (op === 'back') return [...sel, ...rest];
+  if (op === 'forward') return shiftGroup(ids, selSet, +1);
+  if (op === 'backward') return shiftGroup(ids, selSet, -1);
+  return ids.slice();
+}
+// 把選取群組整體往 dir（+1 上 / -1 下）移一步，群組成員不互相穿越。
+function shiftGroup(ids, selSet, dir) {
+  const arr = ids.slice();
+  if (dir > 0) {
+    for (let i = arr.length - 2; i >= 0; i--) {
+      if (selSet.has(arr[i]) && !selSet.has(arr[i + 1])) { const t = arr[i]; arr[i] = arr[i + 1]; arr[i + 1] = t; }
+    }
+  } else {
+    for (let i = 1; i < arr.length; i++) {
+      if (selSet.has(arr[i]) && !selSet.has(arr[i - 1])) { const t = arr[i]; arr[i] = arr[i - 1]; arr[i - 1] = t; }
+    }
+  }
+  return arr;
+}
+
+// 顏色/筆粗套用（純）：依 tool/selectedIds 決定「只設預設」或「同時改選取的所有物件」。
+// 回傳 { defaultStyle, objects, cmds }；eyedropper 與 picker 共用同一路徑。
+function applyStylePatch({ tool, selectedIds, objects, defaultStyle }, patch) {
+  const nextDefault = { ...defaultStyle, ...patch };
+  const sel = new Set(tool === 'select' ? selectedIds : []);
+  if (!sel.size) return { defaultStyle: nextDefault, objects, cmds: [] };
+  const cmds = [];
+  const nextObjects = objects.map(o => {
+    if (!sel.has(o.id)) return o;
+    const before = { style: { ...o.style } };
+    const after = { style: { ...o.style, ...patch } };
+    cmds.push({ type: 'update', id: o.id, before, after });
+    return { ...o, ...after };
+  });
+  return { defaultStyle: nextDefault, objects: nextObjects, cmds };
+}
+
+// EyeDropper API 偵測（feature-detect；可注入 win 以利單測）。
+function eyedropperSupported(win = (typeof window !== 'undefined' ? window : undefined)) {
+  return !!win && typeof win.EyeDropper === 'function';
 }
 
 function reindexByIds(objects, ids) {
@@ -1117,6 +1177,11 @@ function applyCommand(objects, cmd) {
   if (cmd.type === 'delete') return objects.filter(o => o.id !== cmd.obj.id);
   if (cmd.type === 'update') return objects.map(o => (o.id === cmd.id ? { ...o, ...cmd.after } : o));
   if (cmd.type === 'reorder') return reindexByIds(objects, cmd.after);
+  if (cmd.type === 'batch') return cmd.cmds.reduce((objs, c) => applyCommand(objs, c), objects);
+  if (cmd.type === 'deleteMany') {
+    const ids = new Set(cmd.items.map(it => it.obj.id));
+    return objects.filter(o => !ids.has(o.id));
+  }
   return objects;
 }
 
@@ -1129,6 +1194,13 @@ function invertCommand(objects, cmd) {
   }
   if (cmd.type === 'update') return objects.map(o => (o.id === cmd.id ? { ...o, ...cmd.before } : o));
   if (cmd.type === 'reorder') return reindexByIds(objects, cmd.before);
+  if (cmd.type === 'batch') return cmd.cmds.slice().reverse().reduce((objs, c) => invertCommand(objs, c), objects);
+  if (cmd.type === 'deleteMany') {
+    const next = objects.slice();
+    cmd.items.slice().sort((a, b) => a.index - b.index) // 由小到大插回 → 原索引正確
+      .forEach(it => next.splice(Math.min(it.index, next.length), 0, it.obj));
+    return next;
+  }
   return objects;
 }
 
@@ -1241,6 +1313,21 @@ const DRAW_STYLES = `
 .pc-draw-width:hover { background: #333; }
 .pc-draw-width.active { background: #0FA0A0; }
 .pc-draw-disabled { opacity: .35; cursor: not-allowed; }
+.pc-draw-eyedropper { color: #e5e7eb; }
+/* 右鍵 context menu */
+.pc-draw-context {
+  position: fixed; z-index: 2147483601; display: none; flex-direction: column;
+  min-width: 132px; padding: 4px; background: #1e1e1e; border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.4); font-family: system-ui, -apple-system, sans-serif;
+}
+.pc-draw-context.open { display: flex; }
+.pc-draw-context-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 8px; border: none; border-radius: 6px; cursor: pointer;
+  background: transparent; color: #e5e7eb; font-size: 13px; text-align: left;
+}
+.pc-draw-context-item:hover { background: #0FA0A0; color: #fff; }
+.pc-draw-context-item svg { flex: none; }
 .pc-draw-text-input {
   position: absolute; z-index: 230; min-width: 80px; font: 14px system-ui, sans-serif;
   color: #E5484D; background: rgba(255,255,255,.92); border: 1px solid #E5484D;
@@ -1277,13 +1364,24 @@ function initDrawLayer(target, opts = {}) {
     tool: 'select',
     objects: [],      // DrawObject[]（committed，陣列順序＝z-order）
     draft: null,      // 進行中的 DrawObject（尚未送出）
-    selectedId: null, // 目前選取物件 id
+    selectedIds: [],  // 多選：目前選取的物件 id 集合（陣列保序）
+    marquee: null,    // 進行中的橡皮筋框 {x,y,w,h}（% 座標）
   };
   const history = makeUndoStack();
   let drag = null;    // 繪製中：{ tool, rect, start, points }
-  const actions = { setMode, setTool, setColor, setStrokeWidth, act };
+  const actions = { setMode, setTool, setColor, setStrokeWidth, act, eyedropper: openEyedropper, closeContext: closeContextMenu };
   const toolbar = buildToolbar(state, actions);
   document.body.appendChild(toolbar);
+  const contextMenu = buildContextMenu(actions);
+  document.body.appendChild(contextMenu);
+
+  // 選取集合小工具
+  const isSelected = id => state.selectedIds.includes(id);
+  const selectOnly = id => { state.selectedIds = id ? [id] : []; };
+  const toggleSelect = id => {
+    state.selectedIds = isSelected(id) ? state.selectedIds.filter(x => x !== id) : [...state.selectedIds, id];
+  };
+  const selectedObjects = () => state.selectedIds.map(id => findById(state.objects, id)).filter(Boolean);
 
   function applyMode() {
     svg.classList.toggle('pc-draw-active', state.mode === 'draw');
@@ -1298,7 +1396,7 @@ function initDrawLayer(target, opts = {}) {
   function setTool(tool) {
     if (!DRAW_TOOLS.includes(tool)) return;
     state.tool = tool;
-    if (tool !== 'select') state.selectedId = null; // 切到繪圖工具 → 取消選取（避免新物件被回頭改色）
+    if (tool !== 'select') state.selectedIds = []; // 切到繪圖工具 → 取消選取（避免新物件被回頭改色）
     setMode('draw'); // 任何工具（含 select）都進 draw → SVG 吃事件
     render();
   }
@@ -1316,36 +1414,43 @@ function initDrawLayer(target, opts = {}) {
       svg.appendChild(node);
     });
     renderSelection(rect);
+    renderMarquee(rect);
     syncToolbar(toolbar, state, history);
   }
 
   function renderSelection(rect) {
-    if (!state.selectedId) return;
-    const o = findById(state.objects, state.selectedId);
-    if (!o) return;
-    const b = geomBBox(o);
-    const box = { x: pctToPx(b.x, rect.width), y: pctToPx(b.y, rect.height), w: pctToPx(b.w, rect.width), h: pctToPx(b.h, rect.height) };
+    const objs = selectedObjects();
+    if (!objs.length) return;
     const g = drawSvgEl('g', { class: 'pc-draw-selection' });
-    g.appendChild(drawSvgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, fill: 'none', stroke: '#0FA0A0', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
-    ['nw', 'ne', 'se', 'sw'].forEach(name => {
-      const c = boxCorner(box, name);
-      g.appendChild(drawSvgEl('rect', { x: c.x - 4, y: c.y - 4, width: 8, height: 8, fill: '#fff', stroke: '#0FA0A0', 'stroke-width': 1, 'data-handle': name }));
+    objs.forEach(o => {
+      const box = toPxBox(geomBBox(o), rect);
+      g.appendChild(drawSvgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, fill: 'none', stroke: '#0FA0A0', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
     });
+    if (objs.length === 1) { // 縮放 handle 只在單選時出現
+      const box = toPxBox(geomBBox(objs[0]), rect);
+      ['nw', 'ne', 'se', 'sw'].forEach(name => {
+        const c = boxCorner(box, name);
+        g.appendChild(drawSvgEl('rect', { x: c.x - 4, y: c.y - 4, width: 8, height: 8, fill: '#fff', stroke: '#0FA0A0', 'stroke-width': 1, 'data-handle': name }));
+      });
+    }
     svg.appendChild(g);
+  }
+  function renderMarquee(rect) {
+    if (!state.marquee) return;
+    const box = toPxBox(state.marquee, rect);
+    svg.appendChild(drawSvgEl('rect', { class: 'pc-draw-marquee', x: box.x, y: box.y, width: box.w, height: box.h, fill: 'rgba(15,160,160,.08)', stroke: '#0FA0A0', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
   }
 
   // ── command 執行（apply＋push）/ undo / redo ─────────────────────────────────
   function runCommand(cmd) {
     state.objects = applyCommand(state.objects, cmd);
     history.push(cmd);
-    if (cmd.type === 'create') state.selectedId = cmd.obj.id;
+    if (cmd.type === 'create') state.selectedIds = [cmd.obj.id];
     render();
   }
   // 物件已即時改好（拖曳預覽），只補登歷史（不重複 apply）。
-  function commitChange(id, before, after) {
-    history.push({ type: 'update', id, before, after });
-    render();
-  }
+  function pushHistory(cmd) { history.push(cmd); render(); }
+  function commitChange(id, before, after) { pushHistory({ type: 'update', id, before, after }); }
   function doUndo() {
     const cmd = history.undo();
     if (!cmd) return;
@@ -1361,37 +1466,47 @@ function initDrawLayer(target, opts = {}) {
     render();
   }
   function ensureSelectionValid() {
-    if (state.selectedId && !findById(state.objects, state.selectedId)) state.selectedId = null;
+    state.selectedIds = state.selectedIds.filter(id => findById(state.objects, id));
   }
 
-  // ── z-order / 刪除 / style ──────────────────────────────────────────────────
+  // ── z-order / 刪除 / style（皆作用於整個選取集合）──────────────────────────────
   function zorder(op) {
-    if (!state.selectedId) return;
+    if (!state.selectedIds.length) return;
     const before = state.objects.map(o => o.id);
-    const after = reorderIds(before, state.selectedId, op);
+    const after = reorderMany(before, state.selectedIds, op);
     runCommand({ type: 'reorder', before, after });
   }
   function deleteSelected() {
-    const o = findById(state.objects, state.selectedId);
-    if (!o) return;
-    const index = state.objects.indexOf(o);
-    state.selectedId = null;
-    runCommand({ type: 'delete', obj: o, index });
+    if (!state.selectedIds.length) return;
+    const items = state.objects
+      .map((o, i) => ({ obj: o, index: i }))
+      .filter(it => isSelected(it.obj.id)); // 已依 index 由小到大
+    if (!items.length) return;
+    state.selectedIds = [];
+    runCommand({ type: 'deleteMany', items });
   }
-  // Excalidraw 風格：繪圖工具啟用時，picker 只改「下一個新物件」的預設，不動目前選取；
-  // 只有 select 工具 + 有選取時才回頭改選取物件的樣式（同時更新預設）。
+  // Excalidraw 風格：繪圖工具啟用時 picker 只改「下一個新物件」的預設、不動選取；
+  // select 工具 + 有選取時才回頭改「所有選取物件」的樣式（同時更新預設）。
   function setStyle(patch) {
-    Object.assign(DEFAULT_DRAW_STYLE, patch); // 影響之後新物件
-    const o = state.tool === 'select' ? findById(state.objects, state.selectedId) : null;
-    if (!o) { render(); return; }
-    const before = { style: { ...o.style } };
-    o.style = { ...o.style, ...patch };
-    commitChange(o.id, before, { style: { ...o.style } });
+    const res = applyStylePatch({ tool: state.tool, selectedIds: state.selectedIds, objects: state.objects, defaultStyle: DEFAULT_DRAW_STYLE }, patch);
+    Object.assign(DEFAULT_DRAW_STYLE, res.defaultStyle);
+    state.objects = res.objects;
+    if (!res.cmds.length) { render(); return; }
+    pushHistory(res.cmds.length === 1 ? res.cmds[0] : { type: 'batch', cmds: res.cmds });
   }
   function setColor(c) { setStyle({ color: c }); }
   function setStrokeWidth(w) { setStyle({ strokeWidth: w }); }
 
-  // toolbar 動作分派（z-order / 刪除 / undo-redo）。
+  // 吸管：用瀏覽器 EyeDropper API 取樣 → 走 setColor 同一語意。
+  async function openEyedropper() {
+    if (!eyedropperSupported(window)) return;
+    try {
+      const res = await new window.EyeDropper().open();
+      if (res && res.sRGBHex) setColor(res.sRGBHex);
+    } catch (_) { /* 使用者按 Esc 取消 → 忽略 */ }
+  }
+
+  // toolbar / 右鍵選單 動作分派（z-order / 刪除 / undo-redo）。
   function act(action) {
     if (action === 'delete') return deleteSelected();
     if (action === 'undo') return doUndo();
@@ -1399,16 +1514,18 @@ function initDrawLayer(target, opts = {}) {
     return zorder(action); // front / back / forward / backward
   }
 
-  // ── pointer：select 模式（選取 / 移動 / 縮放）─────────────────────────────────
+  // ── pointer：select 模式（選取 / 多選 / marquee / 移動 / 縮放）──────────────────
   function onSelectDown(e) {
     const rect = svg.getBoundingClientRect();
     const handle = e.target && e.target.dataset ? e.target.dataset.handle : null;
-    if (handle && state.selectedId) { startResize(e, handle, rect); return; }
+    if (handle && state.selectedIds.length === 1) { startResize(e, handle, rect); return; }
     const p = clientToPct(e.clientX, e.clientY, rect);
     const hit = hitTest(p);
-    state.selectedId = hit ? hit.id : null;
+    if (!hit) { startMarquee(rect, p, e.shiftKey); render(); return; } // 空白起拖 → 橡皮筋框
+    if (e.shiftKey) { toggleSelect(hit.id); render(); return; }        // Shift+click → 加/減選
+    if (!isSelected(hit.id)) selectOnly(hit.id);                       // 點未選物件 → 只選它
     render();
-    if (hit) startMove(rect, p);
+    startMove(rect, p);                                               // 拖曳 → 整個選取一起移動
   }
   function hitTest(p) {
     for (let i = state.objects.length - 1; i >= 0; i--) {
@@ -1419,27 +1536,50 @@ function initDrawLayer(target, opts = {}) {
     }
     return null;
   }
+  function startMarquee(rect, startP, additive) {
+    const base = additive ? state.selectedIds.slice() : [];
+    state.selectedIds = base.slice(); // 起手即套用：純 click 空白（無拖移）也會取消選取
+    state.marquee = { x: startP.x, y: startP.y, w: 0, h: 0 };
+    const onMv = ev => {
+      const p = clientToPct(ev.clientX, ev.clientY, rect);
+      state.marquee = rectFromPoints(startP, p);
+      const hits = marqueeSelect(state.objects, state.marquee);
+      state.selectedIds = [...new Set([...base, ...hits])];
+      render();
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMv);
+      window.removeEventListener('pointerup', onUp);
+      state.marquee = null;
+      render();
+    };
+    window.addEventListener('pointermove', onMv);
+    window.addEventListener('pointerup', onUp);
+  }
   function startMove(rect, startP) {
-    const o = findById(state.objects, state.selectedId);
-    if (!o) return;
-    const before = o.geom;
+    const objs = selectedObjects();
+    if (!objs.length) return;
+    const before = new Map(objs.map(o => [o.id, o.geom]));
     let moved = false;
     const onMv = ev => {
       const p = clientToPct(ev.clientX, ev.clientY, rect);
-      o.geom = translateGeom({ tool: o.tool, geom: before }, p.x - startP.x, p.y - startP.y);
+      const dx = p.x - startP.x, dy = p.y - startP.y;
+      objs.forEach(o => { o.geom = translateGeom({ tool: o.tool, geom: before.get(o.id) }, dx, dy); });
       moved = true;
       render();
     };
     const onUp = () => {
       window.removeEventListener('pointermove', onMv);
       window.removeEventListener('pointerup', onUp);
-      if (moved) commitChange(o.id, { geom: before }, { geom: o.geom });
+      if (!moved) return;
+      const cmds = objs.map(o => ({ type: 'update', id: o.id, before: { geom: before.get(o.id) }, after: { geom: o.geom } }));
+      pushHistory(cmds.length === 1 ? cmds[0] : { type: 'batch', cmds });
     };
     window.addEventListener('pointermove', onMv);
     window.addEventListener('pointerup', onUp);
   }
   function startResize(e, handle, rect) {
-    const o = findById(state.objects, state.selectedId);
+    const o = selectedObjects()[0];
     if (!o) return;
     const before = o.geom;
     const oldBox = geomBBox(o);
@@ -1465,7 +1605,7 @@ function initDrawLayer(target, opts = {}) {
     if (state.mode !== 'draw') return;
     if (state.tool === 'select') { onSelectDown(e); return; }
     e.preventDefault();
-    state.selectedId = null;
+    state.selectedIds = [];
     const rect = svg.getBoundingClientRect();
     if (state.tool === 'text') { startTextInput(e.clientX, e.clientY, rect); return; }
     const p = clientToPct(e.clientX, e.clientY, rect);
@@ -1517,6 +1657,7 @@ function initDrawLayer(target, opts = {}) {
   // ── 鍵盤：Delete/Backspace 刪除、Cmd/Ctrl+Z undo、Shift+Cmd/Ctrl+Z redo ────────
   function onKey(e) {
     if (state.mode !== 'draw') return;
+    if (e.key === 'Escape') { closeContextMenu(); return; } // 關右鍵選單
     const tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return;
     const meta = e.metaKey || e.ctrlKey;
@@ -1525,13 +1666,38 @@ function initDrawLayer(target, opts = {}) {
       if (e.shiftKey) doRedo(); else doUndo();
       return;
     }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedId) {
+    if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedIds.length) {
       e.preventDefault();
       deleteSelected();
     }
   }
 
+  // ── 右鍵 context menu（z-order + 刪除，作用於選取集合）──────────────────────────
+  function onContextMenu(e) {
+    if (state.mode !== 'draw' || state.tool !== 'select') return;
+    e.preventDefault(); // 擋掉瀏覽器原生選單
+    const rect = svg.getBoundingClientRect();
+    const hit = hitTest(clientToPct(e.clientX, e.clientY, rect));
+    if (!hit) { closeContextMenu(); return; }
+    if (!isSelected(hit.id)) selectOnly(hit.id); // 右鍵未選物件 → 先選它
+    render();
+    openContextMenu(e.clientX, e.clientY);
+  }
+  function openContextMenu(x, y) {
+    contextMenu.style.left = x + 'px';
+    contextMenu.style.top = y + 'px';
+    contextMenu.classList.add('open');
+    // 下一輪 tick 再掛外點關閉監聽（避免開啟當下的同一個 pointer 事件立刻關掉）。Esc 由 onKey 處理。
+    setTimeout(() => document.addEventListener('pointerdown', onDocPointer, true), 0);
+  }
+  function closeContextMenu() {
+    contextMenu.classList.remove('open');
+    document.removeEventListener('pointerdown', onDocPointer, true);
+  }
+  function onDocPointer(e) { if (!contextMenu.contains(e.target)) closeContextMenu(); }
+
   svg.addEventListener('pointerdown', onDown);
+  svg.addEventListener('contextmenu', onContextMenu);
   window.addEventListener('resize', render);
   window.addEventListener('keydown', onKey);
 
@@ -1545,8 +1711,10 @@ function initDrawLayer(target, opts = {}) {
     getTool: () => state.tool,
     setTool,
     getObjects: () => { stampZ(); return state.objects.map(serializeDrawObject); },
-    getSelected: () => state.selectedId,
-    select: id => { state.selectedId = id; render(); },
+    getSelected: () => (state.selectedIds.length ? state.selectedIds[0] : null), // 向後相容：回傳首個
+    getSelectedIds: () => state.selectedIds.slice(),
+    select: id => { state.selectedIds = id ? [id] : []; render(); },
+    selectIds: ids => { state.selectedIds = (ids || []).slice(); render(); },
     bringToFront: () => zorder('front'),
     sendToBack: () => zorder('back'),
     forward: () => zorder('forward'),
@@ -1556,13 +1724,20 @@ function initDrawLayer(target, opts = {}) {
     redo: doRedo,
     setColor,
     setStrokeWidth,
-    clear: () => { state.objects = []; state.draft = null; state.selectedId = null; render(); },
+    eyedropper: openEyedropper,
+    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; render(); },
     destroy: () => {
-      svg.remove(); toolbar.remove();
+      svg.remove(); toolbar.remove(); contextMenu.remove();
       window.removeEventListener('resize', render);
       window.removeEventListener('keydown', onKey);
+      closeContextMenu();
     },
   };
+}
+
+// 把 % box 換成 px box（選取框 / marquee 繪製）。
+function toPxBox(b, rect) {
+  return { x: pctToPx(b.x, rect.width), y: pctToPx(b.y, rect.height), w: pctToPx(b.w, rect.width), h: pctToPx(b.h, rect.height) };
 }
 
 function findById(objects, id) { return objects.find(o => o.id === id); }
@@ -1689,6 +1864,22 @@ function actButton(action, actions) {
   return b;
 }
 
+// 右鍵 context menu：z-order + 刪除，作用於目前選取集合。
+function buildContextMenu(actions) {
+  const menu = drawHtmlEl('div', 'pc-draw-context');
+  menu.id = 'pc-draw-context';
+  [['front', '置頂'], ['forward', '上移一層'], ['backward', '下移一層'], ['back', '置底'], ['delete', '刪除']]
+    .forEach(([action, label]) => {
+      const item = drawHtmlEl('button', 'pc-draw-context-item');
+      item.dataset.action = action;
+      item.setAttribute('aria-label', label);
+      item.innerHTML = icon(action, 18) + `<span>${label}</span>`;
+      item.onclick = () => { actions.act(action); actions.closeContext(); };
+      menu.appendChild(item);
+    });
+  return menu;
+}
+
 // 顏色 popover：8 預設色 swatch ＋ <input type=color> 自訂任意 hex。
 function colorMenu(actions) {
   const wrap = drawHtmlEl('div', 'pc-draw-menu');
@@ -1702,9 +1893,21 @@ function colorMenu(actions) {
   pop.dataset.menu = 'color';
   DRAW_COLORS.forEach(c => pop.appendChild(swatchButton(c, actions)));
   pop.appendChild(customSwatch(actions)); // 第 9 顆：自訂調色盤
+  pop.appendChild(eyedropperButton(actions)); // 吸管取樣
   wrap.appendChild(trigger);
   wrap.appendChild(pop);
   return wrap;
+}
+// 吸管：取樣畫面上任意顏色（瀏覽器 EyeDropper API）。不支援時隱藏，不報錯。
+function eyedropperButton(actions) {
+  const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-eyedropper');
+  b.dataset.action = 'eyedropper';
+  b.title = '取樣顏色';
+  b.setAttribute('aria-label', '取樣顏色');
+  b.innerHTML = icon('colorize');
+  b.onclick = () => actions.eyedropper();
+  if (!eyedropperSupported()) { b.disabled = true; b.style.display = 'none'; }
+  return b;
 }
 // 自訂顏色 swatch：彩虹圓 + 「+」，看起來像第 9 顆 swatch；點擊開原生 color picker。
 function customSwatch(actions) {
