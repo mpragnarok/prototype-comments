@@ -16,13 +16,21 @@
 </style>
 </head>
 <body>
-<div id="canvas"></div>
+<div id="canvas">
+  <!-- 底層 app 元件（在 overlay 之下）：給 P4 elementFromPoint anchor 擷取測試用 -->
+  <div id="price-card" style="position:absolute; left:80px; top:60px; width:160px; height:120px; background:#ddd;"></div>
+  <div data-testid="sidebar" style="position:absolute; left:320px; top:60px; width:120px; height:200px; background:#eee;"></div>
+</div>
 
 <script type="module">
   import { initDrawLayer } from '/src/draw-layer.js';
+  // Mock 瀏覽器 EyeDropper API（playwright/Chromium 無此 API）→ 回傳可由測試設定的 hex。
+  window.__eyedropHex = '#123456';
+  window.EyeDropper = class { open() { return Promise.resolve({ sRGBHex: window.__eyedropHex }); } };
   window.__drawTest = {
     initDrawLayer,
     init: (overrides = {}) => initDrawLayer('#canvas', overrides),
+    setEyedropHex: (hex) => { window.__eyedropHex = hex; },
     ready: true,
   };
 </script>

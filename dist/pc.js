@@ -956,6 +956,7 @@ const ICON_PATHS = {
   colorize: 'M20.71 5.63l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-3.12 3.12-1.93-1.91-1.41 1.41 1.42 1.42L3 16.25V21h4.75l8.92-8.92 1.42 1.42 1.41-1.41-1.92-1.92 3.12-3.12c.4-.4.4-1.03.01-1.4zM6.92 19L5 17.08l8.06-8.06 1.92 1.92L6.92 19z', // colorize（吸管）
   brush: 'M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37l-1.34-1.34c-.39-.39-1.02-.39-1.41 0L9 12.25 11.75 15l8.96-8.96c.39-.39.39-1.02 0-1.41z', // brush（麥克筆）
   highlighter: 'M17.75 7L14 3.25l-10 10V17h3.75l10-10zm2.96-2.96c.39-.39.39-1.02 0-1.41L18.37.29c-.2-.2-.45-.29-.71-.29s-.51.1-.7.29L15 2.25 18.75 6l1.96-1.96zM0 20h24v4H0z', // border_color（螢光筆）
+  send: 'M2.01 21L23 12 2.01 3 2 10l15 2-15 2z', // send（送給 AI）
 };
 
 // 一個 Material 圖示 → inline SVG 字串（currentColor → 跟著 active/hover 文字色變化）。
@@ -1054,6 +1055,59 @@ function imageGeom(natW, natH, canvasW, canvasH, atPoint, maxFrac = 0.6) {
   x = Math.max(0, Math.min(x, 100 - wPct)); // 夾進畫布
   y = Math.max(0, Math.min(y, 100 - hPct));
   return { x: r2(x), y: r2(y), w: r2(wPct), h: r2(hPct) };
+}
+
+// ── P4 結構化匯出（selector 擷取 + 精簡 JSON）────────────────────────────────────
+const ANCHOR_DATA_ATTRS = ['data-testid', 'data-test', 'data-cy', 'data-id'];
+function cssEscape(s) {
+  if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(s);
+  return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&'); // node fallback（無 CSS API）
+}
+function nthOfType(el) {
+  const parent = el.parentElement || el.parentNode;
+  if (!parent || !parent.children) return null;
+  const same = [...parent.children].filter(c => c.tagName === el.tagName);
+  if (same.length <= 1) return null;
+  return same.indexOf(el) + 1;
+}
+// DOM 元素 → 穩定 CSS selector（id 優先 → data-* → nth-of-type 路徑）。可被 querySelector round-trip。
+function cssSelectorFor(el) {
+  if (!el || !el.tagName) return null;
+  if (el.id) return '#' + cssEscape(el.id);
+  for (const attr of ANCHOR_DATA_ATTRS) {
+    const v = el.getAttribute && el.getAttribute(attr);
+    if (v) return `[${attr}="${cssEscape(v)}"]`;
+  }
+  const parts = [];
+  let cur = el;
+  while (cur && cur.tagName) {
+    const tag = cur.tagName.toLowerCase();
+    if (tag === 'html' || tag === 'body') break;
+    if (cur.id) { parts.unshift('#' + cssEscape(cur.id)); break; }
+    const v = cur.getAttribute && ANCHOR_DATA_ATTRS.map(a => [a, cur.getAttribute(a)]).find(([, x]) => x);
+    if (v) { parts.unshift(`[${v[0]}="${cssEscape(v[1])}"]`); break; }
+    const n = nthOfType(cur);
+    parts.unshift(n ? `${tag}:nth-of-type(${n})` : tag);
+    cur = cur.parentElement || cur.parentNode;
+  }
+  return parts.length ? parts.join(' > ') : null;
+}
+
+// DrawObject[] → 精簡結構化匯出（省 token；只含有意義欄位）。純函式。
+function buildExport(objects, viewport = {}) {
+  return {
+    viewport: { w: viewport.w || 0, h: viewport.h || 0 },
+    annotations: (objects || []).map(o => {
+      const a = { id: o.id, tool: o.tool };
+      if (o.anchor != null) a.selector = o.anchor;
+      const text = (o.label != null && o.label !== '') ? o.label : (o.text != null ? o.text : null);
+      if (text != null) a.text = text;
+      if (o.style && o.style.color) a.color = o.style.color;
+      if (o.imageRef != null) a.image = true; // 標記有圖（dataURL 不塞進精簡 JSON）
+      a.geom = o.geom;
+      return a;
+    }),
+  };
 }
 
 // 一次拖曳（起點 a、終點 b）→ 某工具的幾何（box 類 / 端點類）。pencil 另走累點邏輯。
@@ -1375,6 +1429,7 @@ function serializeDrawObject(obj) {
   const out = { id: obj.id, tool: obj.tool, geom: obj.geom, style: obj.style };
   if (obj.text != null) out.text = obj.text;
   if (obj.label != null && obj.label !== '') out.label = obj.label; // 綁定標籤
+  if (obj.anchor != null) out.anchor = obj.anchor;                  // elementFromPoint selector
   if (obj.imageRef != null) out.imageRef = obj.imageRef;            // 貼圖 dataURL/路徑
   if (obj.z != null) out.z = obj.z;
   return out;
@@ -1511,10 +1566,11 @@ function initDrawLayer(target, opts = {}) {
     selectedIds: [],  // 多選：目前選取的物件 id 集合（陣列保序）
     marquee: null,    // 進行中的橡皮筋框 {x,y,w,h}（% 座標）
     brushType: 'pen', // 自由筆刷類型 pen/marker/highlighter
+    exportEndpoint: opts.exportEndpoint || null, // 「送給 AI」POST 目標（無則只回 payload）
   };
   const history = makeUndoStack();
   let drag = null;    // 繪製中：{ tool, rect, start, points }
-  const actions = { setMode, setTool, setBrush, setColor, setStrokeWidth, act, eyedropper: openEyedropper, closeContext: closeContextMenu };
+  const actions = { setMode, setTool, setBrush, setColor, setStrokeWidth, act, eyedropper: openEyedropper, closeContext: closeContextMenu, send: () => sendToAgent() };
   const toolbar = buildToolbar(state, actions);
   document.body.appendChild(toolbar);
   const contextMenu = buildContextMenu(actions);
@@ -1785,8 +1841,75 @@ function initDrawLayer(target, opts = {}) {
   function commitDraft() {
     const d = state.draft;
     state.draft = null;
-    if (d && isDrawn(d)) runCommand({ type: 'create', obj: d });
+    if (d && isDrawn(d)) { captureAnchor(d); runCommand({ type: 'create', obj: d }); }
     else render();
+  }
+
+  // ── P4：selector 擷取 + 截圖 + 結構化匯出 + 送給 AI ─────────────────────────────
+  const ANCHOR_TOOLS = ['ellipse', 'diamond', 'rect', 'arrow', 'line']; // 指向底層元件的標注才擷取
+  // 暫時關閉 overlay/toolbar 指標事件，elementFromPoint 取得底層 app 元件。
+  function elementUnderPoint(clientX, clientY) {
+    const prev = svg.style.pointerEvents;
+    svg.style.pointerEvents = 'none';
+    toolbar.style.pointerEvents = 'none';
+    const el = document.elementFromPoint(clientX, clientY);
+    svg.style.pointerEvents = prev;
+    toolbar.style.pointerEvents = '';
+    return el;
+  }
+  function captureAnchor(obj) {
+    if (!ANCHOR_TOOLS.includes(obj.tool)) return;
+    const rect = svg.getBoundingClientRect();
+    const a = labelAnchor(obj); // bbox 中心 / 線中點
+    const el = elementUnderPoint(rect.left + pctToPx(a.x, rect.width), rect.top + pctToPx(a.y, rect.height));
+    if (!el || el === document.body || el === document.documentElement) return; // 空畫布 → anchor 留 null
+    const sel = cssSelectorFor(el);
+    if (sel) obj.anchor = sel;
+  }
+
+  function exportPayload() {
+    return buildExport(state.objects, { w: svg.clientWidth || host.clientWidth, h: svg.clientHeight || host.clientHeight });
+  }
+  // 把 #pc-draw SVG（含貼圖 + 標注）轉 PNG dataURL（XMLSerializer → img → canvas）。async。
+  async function capturePng() {
+    try {
+      const w = svg.clientWidth || host.clientWidth, h = svg.clientHeight || host.clientHeight;
+      const clone = svg.cloneNode(true);
+      clone.setAttribute('width', w);
+      clone.setAttribute('height', h);
+      clone.setAttribute('xmlns', SVG_NS);
+      clone.querySelectorAll('.pc-draw-selection, .pc-draw-marquee').forEach(n => n.remove()); // 不要選取框
+      const xml = new XMLSerializer().serializeToString(clone);
+      const url = URL.createObjectURL(new Blob([xml], { type: 'image/svg+xml;charset=utf-8' }));
+      const dataURL = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0);
+          resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = reject;
+        img.src = url;
+      });
+      URL.revokeObjectURL(url);
+      return dataURL;
+    } catch (_) { return null; }
+  }
+  // 組 {json, png} → POST 到 endpoint（可無）；無論有無 server 都回 payload 供 caller/測試讀。
+  async function sendToAgent(opts2 = {}) {
+    const json = exportPayload();
+    if (!json.annotations.length) return { json, png: null, sent: false }; // 沒標注 → 不做事
+    const png = await capturePng();
+    const payload = { json, png, sent: false };
+    const endpoint = opts2.endpoint || state.exportEndpoint;
+    if (endpoint && typeof fetch === 'function') {
+      try {
+        await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ json, png }) });
+        payload.sent = true;
+      } catch (_) { payload.sent = false; }
+    }
+    return payload;
   }
 
   function startTextInput(clientX, clientY, rect) {
@@ -1978,6 +2101,10 @@ function initDrawLayer(target, opts = {}) {
     setStrokeWidth,
     eyedropper: openEyedropper,
     addImage, // (dataURL, naturalW, naturalH, atPoint?) → 新 image 物件（paste/drop 與測試共用）
+    buildExport: exportPayload,            // 結構化 JSON（selector + text + geom）
+    capturePng,                            // async → PNG dataURL
+    sendToAgent,                           // async (opts?) → {json, png, sent}；回 payload
+    setExportEndpoint: url => { state.exportEndpoint = url; },
     clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; render(); },
     destroy: () => {
       svg.remove(); toolbar.remove(); contextMenu.remove();
@@ -2162,6 +2289,14 @@ function buildToolbar(state, actions) {
   bar.appendChild(actButton('delete', actions)); // 刪除（z-order 已移到右鍵選單）
   appendSep(bar);
   ['undo', 'redo'].forEach(a => bar.appendChild(actButton(a, actions)));
+  appendSep(bar);
+  const send = drawHtmlEl('button', 'pc-draw-tool pc-draw-send');
+  send.dataset.action = 'send';
+  send.title = '送給 AI';
+  send.setAttribute('aria-label', '送給 AI');
+  send.innerHTML = icon('send');
+  send.onclick = () => actions.send();
+  bar.appendChild(send);
   appendSep(bar);
   const off = drawHtmlEl('button', 'pc-draw-tool');
   off.dataset.tool = 'off';

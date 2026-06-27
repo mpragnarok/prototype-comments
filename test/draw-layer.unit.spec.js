@@ -9,6 +9,7 @@ import {
   pxToPct, pctToPx, clientToPct, rectFromPoints,
   makeDrawObject, serializeDrawObject,
   geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath, diamondPoints, labelAnchor, imageGeom,
+  cssSelectorFor, buildExport,
   taperScale, outlineWidths, taperedOutline, brushStyle, DRAW_BRUSHES,
   TOOL_SHORTCUTS, resolveShortcut,
   reorderIds, reorderMany, rectsIntersect, marqueeSelect, applyStylePatch, eyedropperSupported,
@@ -308,6 +309,67 @@ test('image: 走 box 幾何（geomBBox / translateGeom / remapGeom）', () => {
   const t = translateGeom(o, 5, 7); eq(t.x, 15); eq(t.y, 17); eq(t.w, 30);
   const r = remapGeom(o, { x: 10, y: 10, w: 30, h: 20 }, { x: 0, y: 0, w: 60, h: 40 });
   eq(JSON.stringify(r), JSON.stringify({ x: 0, y: 0, w: 60, h: 40 }), 'resize 重映射');
+});
+
+// ── P4 cssSelectorFor（用 fake DOM 節點驗 selector 字串；round-trip 在 e2e 真 DOM 驗）────
+function fakeEl(tag, opts = {}) {
+  const e = {
+    tagName: tag.toUpperCase(), id: opts.id || '', _attrs: opts.attrs || {},
+    getAttribute(k) { return this._attrs[k] != null ? this._attrs[k] : null; },
+    parentElement: null, children: [],
+  };
+  if (opts.parent) { opts.parent.children.push(e); e.parentElement = opts.parent; }
+  return e;
+}
+test('cssSelectorFor: id → #id（優先）', () => {
+  eq(cssSelectorFor(fakeEl('div', { id: 'price-card', attrs: { 'data-testid': 'x' } })), '#price-card');
+});
+test('cssSelectorFor: 無 id → data-testid', () => {
+  eq(cssSelectorFor(fakeEl('div', { attrs: { 'data-testid': 'sidebar' } })), '[data-testid="sidebar"]');
+});
+test('cssSelectorFor: 退回 nth-of-type 路徑（停在最近的 id 祖先）', () => {
+  const root = fakeEl('div', { id: 'root' });
+  const sec = fakeEl('section', { parent: root });
+  fakeEl('span', { parent: sec });               // span #1
+  const s2 = fakeEl('span', { parent: sec });    // span #2
+  eq(cssSelectorFor(s2), '#root > section > span:nth-of-type(2)');
+});
+test('cssSelectorFor: 單一同類子元素 → 不加 nth-of-type', () => {
+  const root = fakeEl('main', { id: 'app' });
+  const only = fakeEl('header', { parent: root });
+  eq(cssSelectorFor(only), '#app > header');
+});
+test('cssSelectorFor: null/非元素 → null', () => {
+  eq(cssSelectorFor(null), null);
+  eq(cssSelectorFor({}), null);
+});
+
+// ── P4 buildExport（精簡結構化 JSON）───────────────────────────────────────────────
+test('buildExport: 形狀含 selector(anchor)/text(label)/color/geom，省略 null', () => {
+  const objs = [
+    { id: 'a', tool: 'ellipse', anchor: '#price-card', label: '對齊右欄', style: { color: '#e03131' }, geom: { x: 1, y: 2, w: 3, h: 4 } },
+    { id: 'b', tool: 'arrow', style: { color: '#1971c2' }, geom: { from: { x: 0, y: 0 }, to: { x: 5, y: 5 } } }, // 無 anchor/label
+  ];
+  const out = buildExport(objs, { w: 600, h: 400 });
+  eq(JSON.stringify(out.viewport), JSON.stringify({ w: 600, h: 400 }));
+  const a = out.annotations[0];
+  eq(a.id, 'a'); eq(a.tool, 'ellipse'); eq(a.selector, '#price-card'); eq(a.text, '對齊右欄'); eq(a.color, '#e03131');
+  eq(JSON.stringify(a.geom), JSON.stringify({ x: 1, y: 2, w: 3, h: 4 }));
+  const b = out.annotations[1];
+  assert(!('selector' in b), '無 anchor → 不含 selector');
+  assert(!('text' in b), '無 label → 不含 text');
+  eq(b.color, '#1971c2');
+});
+test('buildExport: text 工具用 obj.text 當 text；image 標 image:true', () => {
+  const out = buildExport([
+    { id: 't', tool: 'text', text: '備註', style: {}, geom: { x: 1, y: 1 } },
+    { id: 'i', tool: 'image', imageRef: 'data:...', style: {}, geom: { x: 0, y: 0, w: 5, h: 5 } },
+  ], { w: 100, h: 100 });
+  eq(out.annotations[0].text, '備註');
+  assert(out.annotations[1].image === true, 'image 應標記 image:true（不塞 dataURL）');
+});
+test('buildExport: 空 → annotations []', () => {
+  eq(JSON.stringify(buildExport([], { w: 10, h: 10 }).annotations), '[]');
 });
 
 // ── 綁定標籤：labelAnchor + serialize ───────────────────────────────────────────
