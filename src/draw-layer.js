@@ -444,13 +444,21 @@ export function nearestPointOnRect(p, rect) {
 }
 
 // 其他畫圖物件（arrow/line）的端點 → 吸附候選，標上可建 obj anchor 的 objId/which。
+const SNAP_SHAPE_TOOLS = ['rect', 'ellipse', 'diamond', 'image'];
 export function objectSnapPoints(objects, exceptId) {
   const pts = [];
   (objects || []).forEach(o => {
     if (o.id === exceptId) return;
-    if (o.tool !== 'arrow' && o.tool !== 'line') return;
-    pts.push({ x: o.geom.from.x, y: o.geom.from.y, objId: o.id, which: 'from' });
-    pts.push({ x: o.geom.to.x, y: o.geom.to.y, objId: o.id, which: 'to' });
+    if (o.tool === 'arrow' || o.tool === 'line') { // line/arrow → 兩端點（鎖 which）
+      pts.push({ x: o.geom.from.x, y: o.geom.from.y, objId: o.id, which: 'from' });
+      pts.push({ x: o.geom.to.x, y: o.geom.to.y, objId: o.id, which: 'to' });
+    } else if (SNAP_SHAPE_TOOLS.includes(o.tool)) { // 形狀 → bbox 8 錨點（鎖 relX/relY，隨形狀移動）
+      const bbox = geomBBox(o);
+      rectAnchorPoints(bbox).forEach(pt => {
+        const rel = anchorRel(pt, bbox);
+        pts.push({ x: pt.x, y: pt.y, objId: o.id, relX: rel.relX, relY: rel.relY });
+      });
+    }
   });
   return pts;
 }
@@ -496,7 +504,8 @@ function resolveOneEnd(o, which, getRectPct, objects, seen) {
     const target = objects.find(t => t.id === anchor.objId);
     if (!target) return fallback;
     seen.add(o.id);
-    const ends = resolveEndpoints(target, getRectPct, objects, seen);
+    if (anchor.relX != null) return resolveAnchorPoint(anchor, geomBBox(target)); // 鎖到形狀 bbox 相對位置
+    const ends = resolveEndpoints(target, getRectPct, objects, seen);             // 鎖到 line/arrow 端點
     return ends[anchor.which] || fallback;
   }
   return fallback;
@@ -1072,11 +1081,16 @@ export function initDrawLayer(target, opts = {}) {
     return o;
   }
 
-  // 拖端點吸附中的高亮 selector（render 時畫 dashed teal rect）。放開/離開 → null。
-  let snapHighlightSel = null;
+  // 拖端點吸附中的高亮目標（render 時畫 dashed teal rect）。{selector} 或 {objId}；放開/離開 → null。
+  let snapHighlight = null;
   function renderSnapHighlight() {
-    if (!snapHighlightSel) return;
-    const r = getRectPct(snapHighlightSel);
+    if (!snapHighlight) return;
+    let r = null;
+    if (snapHighlight.selector) r = getRectPct(snapHighlight.selector);            // DOM 元件
+    else if (snapHighlight.objId != null) {                                        // 自繪形狀
+      const t = findById(state.objects, snapHighlight.objId);
+      if (t) r = geomBBox(t, resolveO);
+    }
     if (!r) return;
     const rect = { width: svg.clientWidth || host.clientWidth, height: svg.clientHeight || host.clientHeight };
     const b = toPxBox(r, rect);
@@ -1108,8 +1122,13 @@ export function initDrawLayer(target, opts = {}) {
     if (changed) render();
     liveRaf = (liveOn && typeof requestAnimationFrame === 'function') ? requestAnimationFrame(liveTick) : null; // render→syncLiveLoop 可能已 stopLive，勿排程鬼魂 rAF
   }
+  function hasElAnchor(o) {
+    const ea = o.endAnchors; if (!ea) return false;
+    return (ea.from && ea.from.kind === 'el') || (ea.to && ea.to.kind === 'el');
+  }
   function syncLiveLoop() {
-    const need = state.objects.some(o => o.endAnchors);
+    // 只有 el anchor 需要 DOM 監聽（scroll/resize）；obj 形狀錨點隨 render 自然跟隨，免 rAF。
+    const need = state.objects.some(hasElAnchor);
     if (need && !liveOn) startLive();
     else if (!need && liveOn) stopLive();
   }
@@ -1444,14 +1463,14 @@ export function initDrawLayer(target, opts = {}) {
       o.geom = setEndpoint(before.geom, which, snap ? snap.point : p);
       pendingAnchor = snap ? snap.anchor : undefined;
       o.endAnchors = mergeEndAnchor(before.endAnchors, which, pendingAnchor); // 拖曳中即時反映：避免已 anchored 端點被舊 anchor 鎖住不跟手
-      snapHighlightSel = snap ? snap.selector : null; // 吸到元件 → 高亮其 rect
+      snapHighlight = snap ? snap.highlight : null; // 吸到元件/形狀 → 高亮其 rect
       moved = true;
       render();
     };
     const onUp = () => {
       window.removeEventListener('pointermove', onMv);
       window.removeEventListener('pointerup', onUp);
-      snapHighlightSel = null;
+      snapHighlight = null;
       if (moved) commitEndpoint(o, which, before, pendingAnchor);
       else render(); // 清掉高亮
     };
@@ -1460,20 +1479,32 @@ export function initDrawLayer(target, opts = {}) {
   }
   // 蒐集候選（游標下元件的 8 錨點 + 最近邊 + 其他物件端點）→ 閾值內最近吸附點 + 對應 anchor。
   function computeEndpointSnap(p, draggedId, clientX, clientY) {
-    const candidates = objectSnapPoints(state.objects, draggedId);
+    // 自繪物件（線端點 / 形狀錨點）優先：刻意畫的標注目標應贏過背景 DOM（DOM 最近邊永遠貼游標會蓋掉形狀）。
+    const objHit = nearestSnap(p, objectSnapPoints(state.objects, draggedId), SNAP_THRESHOLD_PCT);
+    if (objHit) return snapResult(objHit, null);
     const selector = elSnapSelector(elementUnderPoint(clientX, clientY));
     const elRect = selector ? getRectPct(selector) : null;
-    if (elRect) {
-      rectAnchorPoints(elRect).forEach(pt => candidates.push({ ...pt, selector }));
-      candidates.push({ ...nearestPointOnRect(p, elRect), selector, ref: 'edge' });
-    }
-    const hit = nearestSnap(p, candidates, SNAP_THRESHOLD_PCT);
-    if (!hit) return null;
-    return { point: hit.point, anchor: snapToAnchor(hit.cand, elRect), selector: hit.cand.selector || null };
+    if (!elRect) return null;
+    const cands = rectAnchorPoints(elRect).map(pt => ({ ...pt, selector }));
+    cands.push({ ...nearestPointOnRect(p, elRect), selector, ref: 'edge' }); // DOM 才有最近邊吸附
+    const elHit = nearestSnap(p, cands, SNAP_THRESHOLD_PCT);
+    return elHit ? snapResult(elHit, elRect) : null;
   }
-  // 候選 → anchor：obj 候選 → obj anchor；el 候選 → el anchor（relX/relY）。
+  function snapResult(hit, elRect) {
+    return { point: hit.point, anchor: snapToAnchor(hit.cand, elRect), highlight: snapHighlightOf(hit.cand) };
+  }
+  // 候選 → 高亮目標：el 候選 → {selector}；obj 候選 → {objId}。
+  function snapHighlightOf(cand) {
+    if (cand.selector) return { selector: cand.selector };
+    if (cand.objId != null) return { objId: cand.objId };
+    return null;
+  }
+  // 候選 → anchor：obj 線端點 → which；obj 形狀 → relX/relY；el → relX/relY。
   function snapToAnchor(cand, elRect) {
-    if (cand.objId != null) return { kind: 'obj', objId: cand.objId, which: cand.which };
+    if (cand.objId != null) {
+      if (cand.which) return { kind: 'obj', objId: cand.objId, which: cand.which };
+      return { kind: 'obj', objId: cand.objId, relX: cand.relX, relY: cand.relY };
+    }
     if (cand.selector && elRect) {
       const rel = anchorRel(cand, elRect);
       return { kind: 'el', selector: cand.selector, relX: rel.relX, relY: rel.relY };
@@ -1502,18 +1533,37 @@ export function initDrawLayer(target, opts = {}) {
     state.selectedIds = [];
     const rect = svg.getBoundingClientRect();
     if (state.tool === 'text') { startTextInput(e.clientX, e.clientY, rect); return; }
-    const p = clientToPct(e.clientX, e.clientY, rect);
-    drag = { tool: state.tool, rect, start: p, points: [[p.x, p.y]] };
+    const p0 = clientToPct(e.clientX, e.clientY, rect);
+    let start = p0, fromAnchor;
+    if (isEndpointTool(state.tool)) { // 起點也可吸附（畫線時 from 黏元件/形狀）
+      const snap = computeEndpointSnap(p0, null, e.clientX, e.clientY);
+      if (snap) { start = snap.point; fromAnchor = snap.anchor; snapHighlight = snap.highlight; }
+    }
+    drag = { tool: state.tool, rect, start, points: [[start.x, start.y]], fromAnchor };
     const style = state.tool === 'pencil' ? { ...(opts.style || {}), brushType: state.brushType } : opts.style;
-    state.draft = makeDrawObject({ tool: state.tool, geom: initialGeom(state.tool, p), style });
+    state.draft = makeDrawObject({ tool: state.tool, geom: initialGeom(state.tool, start), style });
+    if (fromAnchor) state.draft.endAnchors = { from: fromAnchor };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
   }
+  function isEndpointTool(tool) { return tool === 'arrow' || tool === 'line'; }
   function onMove(e) {
     if (!drag || !state.draft) return;
     const p = clientToPct(e.clientX, e.clientY, drag.rect);
-    state.draft.geom = updateGeom(drag, p);
+    let to = p;
+    if (isEndpointTool(drag.tool)) { // 終點即時吸附 + 高亮，並把 anchor 暫存到 draft
+      const snap = computeEndpointSnap(p, null, e.clientX, e.clientY);
+      to = snap ? snap.point : p;
+      snapHighlight = snap ? snap.highlight : null;
+      setDraftAnchors(drag.fromAnchor, snap ? snap.anchor : undefined);
+    }
+    state.draft.geom = updateGeom(drag, to);
     render();
+  }
+  function setDraftAnchors(fromAnchor, toAnchor) {
+    let ea = fromAnchor ? { from: fromAnchor } : undefined;
+    ea = mergeEndAnchor(ea, 'to', toAnchor);
+    if (ea) state.draft.endAnchors = ea; else delete state.draft.endAnchors;
   }
   function onUp() {
     window.removeEventListener('pointermove', onMove);
@@ -1524,6 +1574,7 @@ export function initDrawLayer(target, opts = {}) {
   function commitDraft() {
     const d = state.draft;
     state.draft = null;
+    snapHighlight = null; // 收掉吸附高亮
     if (d && isDrawn(d)) { captureAnchor(d); runCommand({ type: 'create', obj: d }); }
     else render();
   }
