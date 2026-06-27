@@ -8,7 +8,7 @@
 import {
   pxToPct, pctToPx, clientToPct, rectFromPoints,
   makeDrawObject, serializeDrawObject,
-  geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath, diamondPoints,
+  geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath, diamondPoints, labelAnchor,
   taperScale, outlineWidths, taperedOutline, brushStyle, DRAW_BRUSHES,
   TOOL_SHORTCUTS, resolveShortcut,
   reorderIds, reorderMany, rectsIntersect, marqueeSelect, applyStylePatch, eyedropperSupported,
@@ -270,6 +270,37 @@ test('diamond: DRAW_TOOLS 含 diamond、serialize 保留 tool', () => {
   assert(DRAW_TOOLS.includes('diamond'), 'DRAW_TOOLS 應含 diamond');
   const o = makeDrawObject({ id: 'dm1', tool: 'diamond', geom: { x: 1, y: 1, w: 4, h: 4 } });
   eq(serializeDrawObject(o).tool, 'diamond');
+});
+
+// ── 綁定標籤：labelAnchor + serialize ───────────────────────────────────────────
+test('labelAnchor: shape → bbox 中心', () => {
+  const a = labelAnchor({ tool: 'rect', geom: { x: 10, y: 20, w: 40, h: 20 } });
+  eq(a.x, 30); eq(a.y, 30);
+});
+test('labelAnchor: diamond/ellipse 也取 bbox 中心', () => {
+  eq(JSON.stringify(labelAnchor({ tool: 'diamond', geom: { x: 0, y: 0, w: 10, h: 10 } })), JSON.stringify({ x: 5, y: 5 }));
+  eq(JSON.stringify(labelAnchor({ tool: 'ellipse', geom: { x: 2, y: 4, w: 8, h: 12 } })), JSON.stringify({ x: 6, y: 10 }));
+});
+test('labelAnchor: line/arrow → 兩端中點', () => {
+  const a = labelAnchor({ tool: 'line', geom: { from: { x: 0, y: 0 }, to: { x: 20, y: 10 } } });
+  eq(a.x, 10); eq(a.y, 5);
+  const b = labelAnchor({ tool: 'arrow', geom: { from: { x: 4, y: 4 }, to: { x: 8, y: 8 } } });
+  eq(b.x, 6); eq(b.y, 6);
+});
+test('serialize: 綁定 label 一併輸出；空字串/未設不含 label', () => {
+  const o = makeDrawObject({ id: 'r1', tool: 'rect', geom: { x: 0, y: 0, w: 5, h: 5 } });
+  assert(!('label' in serializeDrawObject(o)), '未設 label 不應出現');
+  o.label = '價格卡';
+  eq(serializeDrawObject(o).label, '價格卡');
+  o.label = '';
+  assert(!('label' in serializeDrawObject(o)), '空字串視為無 label');
+});
+test('label 隨 geom 移動：平移後 labelAnchor 跟著移', () => {
+  const o = { tool: 'rect', geom: { x: 10, y: 10, w: 20, h: 20 }, label: 'x' };
+  const before = labelAnchor(o);
+  o.geom = translateGeom(o, 5, 7);
+  const after = labelAnchor(o);
+  eq(after.x - before.x, 5); eq(after.y - before.y, 7);
 });
 
 test('taperScale: 端點 0、中段 1、頭尾線性升', () => {

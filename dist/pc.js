@@ -1151,6 +1151,16 @@ function geomBBox(o) {
   return { x: g.x, y: g.y - 2.5, w, h: 3.5 };
 }
 
+// 綁定標籤的錨點（% 座標）：line/arrow 取兩端中點；其餘取 bbox 中心。隨 geom 重算 → 跟著物件移動/縮放。
+function labelAnchor(o) {
+  if (o.tool === 'arrow' || o.tool === 'line') {
+    const g = o.geom;
+    return { x: (g.from.x + g.to.x) / 2, y: (g.from.y + g.to.y) / 2 };
+  }
+  const b = geomBBox(o);
+  return { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+}
+
 // 平移物件幾何（移動）。回傳新 geom，不改入參。
 function translateGeom(o, dx, dy) {
   const g = o.geom;
@@ -1348,6 +1358,7 @@ function makeDrawObject({ id, tool, geom, style, text } = {}) {
 function serializeDrawObject(obj) {
   const out = { id: obj.id, tool: obj.tool, geom: obj.geom, style: obj.style };
   if (obj.text != null) out.text = obj.text;
+  if (obj.label != null && obj.label !== '') out.label = obj.label; // 綁定標籤
   if (obj.z != null) out.z = obj.z;
   return out;
 }
@@ -1533,7 +1544,12 @@ function initDrawLayer(target, opts = {}) {
       if (!o) return;
       const node = renderObject(o, rect, svg);
       node.setAttribute('data-id', o.id);
+      // 物件不吃指標事件 → 所有點擊都落在穩定的 <svg>（hit-test 用幾何）。
+      // 關鍵：避免點擊細線時 render() 重建 <line> 導致瀏覽器 dblclick 因 target 改變而不觸發。
+      node.setAttribute('pointer-events', 'none');
       svg.appendChild(node);
+      const lbl = renderLabel(o, rect);
+      if (lbl) svg.appendChild(lbl); // 綁定標籤（隨 geom 重算位置）
     });
     renderSelection(rect);
     renderMarquee(rect);
@@ -1777,6 +1793,41 @@ function initDrawLayer(target, opts = {}) {
     input.addEventListener('blur', commit);
   }
 
+  // ── 雙擊：在物件上加/編輯綁定標籤（Excalidraw bound text）────────────────────────
+  function onDblClick(e) {
+    if (state.mode !== 'draw' || state.tool !== 'select') return;
+    const rect = svg.getBoundingClientRect();
+    const hit = hitTest(clientToPct(e.clientX, e.clientY, rect));
+    if (hit) { e.preventDefault(); state.selectedIds = [hit.id]; startLabelEdit(hit, rect); }
+    else startTextInput(e.clientX, e.clientY, rect); // 雙擊空白 → 自由文字（Excalidraw parity）
+  }
+  // 在物件錨點（shape 中心 / line 中點）開輸入框，commit 寫回 obj.label（可 undo）。
+  function startLabelEdit(o, rect) {
+    const a = labelAnchor(o);
+    const cx = pctToPx(a.x, rect.width), cy = pctToPx(a.y, rect.height);
+    const input = drawHtmlEl('input', 'pc-draw-text-input');
+    input.type = 'text';
+    input.value = o.label || '';                 // 已有標籤 → 預填供編輯
+    input.style.left = (cx - 40) + 'px';          // 大致置中於錨點
+    input.style.top = (cy - 12) + 'px';
+    input.style.textAlign = 'center';
+    host.appendChild(input);
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+    const before = { label: o.label || '' };
+    let done = false;
+    const commit = () => {
+      if (done) return;
+      done = true;
+      const text = input.value.trim();
+      input.remove();
+      if (text === (o.label || '')) { render(); return; } // 無變更
+      o.label = text;                              // 立即套用（預覽）
+      pushHistory({ type: 'update', id: o.id, before, after: { label: text } });
+    };
+    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('blur', commit);
+  }
+
   // ── 鍵盤：Delete/Backspace 刪除、Cmd/Ctrl+Z undo、Shift+Cmd/Ctrl+Z redo ────────
   function onKey(e) {
     if (state.mode !== 'draw') return;
@@ -1831,6 +1882,7 @@ function initDrawLayer(target, opts = {}) {
   function onDocPointer(e) { if (!contextMenu.contains(e.target)) closeContextMenu(); }
 
   svg.addEventListener('pointerdown', onDown);
+  svg.addEventListener('dblclick', onDblClick);
   svg.addEventListener('contextmenu', onContextMenu);
   window.addEventListener('resize', render);
   window.addEventListener('keydown', onKey);
@@ -1950,6 +2002,28 @@ function renderObject(o, rect, svg) {
   const t = drawSvgEl('text', { x: pctToPx(o.geom.x, rect.width), y: pctToPx(o.geom.y, rect.height), fill: s.color, 'font-size': 14, 'font-family': 'system-ui, sans-serif' });
   t.textContent = o.text || '';
   return t;
+}
+
+const LABEL_FONT_SIZE = 14;
+// 綁定標籤 → <g>（含 <text>；line/arrow 另加白底 <rect> 把線蓋掉）。無 label 回 null。
+function renderLabel(o, rect) {
+  if (o.label == null || o.label === '') return null;
+  const a = labelAnchor(o);
+  const x = pctToPx(a.x, rect.width), y = pctToPx(a.y, rect.height);
+  const isLine = o.tool === 'arrow' || o.tool === 'line';
+  const g = drawSvgEl('g', { class: 'pc-draw-label', 'data-label-for': o.id, 'pointer-events': 'none' });
+  if (isLine) { // 白底蓋住線（使用者：「字會自動把線蓋掉」）
+    const w = o.label.length * LABEL_FONT_SIZE * 0.62 + 8;
+    const h = LABEL_FONT_SIZE + 6;
+    g.appendChild(drawSvgEl('rect', { x: x - w / 2, y: y - h / 2, width: w, height: h, fill: '#ffffff', rx: 3 }));
+  }
+  const t = drawSvgEl('text', {
+    x, y, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
+    fill: '#1e1e1e', 'font-size': LABEL_FONT_SIZE, 'font-family': 'system-ui, sans-serif',
+  });
+  t.textContent = o.label;
+  g.appendChild(t);
+  return g;
 }
 
 // <defs> 容器（marker 依顏色按需建立，見 ensureArrowMarker）。render 保留首子節點＝此 defs。

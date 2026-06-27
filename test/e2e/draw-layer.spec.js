@@ -787,6 +787,114 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(o.style.brushType === 'highlighter', `serialize 應含 brushType，實際 ${o.style.brushType}`);
   });
 
+  // ── 綁定標籤（雙擊物件加文字）──────────────────────────────────────────────────
+  console.log('\ndraw-layer e2e — 綁定標籤 (bound text):');
+
+  await test('雙擊 rect → 置中輸入框 → 打字 → <text> 置中於形狀 + obj.label', async () => {
+    await reset('rect');
+    await dragDraw(page, 100, 80, 220, 200); // rect（中心約 160,140）
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.mouse.click(160, 140, { clickCount: 2 });
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.fill('.pc-draw-text-input', '價格卡');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(40);
+    const r = await page.evaluate(() => {
+      const o = window.__drawTest.api.getObjects()[0];
+      const t = document.querySelector(`.pc-draw-label[data-label-for="${o.id}"] text`);
+      return {
+        label: o.label, content: t && t.textContent,
+        anchor: t && t.getAttribute('text-anchor'), baseline: t && t.getAttribute('dominant-baseline'),
+        x: t && +t.getAttribute('x'), y: t && +t.getAttribute('y'),
+        gone: !document.querySelector('.pc-draw-text-input'),
+      };
+    });
+    console.log('     rect label:', JSON.stringify(r));
+    assert(r.label === '價格卡' && r.content === '價格卡', `label 應寫回物件，實際 ${r.label}`);
+    assert(r.anchor === 'middle' && r.baseline === 'middle', 'text 應 h/v 置中');
+    assert(Math.abs(r.x - 160) < 6 && Math.abs(r.y - 140) < 6, `label 應置中於形狀(~160,140)，實際 ${r.x},${r.y}`);
+    assert(r.gone, '送出後輸入框移除');
+  });
+
+  await test('雙擊 line → 中點標籤 + 白底 <rect> 蓋住線', async () => {
+    await reset('line');
+    await dragDraw(page, 100, 100, 300, 200); // 中點約 200,150
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.mouse.click(200, 150, { clickCount: 2 });
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.fill('.pc-draw-text-input', '對齊');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(40);
+    const r = await page.evaluate(() => {
+      const o = window.__drawTest.api.getObjects()[0];
+      const g = document.querySelector(`.pc-draw-label[data-label-for="${o.id}"]`);
+      const bg = g && g.querySelector('rect');
+      const t = g && g.querySelector('text');
+      return { label: o.label, hasBg: !!bg, bgFill: bg && bg.getAttribute('fill'), tx: t && +t.getAttribute('x'), ty: t && +t.getAttribute('y') };
+    });
+    console.log('     line label:', JSON.stringify(r));
+    assert(r.label === '對齊', 'line label 寫回');
+    assert(r.hasBg && /#fff|white/i.test(r.bgFill), 'line/arrow 標籤應有白底 rect 蓋線');
+    assert(Math.abs(r.tx - 200) < 8 && Math.abs(r.ty - 150) < 8, `label 應在中點(~200,150)，實際 ${r.tx},${r.ty}`);
+  });
+
+  await test('label 隨物件移動：拖 rect → 標籤重新置中', async () => {
+    await reset('rect');
+    await dragDraw(page, 100, 80, 220, 200);
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.mouse.click(160, 140, { clickCount: 2 });
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.fill('.pc-draw-text-input', 'L');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(30);
+    const id = await page.evaluate(() => window.__drawTest.api.getObjects()[0].id);
+    const before = await page.evaluate(i => +document.querySelector(`.pc-draw-label[data-label-for="${i}"] text`).getAttribute('x'), id);
+    await dragDraw(page, 160, 140, 240, 200); // 拖物件
+    const after = await page.evaluate(i => +document.querySelector(`.pc-draw-label[data-label-for="${i}"] text`).getAttribute('x'), id);
+    console.log('     label move x:', before, '→', after);
+    assert(after > before + 40, `標籤應隨物件右移，實際 ${before}→${after}`);
+  });
+
+  await test('再次雙擊已有標籤 → 預填既有文字可編輯', async () => {
+    await reset('rect');
+    await dragDraw(page, 100, 80, 220, 200);
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.mouse.click(160, 140, { clickCount: 2 });
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.fill('.pc-draw-text-input', '原文字');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(30);
+    await page.mouse.click(160, 140, { clickCount: 2 }); // 再雙擊
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    const prefill = await page.evaluate(() => document.querySelector('.pc-draw-text-input').value);
+    await page.fill('.pc-draw-text-input', '改後');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(30);
+    const label = await page.evaluate(() => window.__drawTest.api.getObjects()[0].label);
+    console.log('     edit existing prefill:', prefill, '→', label);
+    assert(prefill === '原文字', `應預填既有文字，實際 ${prefill}`);
+    assert(label === '改後', `編輯後 label 應更新，實際 ${label}`);
+  });
+
+  await test('label 輸入框打字不觸發工具快捷鍵', async () => {
+    await reset('rect');
+    await dragDraw(page, 100, 80, 220, 200);
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.mouse.click(160, 140, { clickCount: 2 });
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.focus('.pc-draw-text-input');
+    await page.keyboard.press('o'); // 若漏 guard → 會切 ellipse
+    const r = await page.evaluate(() => ({
+      tool: window.__drawTest.api.getTool(),
+      val: document.querySelector('.pc-draw-text-input') ? document.querySelector('.pc-draw-text-input').value : null,
+    }));
+    console.log('     label typing guard:', JSON.stringify(r));
+    assert(r.tool === 'select', `打標籤時不應切工具，實際 ${r.tool}`);
+    assert(r.val === 'o', `字元應進輸入框，實際 ${r.val}`);
+    await page.keyboard.press('Enter');
+    await page.evaluate(() => window.__drawTest.api.clear());
+  });
+
   // ── Feature A：marquee 多選 + 右鍵 z-order 選單 ──────────────────────────────
   console.log('\ndraw-layer e2e — Feature A 多選 / marquee / 右鍵選單:');
 
