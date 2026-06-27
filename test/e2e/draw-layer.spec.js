@@ -1172,6 +1172,102 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(c === '#ff8800', `吸管應改選取物件顏色，實際 ${c}`);
   });
 
+  // ── P4：selector 擷取 / 結構化匯出 / 截圖 / 送給 AI ──────────────────────────────
+  console.log('\ndraw-layer e2e — P4 匯出 / selector / 截圖 / 送給 AI:');
+
+  await test('anchor selector：ellipse 畫在 #price-card 上 → annotation.selector === "#price-card"', async () => {
+    await reset('ellipse');
+    await dragDraw(page, 110, 80, 210, 160); // 中心 ~160,120 落在 #price-card（client 80..240 / 60..180）
+    const r = await page.evaluate(() => {
+      const ex = window.__drawTest.api.buildExport();
+      const o = window.__drawTest.api.getObjects()[0];
+      return { selector: ex.annotations[0].selector, anchor: o.anchor, tool: ex.annotations[0].tool };
+    });
+    console.log('     anchor capture:', JSON.stringify(r));
+    assert(r.tool === 'ellipse', `annotation tool 應 ellipse，實際 ${r.tool}`);
+    assert(r.selector === '#price-card', `selector 應解析為 #price-card（elementFromPoint 取底層元件），實際 ${r.selector}`);
+  });
+
+  await test('buildExport shape：viewport + 每筆 id/tool/color/geom；labeled 有 text、id 元件上有 selector、空欄省略', async () => {
+    await reset('ellipse');
+    await dragDraw(page, 110, 80, 210, 160);           // A：ellipse 蓋 #price-card（有 selector、無 text）
+    await page.evaluate(() => window.__drawTest.api.setTool('rect'));
+    await dragDraw(page, 100, 250, 200, 320);          // B：rect 於畫布下方
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    await page.mouse.click(150, 285, { clickCount: 2 }); // 雙擊加綁定標籤
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.fill('.pc-draw-text-input', '說明');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(40);
+    const ex = await page.evaluate(() => window.__drawTest.api.buildExport());
+    console.log('     buildExport:', JSON.stringify(ex));
+    assert(ex.viewport && ex.viewport.w > 0 && ex.viewport.h > 0, `應有 viewport w/h，實際 ${JSON.stringify(ex.viewport)}`);
+    assert(ex.annotations.length === 2, `應有 2 筆 annotation，實際 ${ex.annotations.length}`);
+    ex.annotations.forEach((a, i) => {
+      assert(typeof a.id === 'string' && a.id, `annotation ${i} 應有 id`);
+      assert(typeof a.tool === 'string' && a.tool, `annotation ${i} 應有 tool`);
+      assert(a.color, `annotation ${i} 應有 color`);
+      assert(a.geom && typeof a.geom === 'object', `annotation ${i} 應有 geom`);
+    });
+    const ell = ex.annotations.find(a => a.tool === 'ellipse');
+    const rect = ex.annotations.find(a => a.tool === 'rect');
+    assert(ell.selector === '#price-card', `id 元件上的標注應有 selector，實際 ${ell.selector}`);
+    assert(!('text' in ell), 'ellipse 無標籤 → text 欄位應省略（空欄不塞 JSON）');
+    assert(rect.text === '說明', `綁定標籤的物件應有 text，實際 ${rect.text}`);
+  });
+
+  await test('送給 AI 按鈕 + sendToAgent：POST 到 endpoint，body 含 json，回傳 payload.png 為 data:image/png', async () => {
+    // 工具列有送出鈕（aria-label 送給 AI）
+    const btn = await page.evaluate(() => {
+      const b = document.querySelector('.pc-draw-toolbar [data-action="send"]');
+      return { present: !!b, aria: b && b.getAttribute('aria-label') };
+    });
+    assert(btn.present, '工具列應有送出鈕（data-action=send）');
+    assert(btn.aria === '送給 AI', `送出鈕 aria-label 應為「送給 AI」，實際 ${btn.aria}`);
+
+    await reset('ellipse');
+    await dragDraw(page, 110, 80, 210, 160); // 至少一筆標注（否則 sendToAgent 早退、不 fetch）
+    // stub window.fetch 記錄呼叫，並設定 endpoint
+    await page.evaluate(() => {
+      window.__fetchCalls = [];
+      window.fetch = (url, opts) => { window.__fetchCalls.push({ url, body: opts && opts.body }); return Promise.resolve({ ok: true, json: () => Promise.resolve({}) }); };
+      window.__drawTest.api.setExportEndpoint('http://x/api/draw');
+    });
+    // 點工具列送出鈕 → 觸發 actions.send() → sendToAgent()
+    await page.click('.pc-draw-toolbar [data-action="send"]');
+    await page.waitForFunction(() => window.__fetchCalls && window.__fetchCalls.length > 0, { timeout: 2000 });
+    const fc = await page.evaluate(() => {
+      const c = window.__fetchCalls[0];
+      let parsed = null; try { parsed = JSON.parse(c.body); } catch (_) {}
+      return { url: c.url, hasJson: !!(parsed && parsed.json && parsed.json.annotations), annN: parsed && parsed.json && parsed.json.annotations.length };
+    });
+    console.log('     send button fetch:', JSON.stringify(fc));
+    assert(fc.url === 'http://x/api/draw', `fetch 應送到設定的 endpoint，實際 ${fc.url}`);
+    assert(fc.hasJson && fc.annN >= 1, `POST body 應含 json.annotations，實際 ${JSON.stringify(fc)}`);
+    // 直接呼叫 sendToAgent 取回 payload（驗證回傳形狀 + png）
+    const payload = await page.evaluate(async () => {
+      const p = await window.__drawTest.api.sendToAgent();
+      return { sent: p.sent, hasJson: !!(p.json && p.json.annotations), pngPrefix: p.png ? p.png.slice(0, 15) : null };
+    });
+    console.log('     sendToAgent payload:', JSON.stringify(payload));
+    assert(payload.sent === true, 'endpoint 設定下 sendToAgent 應回 sent=true');
+    assert(payload.hasJson, 'payload 應含 json');
+    assert(payload.pngPrefix && payload.pngPrefix.startsWith('data:image/png'), `payload.png 應為 data:image/png，實際 ${payload.pngPrefix}`);
+  });
+
+  await test('capturePng：回傳 data:image/png 字串（chromium rasterize SVG）', async () => {
+    await reset('ellipse');
+    await dragDraw(page, 110, 80, 210, 160);
+    const png = await page.evaluate(async () => {
+      const p = await window.__drawTest.api.capturePng();
+      return { type: typeof p, prefix: p ? p.slice(0, 15) : null, isNull: p === null };
+    });
+    console.log('     capturePng:', JSON.stringify(png));
+    if (png.isNull) { console.log('     [soft] capturePng 回 null（環境無法 rasterize SVG）→ 軟跳過'); return; }
+    assert(png.type === 'string', `capturePng 應回字串，實際 ${png.type}`);
+    assert(png.prefix.startsWith('data:image/png'), `應為 data:image/png dataURL，實際 ${png.prefix}`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
