@@ -1117,6 +1117,8 @@ export function initDrawLayer(target, opts = {}) {
 
   // 選取集合小工具
   const isSelected = id => state.selectedIds.includes(id);
+  // 已送出且未再改 → 從畫布隱藏（仍保留在標注紀錄）。讓畫面只剩「還沒送的」標注。
+  const isSent = o => o && o.id != null && state.sentSigs[o.id] === annotationSig(o);
   const selectOnly = id => { state.selectedIds = id ? [id] : []; };
   const toggleSelect = id => {
     state.selectedIds = isSelected(id) ? state.selectedIds.filter(x => x !== id) : [...state.selectedIds, id];
@@ -1352,6 +1354,7 @@ export function initDrawLayer(target, opts = {}) {
     const rect = { width: svg.clientWidth || host.clientWidth, height: svg.clientHeight || host.clientHeight };
     [...state.objects, state.draft].forEach(o => {
       if (!o) return;
+      if (o !== state.draft && isSent(o)) return; // 已送出 → 不畫在畫布（保留在標注紀錄）
       const vo = viewObject(o); // arrow/line anchor → 解析後端點渲染
       const node = renderObject(vo, rect, svg);
       node.setAttribute('data-id', o.id);
@@ -1415,7 +1418,7 @@ export function initDrawLayer(target, opts = {}) {
   }
 
   function renderSelection(rect) {
-    const objs = selectedObjects();
+    const objs = selectedObjects().filter(o => !isSent(o)); // 已送出隱藏者不畫選取框
     if (!objs.length) return;
     const g = drawSvgEl('g', { class: 'pc-draw-selection' });
     objs.forEach(o => {
@@ -1632,6 +1635,7 @@ export function initDrawLayer(target, opts = {}) {
     let best = null, bestD = Infinity, bestThin = false, bestOutlined = false;
     for (let i = state.objects.length - 1; i >= 0; i--) {
       const o = state.objects[i];
+      if (isSent(o)) continue; // 已送出隱藏 → 不可選
       const ends = (o.tool === 'arrow' || o.tool === 'line') ? resolveO(o) : null;
       const d = objHitDist(o, p, tol, ends);
       if (d === Infinity) continue;
@@ -1644,6 +1648,7 @@ export function initDrawLayer(target, opts = {}) {
     // 第二輪：bbox 後援 → 點在大空白外框內也選得到（如鉛筆捲線內側、未重疊時）
     for (let i = state.objects.length - 1; i >= 0; i--) {
       const o = state.objects[i];
+      if (isSent(o)) continue; // 已送出隱藏 → 不可選
       const b = geomBBox(o, resolveO);
       if (p.x >= b.x - tol && p.x <= b.x + b.w + tol && p.y >= b.y - tol && p.y <= b.y + b.h + tol) return o;
     }
@@ -1946,7 +1951,7 @@ export function initDrawLayer(target, opts = {}) {
       // 記下這批「實際送出（勾選）」的標注＋決定簽章 → 面板那幾列標「已送」（改動後簽章變、自動回「未送」）。
       checkedObjects().forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
       checkedDecisions().forEach(d => { state.sentSigs[d.id] = decisionSig(d); });
-      renderRecordPanel(); // 立刻更新各列「已送」標記（inflight 仍在 → 不會蓋掉按鈕狀態文字）
+      render(); // 立刻更新：畫布隱藏已送標注 + 各列「已送」標記（inflight 仍在 → 不蓋按鈕狀態文字）
       // 2 秒後恢復成可再送（同一批可重送；server 不去重、AI 端 cursor 會收到）。
       setTimeout(() => { delete sendBtn.dataset.inflight; renderRecordPanel(); }, 2000);
       return;

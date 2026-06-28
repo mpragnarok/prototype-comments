@@ -1602,6 +1602,23 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); window.__drawTest.api.clear(); });
   });
 
+  await test('已送出的標注從畫布隱藏（仍留在標注紀錄、標已送）', async () => {
+    await reset('ellipse');
+    await page.evaluate(() => window.__drawTest.api.clear());
+    await dragDraw(page, 120, 90, 220, 170);
+    const before = await page.evaluate(() => document.querySelectorAll('#pc-draw ellipse').length);
+    assert(before === 1, `送出前畫布應有 1 ellipse，實際 ${before}`);
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (!d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
+    await page.evaluate(() => { window.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, n: 1, listening: true }) }); window.__drawTest.api.setExportEndpoint('http://x/api/draw'); });
+    await page.click('.pc-draw-rec-send-btn');
+    await page.waitForFunction(() => document.querySelectorAll('#pc-draw ellipse').length === 0, { timeout: 3000 });
+    const r = await page.evaluate(() => ({ canvas: document.querySelectorAll('#pc-draw ellipse').length, rows: document.querySelectorAll('.pc-draw-rec-row').length, sent: !!document.querySelector('.pc-draw-rec-status.is-sent') }));
+    console.log('     hide-sent:', JSON.stringify(r));
+    assert(r.canvas === 0, '送出後畫布應隱藏該標注');
+    assert(r.rows === 1 && r.sent, '標注紀錄應仍保留該列且標已送');
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); window.__drawTest.api.clear(); });
+  });
+
   await test('標注紀錄頂部顯示「送出畫面」縮圖（.pc-draw-rec-preview）', async () => {
     await reset('ellipse');
     await dragDraw(page, 110, 80, 210, 160);
