@@ -14,6 +14,7 @@ import {
   taperScale, outlineWidths, taperedOutline, brushStyle, DRAW_BRUSHES,
   TOOL_SHORTCUTS, resolveShortcut,
   reorderIds, reorderMany, rectsIntersect, marqueeSelect, applyStylePatch, eyedropperSupported,
+  distPointToSegment, pointNearPolyline, pointHitsObject,
   applyCommand, invertCommand, makeUndoStack,
   DEFAULT_DRAW_STYLE, DRAW_MODES, DRAW_TOOLS, MIN_DRAW_SIZE_PCT,
   DRAW_FONT_SIZES,
@@ -1029,6 +1030,30 @@ test('resolveEndpoints: obj rel anchor 隨目標移動而更新（live 跟隨）
   const moved = makeDrawObject({ id: 'bx', tool: 'rect', geom: { x: 50, y: 50, w: 20, h: 20 } });
   const e = resolveEndpoints(o, null, [moved, o]);
   eq(e.to.x, 70); eq(e.to.y, 70); // 右下角 = 50+20,50+20
+});
+
+test('distPointToSegment: 垂直距離 / 端點外投影夾住', () => {
+  close(distPointToSegment({ x: 5, y: 5 }, { x: 0, y: 0 }, { x: 10, y: 0 }), 5); // 垂直
+  close(distPointToSegment({ x: -3, y: 0 }, { x: 0, y: 0 }, { x: 10, y: 0 }), 3); // 端點外 → 夾到 a
+  close(distPointToSegment({ x: 5, y: 0 }, { x: 0, y: 0 }, { x: 10, y: 0 }), 0); // 線上
+});
+test('pointNearPolyline: 靠近任一段→true；遠離→false', () => {
+  const pts = [[0, 0], [10, 0], [10, 10]];
+  assert(pointNearPolyline({ x: 5, y: 1 }, pts, 2), '靠近第一段');
+  assert(pointNearPolyline({ x: 11, y: 5 }, pts, 2), '靠近第二段');
+  assert(!pointNearPolyline({ x: 5, y: 5 }, pts, 2), '折線內側空白 → 不命中');
+});
+test('pointHitsObject: pencil 用實際筆畫（空白 bbox 內部不命中、底下物件不被蓋）', () => {
+  const pencil = makeDrawObject({ tool: 'pencil', geom: { points: [[0, 0], [20, 0], [20, 20]] } });
+  assert(pointHitsObject(pencil, { x: 10, y: 0.5 }, 2), '點在筆畫上 → 命中');
+  assert(!pointHitsObject(pencil, { x: 5, y: 10 }, 2), 'bbox 內但非筆畫 → 不命中（讓底下物件可選）');
+});
+test('pointHitsObject: arrow 用線段距離；rect 用 bbox', () => {
+  const arrow = makeDrawObject({ tool: 'arrow', geom: { from: { x: 0, y: 0 }, to: { x: 10, y: 10 } } });
+  assert(pointHitsObject(arrow, { x: 5, y: 5 }, 2), '點在箭頭線上 → 命中');
+  assert(!pointHitsObject(arrow, { x: 0, y: 10 }, 2), '在 bbox 角但離線遠 → 不命中');
+  const rect = makeDrawObject({ tool: 'rect', geom: { x: 0, y: 0, w: 10, h: 10 } });
+  assert(pointHitsObject(rect, { x: 5, y: 5 }, 2), 'rect 內部 → 命中（bbox）');
 });
 
 test('arrowHeads: arrow 預設（無 heads）→ 終點箭頭', () => {
