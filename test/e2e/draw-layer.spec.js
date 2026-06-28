@@ -2353,6 +2353,23 @@ async function dragDraw(page, x1, y1, x2, y2) {
     console.log('     arrow-under-ellipse selIds:', JSON.stringify(sel), 'arrow:', arrowId);
     assert(sel.length === 1 && sel[0] === arrowId, `點橢圓內的箭頭應選到箭頭，實際 ${JSON.stringify(sel)}`);
   });
+  await test('外框形狀不蓋住底下：點箭頭(穿過橢圓邊緣處)→ 取最近者選到箭頭', async () => {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); });
+    // 箭頭橫貫整個橢圓寬度（明確穿過左右外框）：y=200, x 120→380
+    await page.evaluate(() => window.__drawTest.api.setTool('arrow'));
+    await page.mouse.move(120, 200); await page.mouse.down(); await page.mouse.move(380, 200); await page.mouse.up();
+    const arrowId = await page.evaluate(() => window.__drawTest.api.getObjects().find(o => o.tool === 'arrow').id);
+    // 橢圓（上層，外框）x150-350 → 左外框在 y=200 處 x≈150
+    await page.evaluate(() => window.__drawTest.api.setTool('ellipse'));
+    await page.mouse.move(150, 150); await page.mouse.down(); await page.mouse.move(350, 250); await page.mouse.up();
+    // 點 (153,200)：落在箭頭線上(dist≈0)、且離橢圓左外框僅 ~3px(在容差內)→ 應選最近者＝箭頭
+    await page.evaluate(() => { window.__drawTest.api.setTool('select'); window.__drawTest.api.selectIds([]); });
+    await page.mouse.click(153, 200);
+    await page.waitForTimeout(30);
+    const sel = await page.evaluate(() => window.__drawTest.api.getSelectedIds());
+    console.log('     arrow-crossing-edge selIds:', JSON.stringify(sel), 'arrow:', arrowId);
+    assert(sel.length === 1 && sel[0] === arrowId, `點外框邊緣處的箭頭應選到箭頭，實際 ${JSON.stringify(sel)}`);
+  });
   await test('快捷鍵：IME 開著(e.key=Process)仍用 e.code 切工具', async () => {
     await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); window.__drawTest.api.setTool('select'); });
     await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Process', code: 'KeyO', bubbles: true })));

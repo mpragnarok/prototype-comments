@@ -597,50 +597,67 @@ export function distPointToSegment(p, a, b) {
   t = Math.max(0, Math.min(1, t));
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
-// 點是否靠近折線（pencil 的 points，[x,y][]）。
-export function pointNearPolyline(p, points, tol) {
-  if (!points || !points.length) return false;
-  if (points.length === 1) return Math.hypot(p.x - points[0][0], p.y - points[0][1]) <= tol;
+// 點到折線最短距離（pencil 的 points，[x,y][]）；空回 Infinity。
+export function polylineDist(p, points) {
+  if (!points || !points.length) return Infinity;
+  if (points.length === 1) return Math.hypot(p.x - points[0][0], p.y - points[0][1]);
+  let m = Infinity;
   for (let i = 1; i < points.length; i++) {
     const a = { x: points[i - 1][0], y: points[i - 1][1] }, b = { x: points[i][0], y: points[i][1] };
-    if (distPointToSegment(p, a, b) <= tol) return true;
+    m = Math.min(m, distPointToSegment(p, a, b));
   }
-  return false;
+  return m;
 }
-// 點是否靠近多邊形邊（pts＝[{x,y}] 依序，閉合）。
-function pointNearPolygon(p, pts, tol) {
-  for (let i = 0; i < pts.length; i++) {
-    if (distPointToSegment(p, pts[i], pts[(i + 1) % pts.length]) <= tol) return true;
-  }
-  return false;
+export function pointNearPolyline(p, points, tol) { return polylineDist(p, points) <= tol; }
+// 點到多邊形邊最短距離（pts＝[{x,y}] 依序，閉合）。
+function polygonDist(p, pts) {
+  let m = Infinity;
+  for (let i = 0; i < pts.length; i++) m = Math.min(m, distPointToSegment(p, pts[i], pts[(i + 1) % pts.length]));
+  return m;
 }
-// 點是否靠近橢圓外框（radial 偏離 1 換回 % 距離）。
-function pointNearEllipseOutline(p, b, tol) {
+function pointNearPolygon(p, pts, tol) { return polygonDist(p, pts) <= tol; }
+// 點到橢圓外框的近似距離（radial 偏離 1 換回 % 距離）。
+function ellipseOutlineDist(p, b) {
   const cx = b.x + b.w / 2, cy = b.y + b.h / 2, rx = b.w / 2, ry = b.h / 2;
-  if (rx <= 0 || ry <= 0) return Math.hypot(p.x - cx, p.y - cy) <= tol;
+  if (rx <= 0 || ry <= 0) return Math.hypot(p.x - cx, p.y - cy);
   const k = Math.hypot((p.x - cx) / rx, (p.y - cy) / ry); // =1 在外框上
-  return Math.abs(k - 1) * Math.min(rx, ry) <= tol;
+  return Math.abs(k - 1) * Math.min(rx, ry);
 }
-// 點是否命中物件：細線(arrow/line/pencil)用實際幾何；外框形狀(fill:none 的 rect/ellipse/diamond)
-// 用「外框線」避免大空白內部蓋住底下物件；填充形狀 / image / text 用 bbox 內部。ends＝解析後端點（選用）。
-export function pointHitsObject(o, p, tol, ends) {
+function pointNearEllipseOutline(p, b, tol) { return ellipseOutlineDist(p, b) <= tol; }
+// 外框形狀（fill:none 的 rect/diamond）的外框頂點。
+function shapeOutlinePts(o, b) {
+  return o.tool === 'diamond'
+    ? [{ x: b.x + b.w / 2, y: b.y }, { x: b.x + b.w, y: b.y + b.h / 2 }, { x: b.x + b.w / 2, y: b.y + b.h }, { x: b.x, y: b.y + b.h / 2 }]
+    : [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }, { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h }];
+}
+function isOutlinedShape(o) {
+  return (o.tool === 'rect' || o.tool === 'ellipse' || o.tool === 'diamond')
+    && !(o.style && o.style.fill && o.style.fill !== 'none');
+}
+// 點到物件的「命中距離」(% 空間)；> tol 視為未命中回 Infinity。
+// 細線(arrow/line/pencil)＝實際幾何距離；外框形狀＝外框線距離（大空白內部不蓋底下物件）；
+// 填充形狀 / image / text＝bbox 內部回 0（實心命中）。ends＝解析後端點（選用）。
+// hitTest 用此「距離」取最近者，解決細線穿過外框形狀邊緣時誤選形狀的問題。
+export function objHitDist(o, p, tol, ends) {
   if (o.tool === 'arrow' || o.tool === 'line') {
     const e = ends || o.geom;
-    return distPointToSegment(p, e.from, e.to) <= tol;
+    const d = distPointToSegment(p, e.from, e.to);
+    return d <= tol ? d : Infinity;
   }
-  if (o.tool === 'pencil') return pointNearPolyline(p, o.geom.points, tol);
+  if (o.tool === 'pencil') {
+    const d = polylineDist(p, o.geom.points);
+    return d <= tol ? d : Infinity;
+  }
   const b = geomBBox(o);
-  const outlined = (o.tool === 'rect' || o.tool === 'ellipse' || o.tool === 'diamond')
-    && !(o.style && o.style.fill && o.style.fill !== 'none');
-  if (outlined) {
-    if (o.tool === 'ellipse') return pointNearEllipseOutline(p, b, tol);
-    const pts = o.tool === 'diamond'
-      ? [{ x: b.x + b.w / 2, y: b.y }, { x: b.x + b.w, y: b.y + b.h / 2 }, { x: b.x + b.w / 2, y: b.y + b.h }, { x: b.x, y: b.y + b.h / 2 }]
-      : [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }, { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h }];
-    return pointNearPolygon(p, pts, tol);
+  if (isOutlinedShape(o)) {
+    const d = o.tool === 'ellipse' ? ellipseOutlineDist(p, b) : polygonDist(p, shapeOutlinePts(o, b));
+    return d <= tol ? d : Infinity;
   }
-  return p.x >= b.x - tol && p.x <= b.x + b.w + tol && p.y >= b.y - tol && p.y <= b.y + b.h + tol;
+  const inside = p.x >= b.x - tol && p.x <= b.x + b.w + tol && p.y >= b.y - tol && p.y <= b.y + b.h + tol;
+  return inside ? 0 : Infinity;
 }
+// 點是否命中物件（boolean 包裝，向後相容）。
+export function pointHitsObject(o, p, tol, ends) { return objHitDist(o, p, tol, ends) !== Infinity; }
 
 // z-order：把 id 在 id 陣列中往前/後/頂/底重排（陣列尾＝最上層）。回傳新陣列。
 export function reorderIds(ids, id, op) {
@@ -1481,12 +1498,20 @@ export function initDrawLayer(target, opts = {}) {
   }
   function hitTest(p) {
     const tol = 2.5; // % 容差
-    // 第一輪：精準命中（細線用實際幾何）→ 重疊時點哪條線選哪條
+    // 第一輪：精準命中取「最近者」→ 細線穿過外框形狀邊緣時選到的是線，不是被穿的形狀。
+    // 平手時：細線(arrow/line/pencil)優先於外框形狀；其餘維持 z-order（上層先遇到者勝）。
+    let best = null, bestD = Infinity, bestThin = false, bestOutlined = false;
     for (let i = state.objects.length - 1; i >= 0; i--) {
       const o = state.objects[i];
       const ends = (o.tool === 'arrow' || o.tool === 'line') ? resolveO(o) : null;
-      if (pointHitsObject(o, p, tol, ends)) return o;
+      const d = objHitDist(o, p, tol, ends);
+      if (d === Infinity) continue;
+      const thin = o.tool === 'arrow' || o.tool === 'line' || o.tool === 'pencil';
+      const closer = d < bestD - 1e-9;
+      const tieThinWins = Math.abs(d - bestD) <= 1e-9 && thin && bestOutlined && !bestThin;
+      if (best === null || closer || tieThinWins) { best = o; bestD = d; bestThin = thin; bestOutlined = isOutlinedShape(o); }
     }
+    if (best) return best;
     // 第二輪：bbox 後援 → 點在大空白外框內也選得到（如鉛筆捲線內側、未重疊時）
     for (let i = state.objects.length - 1; i >= 0; i--) {
       const o = state.objects[i];
