@@ -1563,6 +1563,29 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => window.__drawTest.api.clear && window.__drawTest.api.clear());
   });
 
+  await test('AI 方案卡：選項帶 desc + preview → 圖文卡片式渲染', async () => {
+    await reset('select');
+    await page.evaluate(() => {
+      window.__drawTest.api.ingestReplies([{ n: 7, anchor: { x: 40, y: 50 }, text: '挑一種', options: [
+        { id: 'multi', label: '多選核取＋其他', desc: '可複選多項', preview: '☑ 素食  ☐ 不吃牛\n☐ 其他：[____]' },
+        { id: 'select', label: '單選下拉', desc: '一次一個', preview: '[ 無        ▾ ]' },
+      ] }]);
+    });
+    const r = await page.evaluate(() => {
+      const c = document.querySelector('.pc-draw-reply-card');
+      return {
+        rich: !!c.querySelector('.pc-draw-reply-opts.is-rich'),
+        descs: [...c.querySelectorAll('.pc-draw-reply-opt-desc')].map(d => d.textContent),
+        previews: [...c.querySelectorAll('.pc-draw-reply-preview')].map(p => p.textContent),
+      };
+    });
+    console.log('     rich reply card:', JSON.stringify(r));
+    assert(r.rich, '應為圖文卡片式（is-rich）');
+    assert(r.descs.length === 2 && r.descs[0] === '可複選多項', `應渲染 desc，實際 ${JSON.stringify(r.descs)}`);
+    assert(r.previews.length === 2 && /素食/.test(r.previews[0]), `應渲染 preview 示意圖，實際 ${JSON.stringify(r.previews)}`);
+    await page.evaluate(() => window.__drawTest.api.clear && window.__drawTest.api.clear());
+  });
+
   await test('標注紀錄頂部顯示「送出畫面」縮圖（.pc-draw-rec-preview）', async () => {
     await reset('ellipse');
     await dragDraw(page, 110, 80, 210, 160);
