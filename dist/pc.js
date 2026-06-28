@@ -1941,7 +1941,11 @@ const DRAW_STYLES = `
 .pc-draw-reply-card { position: absolute; pointer-events: auto; max-width: 300px; transform: translate(12px, 12px);
   background: #fff; border: 1.5px solid #0FA0A0; border-radius: 10px; padding: 10px 12px;
   box-shadow: 0 6px 24px rgba(15,160,160,.22); font: 13px/1.5 system-ui, -apple-system, sans-serif; color: #1e293b; }
-.pc-draw-reply-head { font-size: 11px; font-weight: 700; color: #0d8f8f; margin-bottom: 4px; }
+.pc-draw-reply-head { font-size: 11px; font-weight: 700; color: #0d8f8f; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; }
+.pc-draw-reply-close { border: none; background: transparent; color: #94a3b8; font-size: 13px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.pc-draw-reply-close:hover { color: #475569; }
+.pc-draw-rec-remove { flex: none; border: none; background: transparent; color: #b0bcc8; font-size: 12px; line-height: 1; cursor: pointer; padding: 2px 4px; }
+.pc-draw-rec-remove:hover { color: #d64545; }
 .pc-draw-reply-text { margin-bottom: 8px; white-space: pre-wrap; }
 .pc-draw-reply-opts { display: flex; flex-wrap: wrap; gap: 6px; }
 .pc-draw-reply-opts.is-rich { flex-direction: column; flex-wrap: nowrap; gap: 8px; }
@@ -2064,6 +2068,7 @@ function initDrawLayer(target, opts = {}) {
   const checkedObjects = () => state.objects.filter(o => !state.sendUnchecked[o.id]);
   const checkedDecisions = () => state.decisions.filter(d => !state.sendUnchecked[d.id]);
   const onToggleSendChecked = (id, checked) => { if (checked) delete state.sendUnchecked[id]; else state.sendUnchecked[id] = true; renderRecordPanel(); };
+  const removeDecision = (id) => { state.decisions = state.decisions.filter(d => d.id !== id); delete state.sendUnchecked[id]; delete state.sentSigs[id]; renderRecordPanel(); };
   const drawerAllBox = recordDrawer.querySelector('.pc-draw-rec-all');
   if (drawerAllBox) drawerAllBox.onchange = () => {
     if (drawerAllBox.checked) state.sendUnchecked = {};
@@ -2122,7 +2127,7 @@ function initDrawLayer(target, opts = {}) {
       return;
     }
     list.appendChild(recordPreviewEl()); // 置頂：送給 AI 的畫面截圖預覽
-    rows.forEach(row => list.appendChild(recordRowEl(row, isSelected(row.id), onRecordRowClick, !state.sendUnchecked[row.id], onToggleSendChecked)));
+    rows.forEach(row => list.appendChild(recordRowEl(row, isSelected(row.id), onRecordRowClick, !state.sendUnchecked[row.id], onToggleSendChecked, row.isDecision ? removeDecision : null)));
     refreshRecordPreview();
   }
   // 標注紀錄頂部「送出畫面」縮圖：顯示 capturePng() 的結果（=送給 AI 的 PNG）。
@@ -2310,13 +2315,18 @@ function initDrawLayer(target, opts = {}) {
     replyLayer.innerHTML = '';
     const rect = { width: svg.clientWidth || host.clientWidth, height: svg.clientHeight || host.clientHeight };
     state.replies.forEach(r => {
-      const card = replyCardEl(r, submitChoice);
+      const card = replyCardEl(r, submitChoice, closeReply);
       const a = r.anchor || {};
       const x = a.x != null ? a.x : 50, y = a.y != null ? a.y : 50;
       card.style.left = pctToPx(x, rect.width) + 'px';
       card.style.top = pctToPx(y, rect.height) + 'px';
       replyLayer.appendChild(card);
     });
+  }
+  // 關閉單張方案卡（不影響佇列裡已做的決定）。
+  function closeReply(reply) {
+    state.replies = state.replies.filter(r => r.n !== reply.n);
+    renderReplies();
   }
   // 注入方案卡（poll 收到或測試用）：依 n 去重後併入。
   function ingestReplies(entries) {
@@ -2805,8 +2815,48 @@ function initDrawLayer(target, opts = {}) {
     if (decs.length) p.decisions = decs.map(d => ({ replyId: d.replyId, optionId: d.optionId, optionLabel: d.optionLabel })); // 方案卡決定隨批送
     return p;
   }
-  // 把 #pc-draw SVG（含貼圖 + 標注）轉 PNG dataURL（XMLSerializer → img → canvas）。async。
+  // html2canvas 載入：優先用既有 window.html2canvas，否則動態 import CDN（5s 內沒好就放棄）。回 fn 或 null。
+  let _h2cPromise = null;
+  function loadHtml2canvas() {
+    if (typeof window !== 'undefined' && window.html2canvas) return Promise.resolve(window.html2canvas);
+    if (typeof window === 'undefined') return Promise.resolve(null);
+    if (!_h2cPromise) {
+      const imp = import('https://esm.sh/html2canvas@1.4.1').then(m => (m && (m.default || m)) || null).catch(() => null);
+      const timeout = new Promise(r => setTimeout(() => r(null), 5000));
+      _h2cPromise = Promise.race([imp, timeout]);
+    }
+    return _h2cPromise;
+  }
+  // 截圖要排除的 overlay chrome（工具列/抽屜/方案卡/選單/編輯框）＋未勾選送出的標注（讓截圖=送出內容一致）。
+  function isCaptureExcluded(el) {
+    if (!el || !el.classList) return false;
+    if (el.classList.contains('pc-draw-toolbar') || el.classList.contains('pc-draw-reply-layer')
+      || el.classList.contains('pc-draw-rec-tab') || el.classList.contains('pc-draw-text-input')
+      || el.id === 'pc-draw-rec-drawer' || el.id === 'pc-draw-context') return true;
+    const id = el.getAttribute && el.getAttribute('data-id');
+    return !!(id && state.sendUnchecked[id]); // 未勾選送出的標注不入鏡
+  }
+  // 整頁截圖（底層畫面 + 標注合成）。html2canvas 不可用/失敗 → 退回只截 SVG 標注層（透明底）。async。
   async function capturePng() {
+    const h2c = await loadHtml2canvas().catch(() => null);
+    if (h2c) {
+      const prevSel = state.selectedIds.slice();
+      try {
+        if (prevSel.length) { state.selectedIds = []; render(); } // 選取框不入鏡
+        const canvas = await h2c(document.body, {
+          backgroundColor: '#ffffff',
+          scale: Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1),
+          logging: false, useCORS: true,
+          ignoreElements: isCaptureExcluded,
+        });
+        return canvas.toDataURL('image/png');
+      } catch (_) { /* fall through to SVG-only */ }
+      finally { if (prevSel.length) { state.selectedIds = prevSel; render(); } }
+    }
+    return capturePngSvgOnly();
+  }
+  // 後援：把 #pc-draw SVG（含貼圖 + 標注）轉 PNG dataURL（透明底，XMLSerializer → img → canvas）。async。
+  async function capturePngSvgOnly() {
     try {
       const w = svg.clientWidth || host.clientWidth, h = svg.clientHeight || host.clientHeight;
       const clone = svg.cloneNode(true);
@@ -3105,6 +3155,7 @@ function initDrawLayer(target, opts = {}) {
   svg.addEventListener('dragover', onDragOver);
   svg.addEventListener('drop', onDrop);
   window.addEventListener('resize', render);
+  window.addEventListener('scroll', renderReplies, true); // 捲動時方案卡跟著重新定位（capture：任何容器捲動都收到）
   window.addEventListener('keydown', onKey);
   window.addEventListener('paste', onPaste);
 
@@ -3161,6 +3212,7 @@ function initDrawLayer(target, opts = {}) {
       svg.remove(); toolbar.remove(); contextMenu.remove(); replyLayer.remove();
       recordTab.remove(); recordDrawer.remove();
       window.removeEventListener('resize', render);
+      window.removeEventListener('scroll', renderReplies, true);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('paste', onPaste);
       if (typeof unsubDraw === 'function') { try { unsubDraw(); } catch (_) { /* ignore */ } }
@@ -3475,7 +3527,7 @@ function buildRecordDrawer(onClose) {
   return drawer;
 }
 // 一筆標注 → 面板 row（工具圖示 + 色票 + 文字 + selector）。點擊 → onClick(id)。
-function recordRowEl(row, selected, onClick, checked, onToggle) {
+function recordRowEl(row, selected, onClick, checked, onToggle, onRemove) {
   const el = drawHtmlEl('div', 'pc-draw-rec-row' + (selected ? ' selected' : ''));
   el.dataset.id = row.id;
   el.setAttribute('role', 'button'); el.setAttribute('tabindex', '0');
@@ -3507,16 +3559,26 @@ function recordRowEl(row, selected, onClick, checked, onToggle) {
   const badge = drawHtmlEl('span', 'pc-draw-rec-status ' + (row.sent ? 'is-sent' : 'is-unsent'));
   badge.textContent = row.sent ? '✓ 已送' : '● 未送';
   el.appendChild(badge);
+  if (onRemove) { // 從佇列移除（目前用於「決定」列）
+    const rm = drawHtmlEl('button', 'pc-draw-rec-remove'); rm.textContent = '✕';
+    rm.title = '從佇列移除'; rm.setAttribute('aria-label', '從佇列移除');
+    rm.onclick = e => { e.stopPropagation(); onRemove(row.id); };
+    el.appendChild(rm);
+  }
   el.onclick = () => onClick(row.id);
   return el;
 }
 
 // AI 方案卡（錨定貼在標注旁）：標題 + 文字 + 可點選項按鈕；已選則顯示「✓ 已選」。
 // onChoose(reply, option) 在點選項時呼叫。純函式（位置由呼叫端設 style）。
-function replyCardEl(reply, onChoose) {
+function replyCardEl(reply, onChoose, onClose) {
   const card = drawHtmlEl('div', 'pc-draw-reply-card');
   card.dataset.n = reply.n;
   const head = drawHtmlEl('div', 'pc-draw-reply-head'); head.textContent = '💬 AI 方案';
+  const close = drawHtmlEl('button', 'pc-draw-reply-close'); close.textContent = '✕';
+  close.title = '關閉這張方案卡'; close.setAttribute('aria-label', '關閉方案卡');
+  close.onclick = () => onClose && onClose(reply);
+  head.appendChild(close);
   card.appendChild(head);
   if (reply.text) { const t = drawHtmlEl('div', 'pc-draw-reply-text'); t.textContent = reply.text; card.appendChild(t); }
   const opts = Array.isArray(reply.options) ? reply.options : [];
