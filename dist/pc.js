@@ -958,6 +958,13 @@ const DEFAULT_DRAW_STYLE = { color: '#E5484D', strokeWidth: 2, fill: 'none', fon
 const DRAW_COLORS = ['#1e1e1e', '#e03131', '#2f9e44', '#1971c2', '#f08c00', '#9c36b5', '#0c8599', '#868e96'];
 const DRAW_STROKE_WIDTHS = [1, 2, 4, 6]; // thin → bold
 const DRAW_FONT_SIZES = [12, 16, 20, 28]; // 文字工具字體大小選項（px）
+const DRAW_HEAD_MODES = ['none', 'end', 'start', 'both']; // 端點箭頭：無/終點/起點/雙向
+// line/arrow 的端點箭頭：依 style.heads；未設時 arrow→終點、line→無（向後相容）。
+function arrowHeads(o) {
+  if (!o || (o.tool !== 'arrow' && o.tool !== 'line')) return { start: false, end: false };
+  const mode = (o.style && o.style.heads) || (o.tool === 'arrow' ? 'end' : 'none');
+  return { start: mode === 'start' || mode === 'both', end: mode === 'end' || mode === 'both' };
+}
 const MIN_DRAW_SIZE_PCT = 1; // 縮放最小尺寸（% 座標）
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -1544,7 +1551,9 @@ function shiftGroup(ids, selSet, dir) {
 // 回傳 { defaultStyle, objects, cmds }；eyedropper 與 picker 共用同一路徑。
 function applyStylePatch({ tool, selectedIds, objects, defaultStyle }, patch) {
   const nextDefault = { ...defaultStyle, ...patch };
-  const sel = new Set(tool === 'select' ? selectedIds : []);
+  // 有選取就套到選取物件（不限 select 工具）：剛建立的物件會 auto-select，
+  // 此時按顏色/筆寬/字級應「即時換」到該物件，同時更新預設供下一個物件用。
+  const sel = new Set(selectedIds || []);
   if (!sel.size) return { defaultStyle: nextDefault, objects, cmds: [] };
   const cmds = [];
   const nextObjects = objects.map(o => {
@@ -1626,6 +1635,7 @@ function normalizeStyle(style = {}) {
     fontSize: style.fontSize || DEFAULT_DRAW_STYLE.fontSize, // 文字工具字體大小（px）
   };
   if (style.brushType) out.brushType = style.brushType; // 自由筆刷類型（pen/marker/highlighter）
+  if (style.heads) out.heads = style.heads; // line/arrow 端點箭頭模式（none/end/start/both）
   return out;
 }
 
@@ -1894,7 +1904,7 @@ function initDrawLayer(target, opts = {}) {
   }
   let unsubDraw = null;   // remote 訂閱解除函式（destroy 時呼叫）
   let drag = null;    // 繪製中：{ tool, rect, start, points }
-  const actions = { setMode, setTool, setBrush, setColor, setStrokeWidth, setFontSize, act, eyedropper: openEyedropper, closeContext: closeContextMenu, send: () => sendToAgent(), openRecord: () => { state.recordOpen = true; renderRecordPanel(); } };
+  const actions = { setMode, setTool, setBrush, setColor, setStrokeWidth, setFontSize, setHeads, act, eyedropper: openEyedropper, closeContext: closeContextMenu, send: () => sendToAgent(), openRecord: () => { state.recordOpen = true; renderRecordPanel(); } };
   const toolbar = buildToolbar(state, actions);
   document.body.appendChild(toolbar);
   const contextMenu = buildContextMenu(actions);
@@ -1941,7 +1951,33 @@ function initDrawLayer(target, opts = {}) {
       list.appendChild(empty);
       return;
     }
+    list.appendChild(recordPreviewEl()); // 置頂：送給 AI 的畫面截圖預覽
     rows.forEach(row => list.appendChild(recordRowEl(row, isSelected(row.id), onRecordRowClick)));
+    refreshRecordPreview();
+  }
+  // 標注紀錄頂部「送出畫面」縮圖：顯示 capturePng() 的結果（=送給 AI 的 PNG）。
+  let _previewSig = null, _previewUrl = null, _previewTimer = null;
+  function recordPreviewEl() {
+    const img = drawHtmlEl('img', 'pc-draw-rec-preview');
+    img.alt = '送給 AI 的畫面預覽';
+    img.style.cssText = 'display:block;width:100%;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;';
+    if (_previewUrl) img.src = _previewUrl;
+    return img;
+  }
+  function refreshRecordPreview() {
+    if (!state.recordOpen) return;
+    const sig = state.objects.length + '|' + history.length; // 內容變更（增刪/移動/換色）即重拍
+    if (sig === _previewSig) return;
+    _previewSig = sig;
+    if (_previewTimer) clearTimeout(_previewTimer);
+    _previewTimer = setTimeout(() => {
+      capturePng().then(url => {
+        if (!url) return;
+        _previewUrl = url;
+        const img = recordDrawer.querySelector('.pc-draw-rec-preview');
+        if (img) img.src = url;
+      });
+    }, 180); // debounce：連續操作只在停手後拍一次
   }
   // 點一筆 row → 選取該物件、若在畫面外則捲入視野（沿用 spec-overlay 的 scrollIntoView）。
   function onRecordRowClick(id) {
@@ -2268,6 +2304,7 @@ function initDrawLayer(target, opts = {}) {
   function setColor(c) { setStyle({ color: c }); }
   function setStrokeWidth(w) { setStyle({ strokeWidth: w }); }
   function setFontSize(px) { setStyle({ fontSize: px }); }
+  function setHeads(mode) { setStyle({ heads: mode }); } // line/arrow 端點箭頭 none/end/start/both
 
   // 吸管：用瀏覽器 EyeDropper API 取樣 → 走 setColor 同一語意。
   async function openEyedropper() {
@@ -2801,6 +2838,7 @@ function initDrawLayer(target, opts = {}) {
     setColor,
     setStrokeWidth,
     setFontSize,
+    setHeads,
     eyedropper: openEyedropper,
     addImage, // (dataURL, naturalW, naturalH, atPoint?) → 新 image 物件（paste/drop 與測試共用）
     buildExport: exportPayload,            // 結構化 JSON（selector + text + geom）
@@ -2905,7 +2943,12 @@ function renderObject(o, rect, svg) {
       x2: pctToPx(g.to.x, rect.width), y2: pctToPx(g.to.y, rect.height),
       stroke: s.color, 'stroke-width': s.strokeWidth, fill: 'none',
     };
-    if (o.tool === 'arrow') attrs['marker-end'] = `url(#${ensureArrowMarker(svg, s.color)})`;
+    const h = arrowHeads(o); // 端點箭頭：none/end/start/both（marker 用 auto-start-reverse 自動翻向）
+    if (h.start || h.end) {
+      const mid = ensureArrowMarker(svg, s.color);
+      if (h.end) attrs['marker-end'] = `url(#${mid})`;
+      if (h.start) attrs['marker-start'] = `url(#${mid})`;
+    }
     return drawSvgEl('line', attrs);
   }
   if (o.tool === 'pencil') {
@@ -3008,6 +3051,7 @@ function buildToolbar(state, actions) {
   bar.appendChild(colorMenu(actions));
   bar.appendChild(widthMenu(actions));
   bar.appendChild(fontSizeMenu(actions));
+  bar.appendChild(headsMenu(actions));
   appendSep(bar);
   bar.appendChild(actButton('delete', actions)); // 刪除（z-order 已移到右鍵選單）
   appendSep(bar);
@@ -3246,6 +3290,35 @@ function fontSizeButton(sz, actions) {
   b.style.cssText = `font-size:${Math.max(sz, 10)}px; padding:1px 6px; line-height:1.3; font-family:system-ui,sans-serif;`;
   b.textContent = 'A';
   b.onclick = () => actions.setFontSize(sz);
+  return b;
+}
+
+const HEAD_SYMBOL = { none: '—', end: '→', start: '←', both: '↔' };
+const HEAD_LABEL = { none: '無箭頭', end: '終點箭頭', start: '起點箭頭', both: '雙向箭頭' };
+// 端點箭頭 popover：line/arrow 選無/終點/起點/雙向（雙向＝雙箭頭）。
+function headsMenu(actions) {
+  const wrap = drawHtmlEl('div', 'pc-draw-menu');
+  const trigger = drawHtmlEl('button', 'pc-draw-tool pc-draw-trigger');
+  trigger.dataset.action = 'heads-menu';
+  trigger.title = '端點箭頭（單／雙向）';
+  trigger.setAttribute('aria-label', '端點箭頭');
+  trigger.textContent = '↔';
+  trigger.onclick = () => togglePopover(wrap);
+  const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-heads');
+  pop.dataset.menu = 'heads';
+  DRAW_HEAD_MODES.forEach(m => pop.appendChild(headsButton(m, actions)));
+  wrap.appendChild(trigger);
+  wrap.appendChild(pop);
+  return wrap;
+}
+function headsButton(mode, actions) {
+  const b = drawHtmlEl('button', 'pc-draw-heads');
+  b.dataset.heads = mode;
+  b.title = HEAD_LABEL[mode];
+  b.setAttribute('aria-label', HEAD_LABEL[mode]);
+  b.style.cssText = 'font-size:16px; padding:2px 8px; line-height:1.2;';
+  b.textContent = HEAD_SYMBOL[mode];
+  b.onclick = () => actions.setHeads(mode);
   return b;
 }
 

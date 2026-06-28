@@ -488,36 +488,32 @@ async function dragDraw(page, x1, y1, x2, y2) {
   });
 
   // ── Bug 1：繪圖工具啟用時 picker 只設預設、不回頭改選取；切繪圖工具會取消選取 ──
-  await test('bug1：繪圖工具啟用時 setColor 不改現有選取（只設下一個物件預設）', async () => {
+  await test('即時換色：繪圖工具下對剛建立(選取中)物件 setColor → 即時換色 + 更新預設', async () => {
     await reset('rect');
-    await page.evaluate(() => window.__drawTest.api.setColor('#F5A623')); // tool=rect → 只設預設（amber）
+    await page.evaluate(() => window.__drawTest.api.setColor('#F5A623')); // tool=rect → 設預設（amber）
     await dragDraw(page, 100, 80, 200, 180);                              // 畫出 amber rect（自動選取）
     const c1 = await page.evaluate(() => window.__drawTest.api.getObjects()[0].style.color);
-    await page.evaluate(() => window.__drawTest.api.setColor('#0066FF')); // tool 仍 rect → 不應改既有 rect
+    await page.evaluate(() => window.__drawTest.api.setColor('#0066FF')); // tool 仍 rect 但有選取 → 即時換該 rect
     const c2 = await page.evaluate(() => window.__drawTest.api.getObjects()[0].style.color);
-    // 新預設應為藍 → 再畫一個是藍
-    await dragDraw(page, 300, 100, 380, 200);
+    await dragDraw(page, 300, 100, 380, 200);                             // 再畫一個 → 沿用新預設藍
     const c3 = await page.evaluate(() => window.__drawTest.api.getObjects().slice(-1)[0].style.color);
-    console.log('     bug1 colors c1/c2/c3:', c1, c2, c3);
+    console.log('     recolor c1/c2/c3:', c1, c2, c3);
     assert(c1 === '#F5A623', `首個 rect 應為 amber，實際 ${c1}`);
-    assert(c2 === '#F5A623', `繪圖工具下 setColor 不該改既有選取，實際 ${c2}`);
+    assert(c2 === '#0066FF', `剛建立(選取中)物件 setColor 應即時換為藍，實際 ${c2}`);
     assert(c3 === '#0066FF', `新物件應沿用新預設藍，實際 ${c3}`);
   });
 
-  await test('bug1：select 工具 + 選取時 setColor 才改選取物件', async () => {
+  await test('即時換色：未選取時 setColor 只設預設、不動既有物件', async () => {
     await reset('rect');
-    await page.evaluate(() => window.__drawTest.api.setColor('#E5484D')); // 先把預設定成 red（tool=rect）
+    await page.evaluate(() => window.__drawTest.api.setColor('#E5484D')); // 預設 red
     await dragDraw(page, 100, 80, 200, 180);                             // 畫出 red rect（自動選取）
+    await page.evaluate(() => window.__drawTest.api.setTool('ellipse')); // 切繪圖工具 → 取消選取
     const beforeC = await page.evaluate(() => window.__drawTest.api.getObjects()[0].style.color);
-    await page.evaluate(() => window.__drawTest.api.setColor('#0066FF')); // 仍是繪圖工具 → 不改選取
-    const midC = await page.evaluate(() => window.__drawTest.api.getObjects()[0].style.color);
-    await page.evaluate(() => window.__drawTest.api.setTool('select'));   // 切 select（保留選取）
-    await page.evaluate(() => window.__drawTest.api.setColor('#111111')); // 這次應改選取物件
+    await page.evaluate(() => window.__drawTest.api.setColor('#0066FF')); // 無選取 → 只設預設
     const afterC = await page.evaluate(() => window.__drawTest.api.getObjects()[0].style.color);
-    console.log('     bug1 select-recolor:', beforeC, '→(rect-tool setColor)→', midC, '→(select setColor)→', afterC);
+    console.log('     recolor no-selection:', beforeC, '→(setColor blue, no selection)→', afterC);
     assert(beforeC === '#E5484D', `畫出時應為 red，實際 ${beforeC}`);
-    assert(midC === '#E5484D', `繪圖工具 setColor 不改選取，應仍 red，實際 ${midC}`);
-    assert(afterC === '#111111', `select + 選取時 setColor 應改色為黑，實際 ${afterC}`);
+    assert(afterC === '#E5484D', `無選取時 setColor 不該改既有物件，應仍 red，實際 ${afterC}`);
   });
 
   await test('bug1：切換到繪圖工具會取消目前選取', async () => {
@@ -1456,6 +1452,20 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.disabled, '送出後 1.8s 內 btn 應保持 disabled');
   });
 
+  await test('標注紀錄頂部顯示「送出畫面」縮圖（.pc-draw-rec-preview）', async () => {
+    await reset('ellipse');
+    await dragDraw(page, 110, 80, 210, 160);
+    // 確保抽屜開著（前一個測試可能殘留開/關狀態）→ 用 API 而非點工具列鈕（抽屜會蓋住工具列）
+    await page.evaluate(() => { if (!document.querySelector('.pc-draw-rec-drawer.open')) window.__drawTest.api.toggleRecordPanel(); });
+    await page.waitForTimeout(250);
+    const r = await page.evaluate(() => {
+      const list = document.querySelector('.pc-draw-rec-list');
+      return { hasPreview: !!document.querySelector('.pc-draw-rec-preview'), first: !!(list && list.firstChild && list.firstChild.className === 'pc-draw-rec-preview') };
+    });
+    assert(r.hasPreview, '標注紀錄頂部應有縮圖預覽 img');
+    assert(r.first, '縮圖應置於列表頂端');
+  });
+
   // ── Phase A：arrow/line 端點 handle + 拖曳重指向 ─────────────────────────────
   console.log('\ndraw-layer e2e — Phase A 端點 handle:');
 
@@ -1709,6 +1719,30 @@ async function dragDraw(page, x1, y1, x2, y2) {
     const r = await page.evaluate(() => (window.__drawTest.api.getObjects().find(o => o.tool === 'arrow').endAnchors || {}).to || null);
     console.log('     create-time snap anchor:', JSON.stringify(r));
     assert(r && r.kind === 'obj' && r.objId === rectId, `畫線終點應即時吸附 rect，實際 ${JSON.stringify(r)}`);
+  });
+
+  // ── Batch 6：端點箭頭（單／雙向）──────────────────────────────────────────────
+  console.log('\ndraw-layer e2e — Batch 6 端點箭頭 heads:');
+  await test('arrow 預設 → 有 marker-end、無 marker-start', async () => {
+    await reset('arrow');
+    await dragDraw(page, 120, 100, 260, 180);
+    const r = await page.evaluate(() => { const l = document.querySelector('#pc-draw line'); return { end: !!l.getAttribute('marker-end'), start: !!l.getAttribute('marker-start') }; });
+    assert(r.end, 'arrow 應有 marker-end');
+    assert(!r.start, 'arrow 預設不應有 marker-start');
+  });
+  await test('setHeads(both) → 雙箭頭（marker-start + marker-end）', async () => {
+    await page.evaluate(() => window.__drawTest.api.setHeads('both')); // 承上：arrow 已選取
+    const r = await page.evaluate(() => { const l = document.querySelector('#pc-draw line'); return { end: !!l.getAttribute('marker-end'), start: !!l.getAttribute('marker-start') }; });
+    assert(r.start && r.end, `雙向應有兩端 marker，實際 ${JSON.stringify(r)}`);
+  });
+  await test('line 預設無箭頭 → setHeads(end) 變單箭頭', async () => {
+    await reset('line');
+    await dragDraw(page, 120, 100, 260, 180);
+    const before = await page.evaluate(() => !!document.querySelector('#pc-draw line').getAttribute('marker-end'));
+    await page.evaluate(() => window.__drawTest.api.setHeads('end'));
+    const after = await page.evaluate(() => !!document.querySelector('#pc-draw line').getAttribute('marker-end'));
+    assert(!before, 'line 預設不應有 marker-end');
+    assert(after, 'setHeads(end) 後 line 應有 marker-end');
   });
 
   // ── P7 團隊持久（Firestore 向量同步，用 mock firebase）─────────────────────────────
