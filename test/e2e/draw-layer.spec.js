@@ -1500,6 +1500,42 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
   });
 
+  await test('多選送出：取消勾選某列 → 只送勾選的；全選框可全勾/全不選', async () => {
+    await reset('ellipse');
+    await dragDraw(page, 110, 80, 200, 150); // 第 1 筆
+    await page.evaluate(() => window.__drawTest.api.setTool('ellipse'));
+    await dragDraw(page, 250, 250, 330, 320); // 第 2 筆
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (!d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
+    // 預設兩列都勾 → 「送給 AI（2）」
+    const t0 = await page.evaluate(() => document.querySelector('.pc-draw-rec-send-btn').textContent.trim());
+    assert(/（2）/.test(t0), `預設應全勾顯示「送給 AI（2）」，實際 ${t0}`);
+    // 取消第 1 列勾選 → 「送給 AI（1）」
+    await page.evaluate(() => { const cbs = document.querySelectorAll('.pc-draw-rec-check'); cbs[0].click(); });
+    const t1 = await page.evaluate(() => document.querySelector('.pc-draw-rec-send-btn').textContent.trim());
+    assert(/（1）/.test(t1), `取消 1 列後應顯示「送給 AI（1）」，實際 ${t1}`);
+    // 送出 → POST body 只含 1 筆 annotation
+    await page.evaluate(() => {
+      window.__sendBody = null;
+      window.fetch = (url, opts) => { try { window.__sendBody = JSON.parse(opts.body); } catch (_) {} return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, n: 1, listening: true }) }); };
+      window.__drawTest.api.setExportEndpoint('http://x/api/draw');
+    });
+    await page.click('.pc-draw-rec-send-btn');
+    await page.waitForFunction(() => window.__sendBody, { timeout: 3000 });
+    const annN = await page.evaluate(() => window.__sendBody.json.annotations.length);
+    console.log('     multi-select sent annotations:', annN);
+    assert(annN === 1, `只勾 1 列 → 送出應只含 1 筆，實際 ${annN}`);
+    // 全選框：全不選 → 送出鈕 disabled / 「送給 AI（0）」
+    await page.waitForFunction(() => { const b = document.querySelector('.pc-draw-rec-send-btn'); return b && !b.dataset.inflight; }, { timeout: 3000 });
+    await page.evaluate(() => { const a = document.querySelector('.pc-draw-rec-all'); if (a.checked || a.indeterminate) a.click(); if (document.querySelector('.pc-draw-rec-all').checked) document.querySelector('.pc-draw-rec-all').click(); });
+    const r = await page.evaluate(() => { const b = document.querySelector('.pc-draw-rec-send-btn'); return { text: b.textContent.trim(), disabled: b.disabled }; });
+    assert(/（0）/.test(r.text) && r.disabled, `全不選後應「送給 AI（0）」且 disabled，實際 ${JSON.stringify(r)}`);
+    // 全選回來 → （2）enabled
+    await page.evaluate(() => { const a = document.querySelector('.pc-draw-rec-all'); if (!a.checked) a.click(); });
+    const r2 = await page.evaluate(() => { const b = document.querySelector('.pc-draw-rec-send-btn'); return { text: b.textContent.trim(), disabled: b.disabled }; });
+    assert(/（2）/.test(r2.text) && !r2.disabled, `全選後應「送給 AI（2）」且 enabled，實際 ${JSON.stringify(r2)}`);
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
+  });
+
   await test('標注紀錄頂部顯示「送出畫面」縮圖（.pc-draw-rec-preview）', async () => {
     await reset('ellipse');
     await dragDraw(page, 110, 80, 210, 160);
