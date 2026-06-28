@@ -2702,8 +2702,12 @@ function initDrawLayer(target, opts = {}) {
     if (state.mode !== 'draw' || state.tool !== 'select') return;
     const rect = svg.getBoundingClientRect();
     const hit = hitTest(clientToPct(e.clientX, e.clientY, rect));
-    if (hit) { e.preventDefault(); state.selectedIds = [hit.id]; startLabelEdit(hit, rect); }
-    else startTextInput(e.clientX, e.clientY, rect); // 雙擊空白 → 自由文字（Excalidraw parity）
+    if (hit) {
+      e.preventDefault();
+      state.selectedIds = [hit.id];
+      if (hit.tool === 'text') startTextEdit(hit, rect); // 文字物件 → 編輯內容
+      else startLabelEdit(hit, rect);                    // 其他 → 編輯綁定標籤
+    } else startTextInput(e.clientX, e.clientY, rect);    // 雙擊空白 → 自由文字（Excalidraw parity）
   }
   // 在物件錨點（shape 中心 / line 中點）開輸入框，commit 寫回 obj.label（可 undo）。
   function startLabelEdit(o, rect) {
@@ -2727,6 +2731,34 @@ function initDrawLayer(target, opts = {}) {
       if (text === (o.label || '')) { render(); return; } // 無變更
       o.label = text;                              // 立即套用（預覽）
       pushHistory({ type: 'update', id: o.id, before, after: { label: text } });
+    };
+    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('blur', commit);
+  }
+  // 雙擊文字物件 → 編輯其內容（o.text）；清空則刪除該物件。
+  function startTextEdit(o, rect) {
+    const input = drawHtmlEl('input', 'pc-draw-text-input');
+    input.type = 'text';
+    input.value = o.text || '';
+    input.style.left = pctToPx(o.geom.x, rect.width) + 'px';
+    input.style.top = (pctToPx(o.geom.y, rect.height) - 12) + 'px';
+    host.appendChild(input);
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+    const before = { text: o.text || '' };
+    let done = false;
+    const commit = () => {
+      if (done) return;
+      done = true;
+      const text = input.value.trim();
+      input.remove();
+      if (text === (o.text || '')) { render(); return; } // 無變更
+      if (!text) { // 清空 → 刪除該文字物件
+        const index = state.objects.findIndex(x => x.id === o.id);
+        if (index >= 0) runCommand({ type: 'deleteMany', items: [{ obj: o, index }] });
+        return;
+      }
+      o.text = text;                               // 立即套用（預覽）
+      pushHistory({ type: 'update', id: o.id, before, after: { text } });
     };
     input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
     input.addEventListener('blur', commit);
