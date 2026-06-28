@@ -1000,6 +1000,9 @@ const DRAW_STYLES = `
 .pc-draw-rec-status { flex: none; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 999px; white-space: nowrap; }
 .pc-draw-rec-status.is-sent { color: #0d7a4f; background: rgba(22,163,74,.12); }
 .pc-draw-rec-status.is-unsent { color: #9a6a00; background: rgba(183,121,31,.14); }
+.pc-draw-rec-check { flex: none; width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: #0FA0A0; }
+.pc-draw-rec-all-wrap { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #475569; cursor: pointer; user-select: none; }
+.pc-draw-rec-all { width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: #0FA0A0; }
 .pc-draw-rec-text { color: #1e293b; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-draw-rec-sel { margin-top: 2px; color: #0d8f8f; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1053,6 +1056,7 @@ export function initDrawLayer(target, opts = {}) {
     exportEndpoint: opts.exportEndpoint || null, // 「送給 AI」POST 目標（無則只回 payload）
     recordOpen: false, // P6 側邊標注紀錄抽屜開關（預設關 → 不打擾一般使用）
     sentSigs: {},      // {objId: 上次成功送出時的內容簽章} → 面板每列顯示「已送/未送」
+    sendUnchecked: {}, // {objId: true} → 該列「不納入送出」（預設全勾；新物件預設納入）
   };
   const history = makeUndoStack();
   // ── P7 團隊持久（選用）：把 opts.persist 解析成 drawings store（ready store 或 {fb,db,projectId}）。
@@ -1089,6 +1093,15 @@ export function initDrawLayer(target, opts = {}) {
   const recordDrawer = buildRecordDrawer(() => { state.recordOpen = false; renderRecordPanel(); });
   const drawerSendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
   if (drawerSendBtn) drawerSendBtn.onclick = () => handleDrawerSend();
+  // 標注紀錄「送出時納入哪些」勾選集合：unchecked 內的不送（預設全送）。
+  const checkedObjects = () => state.objects.filter(o => !state.sendUnchecked[o.id]);
+  const onToggleSendChecked = (id, checked) => { if (checked) delete state.sendUnchecked[id]; else state.sendUnchecked[id] = true; renderRecordPanel(); };
+  const drawerAllBox = recordDrawer.querySelector('.pc-draw-rec-all');
+  if (drawerAllBox) drawerAllBox.onchange = () => {
+    if (drawerAllBox.checked) state.sendUnchecked = {};
+    else state.objects.forEach(o => { state.sendUnchecked[o.id] = true; });
+    renderRecordPanel();
+  };
   document.body.appendChild(recordDrawer);
   document.body.appendChild(recordTab);
 
@@ -1097,15 +1110,23 @@ export function initDrawLayer(target, opts = {}) {
     recordTab.classList.toggle('show', !state.recordOpen);
     recordDrawer.classList.toggle('open', state.recordOpen);
     const rows = annotationRows(state.objects, state.sentSigs);
+    const checkedCount = rows.filter(r => !state.sendUnchecked[r.id]).length; // 納入送出的數量
     const count = recordDrawer.querySelector('.pc-draw-rec-count');
     if (count) count.textContent = String(rows.length);
+    // 全選框：全勾→checked、部分→indeterminate、空清單→disabled
+    const allBox = recordDrawer.querySelector('.pc-draw-rec-all');
+    if (allBox) {
+      allBox.checked = rows.length > 0 && checkedCount === rows.length;
+      allBox.indeterminate = checkedCount > 0 && checkedCount < rows.length;
+      allBox.disabled = rows.length === 0;
+    }
     // footer 送出鈕：畫布清空時強制重設（否則 in-flight 中若 clear 仍殘留舊狀態）
     const sendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
     if (sendBtn) {
       if (!rows.length) delete sendBtn.dataset.inflight; // clear → 強制重設
       if (!sendBtn.dataset.inflight) {
-        sendBtn.textContent = `送給 AI（${rows.length}）`;
-        sendBtn.disabled = rows.length === 0;
+        sendBtn.textContent = `送給 AI（${checkedCount}）`;
+        sendBtn.disabled = checkedCount === 0;
         sendBtn.classList.remove('pc-draw-rec-queued');
       }
     }
@@ -1119,7 +1140,7 @@ export function initDrawLayer(target, opts = {}) {
       return;
     }
     list.appendChild(recordPreviewEl()); // 置頂：送給 AI 的畫面截圖預覽
-    rows.forEach(row => list.appendChild(recordRowEl(row, isSelected(row.id), onRecordRowClick)));
+    rows.forEach(row => list.appendChild(recordRowEl(row, isSelected(row.id), onRecordRowClick, !state.sendUnchecked[row.id], onToggleSendChecked)));
     refreshRecordPreview();
   }
   // 標注紀錄頂部「送出畫面」縮圖：顯示 capturePng() 的結果（=送給 AI 的 PNG）。
@@ -1749,7 +1770,7 @@ export function initDrawLayer(target, opts = {}) {
   }
 
   function exportPayload() {
-    return buildExport(state.objects, { w: svg.clientWidth || host.clientWidth, h: svg.clientHeight || host.clientHeight });
+    return buildExport(checkedObjects(), { w: svg.clientWidth || host.clientWidth, h: svg.clientHeight || host.clientHeight });
   }
   // 把 #pc-draw SVG（含貼圖 + 標注）轉 PNG dataURL（XMLSerializer → img → canvas）。async。
   async function capturePng() {
@@ -1760,6 +1781,8 @@ export function initDrawLayer(target, opts = {}) {
       clone.setAttribute('height', h);
       clone.setAttribute('xmlns', SVG_NS);
       clone.querySelectorAll('.pc-draw-selection, .pc-draw-marquee').forEach(n => n.remove()); // 不要選取框
+      // 只截「納入送出」的標注：移除未勾選物件的圖元，讓截圖與送出的 JSON 一致。
+      clone.querySelectorAll('[data-id]').forEach(n => { if (state.sendUnchecked[n.getAttribute('data-id')]) n.remove(); });
       const xml = new XMLSerializer().serializeToString(clone);
       const url = URL.createObjectURL(new Blob([xml], { type: 'image/svg+xml;charset=utf-8' }));
       const dataURL = await new Promise((resolve, reject) => {
@@ -1806,7 +1829,8 @@ export function initDrawLayer(target, opts = {}) {
   async function handleDrawerSend() {
     const sendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
     if (!sendBtn || sendBtn.disabled || sendBtn.dataset.inflight) return;
-    const n = annotationRows(state.objects).length; // 與面板計數一致（非 raw objects 數）
+    const n = checkedObjects().length; // 實際送出的筆數（只算勾選的）
+    if (!n) return; // 全沒勾 → 不送
     sendBtn.dataset.inflight = '1';
     sendBtn.disabled = true;
     sendBtn.textContent = '送出中…';
@@ -1816,8 +1840,8 @@ export function initDrawLayer(target, opts = {}) {
       // 分「AI 在線＝立即送達」與「AI 未連線＝已排佇列（之後連上自動收）」，讓使用者看得出狀態。
       sendBtn.textContent = result.listening ? `✅ 已送達 AI（${n} 筆）` : `📥 已排佇列（${n} 筆，AI 未連線）`;
       sendBtn.classList.toggle('pc-draw-rec-queued', !result.listening);
-      // 記下這批每個物件的簽章 → 面板每列標「已送」（改動後簽章變、自動回「未送」）。
-      state.objects.forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
+      // 記下這批「實際送出（勾選）」物件的簽章 → 面板那幾列標「已送」（改動後簽章變、自動回「未送」）。
+      checkedObjects().forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
       renderRecordPanel(); // 立刻更新各列「已送」標記（inflight 仍在 → 不會蓋掉按鈕狀態文字）
       // 2 秒後恢復成可再送（同一批可重送；server 不去重、AI 端 cursor 會收到）。
       setTimeout(() => { delete sendBtn.dataset.inflight; renderRecordPanel(); }, 2000);
@@ -2081,7 +2105,7 @@ export function initDrawLayer(target, opts = {}) {
     setExportEndpoint: url => { state.exportEndpoint = url; },
     getAnnotationRows: () => annotationRows(state.objects, state.sentSigs), // P6 面板 row 資料（純函式包裝）
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
-    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; render(); persistLocalSave(); },
+    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sendUnchecked = {}; render(); persistLocalSave(); },
     destroy: () => {
       stopLive(); // Batch 4：拆掉 live reposition 監聽/rAF/ResizeObserver
       svg.remove(); toolbar.remove(); contextMenu.remove();
@@ -2380,9 +2404,15 @@ function buildRecordDrawer(onClose) {
   const hd = drawHtmlEl('div', 'pc-draw-rec-hd');
   const title = drawHtmlEl('span', 'pc-draw-rec-hd-title'); title.textContent = '標注紀錄';
   const count = drawHtmlEl('span', 'pc-draw-rec-count'); count.textContent = '0';
+  // 全選/全不選：控制「送出時納入哪些標注」（onchange 在 initDrawLayer 掛上）
+  const allWrap = drawHtmlEl('label', 'pc-draw-rec-all-wrap');
+  const allBox = drawHtmlEl('input', 'pc-draw-rec-all'); allBox.type = 'checkbox'; allBox.checked = true;
+  allBox.setAttribute('aria-label', '全選／全不選送出');
+  const allLbl = drawHtmlEl('span'); allLbl.textContent = '全選';
+  allWrap.appendChild(allBox); allWrap.appendChild(allLbl);
   const close = drawHtmlEl('button', 'pc-draw-rec-close'); close.textContent = '✕';
   close.title = '關閉'; close.setAttribute('aria-label', '關閉標注紀錄'); close.onclick = onClose;
-  hd.appendChild(title); hd.appendChild(count); hd.appendChild(close);
+  hd.appendChild(title); hd.appendChild(count); hd.appendChild(allWrap); hd.appendChild(close);
   drawer.appendChild(hd);
   drawer.appendChild(drawHtmlEl('div', 'pc-draw-rec-list'));
   // footer：主要送出按鈕（onclick 在 initDrawLayer 掛上）
@@ -2395,10 +2425,17 @@ function buildRecordDrawer(onClose) {
   return drawer;
 }
 // 一筆標注 → 面板 row（工具圖示 + 色票 + 文字 + selector）。點擊 → onClick(id)。
-function recordRowEl(row, selected, onClick) {
-  const el = drawHtmlEl('button', 'pc-draw-rec-row' + (selected ? ' selected' : ''));
+function recordRowEl(row, selected, onClick, checked, onToggle) {
+  const el = drawHtmlEl('div', 'pc-draw-rec-row' + (selected ? ' selected' : ''));
   el.dataset.id = row.id;
+  el.setAttribute('role', 'button'); el.setAttribute('tabindex', '0');
   el.setAttribute('aria-label', row.text);
+  // 送出勾選框：是否納入送出（獨立於畫布選取；stopPropagation 不觸發整列點選）。
+  const cb = drawHtmlEl('input', 'pc-draw-rec-check'); cb.type = 'checkbox'; cb.checked = checked !== false;
+  cb.setAttribute('aria-label', '送出時包含此標注');
+  cb.onclick = e => e.stopPropagation();
+  cb.onchange = e => { e.stopPropagation(); if (onToggle) onToggle(row.id, cb.checked); };
+  el.appendChild(cb);
   const ic = drawHtmlEl('span', 'pc-draw-rec-icon');
   ic.innerHTML = icon(row.icon, 18);
   el.appendChild(ic);
