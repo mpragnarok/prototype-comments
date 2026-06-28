@@ -2301,6 +2301,18 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(sel.length === 1 && sel[0] === pencilId, `點鉛筆筆畫應選到鉛筆，實際 ${JSON.stringify(sel)}`);
   });
 
+  await test('bbox 後援：點未重疊鉛筆捲線的內側空白 → 仍選到鉛筆', async () => {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); window.__drawTest.api.setTool('pencil'); });
+    await page.mouse.move(160, 240); await page.mouse.down(); await page.mouse.move(220, 200); await page.mouse.move(260, 250); await page.mouse.move(210, 290); await page.mouse.move(160, 250); await page.mouse.up();
+    const pid = await page.evaluate(() => window.__drawTest.api.getObjects().find(o => o.tool === 'pencil').id);
+    await page.evaluate(() => { window.__drawTest.api.setTool('select'); window.__drawTest.api.selectIds([]); });
+    await page.mouse.click(210, 245); // 捲線內側空白（非筆畫）→ 無重疊 → bbox 後援命中
+    await page.waitForTimeout(30);
+    const sel = await page.evaluate(() => window.__drawTest.api.getSelectedIds());
+    console.log('     bbox-fallback selIds:', JSON.stringify(sel), 'pencil:', pid);
+    assert(sel.length === 1 && sel[0] === pid, `未重疊時點捲線內側應靠 bbox 後援選到鉛筆，實際 ${JSON.stringify(sel)}`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
