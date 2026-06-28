@@ -2375,11 +2375,18 @@ function initDrawLayer(target, opts = {}) {
     startMove(rect, p);                                               // 拖曳 → 整個選取一起移動
   }
   function hitTest(p) {
-    const tol = 2; // % 容差（細線靠近即命中；填充形狀為 bbox 外擴）
+    const tol = 2.5; // % 容差
+    // 第一輪：精準命中（細線用實際幾何）→ 重疊時點哪條線選哪條
     for (let i = state.objects.length - 1; i >= 0; i--) {
       const o = state.objects[i];
       const ends = (o.tool === 'arrow' || o.tool === 'line') ? resolveO(o) : null;
       if (pointHitsObject(o, p, tol, ends)) return o;
+    }
+    // 第二輪：bbox 後援 → 點在大空白外框內也選得到（如鉛筆捲線內側、未重疊時）
+    for (let i = state.objects.length - 1; i >= 0; i--) {
+      const o = state.objects[i];
+      const b = geomBBox(o, resolveO);
+      if (p.x >= b.x - tol && p.x <= b.x + b.w + tol && p.y >= b.y - tol && p.y <= b.y + b.h + tol) return o;
     }
     return null;
   }
