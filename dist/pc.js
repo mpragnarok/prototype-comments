@@ -1929,6 +1929,18 @@ const DRAW_STYLES = `
 .pc-draw-rec-check { flex: none; width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: #0FA0A0; }
 .pc-draw-rec-all-wrap { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #475569; cursor: pointer; user-select: none; }
 .pc-draw-rec-all { width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: #0FA0A0; }
+/* AI 方案卡層：錨定在標注旁。容器不吃指標，卡片本身吃。 */
+.pc-draw-reply-layer { position: absolute; inset: 0; pointer-events: none; z-index: 2147483640; }
+.pc-draw-reply-card { position: absolute; pointer-events: auto; max-width: 260px; transform: translate(12px, 12px);
+  background: #fff; border: 1.5px solid #0FA0A0; border-radius: 10px; padding: 10px 12px;
+  box-shadow: 0 6px 24px rgba(15,160,160,.22); font: 13px/1.5 system-ui, -apple-system, sans-serif; color: #1e293b; }
+.pc-draw-reply-head { font-size: 11px; font-weight: 700; color: #0d8f8f; margin-bottom: 4px; }
+.pc-draw-reply-text { margin-bottom: 8px; white-space: pre-wrap; }
+.pc-draw-reply-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.pc-draw-reply-opt { padding: 6px 10px; border: 1px solid #0FA0A0; border-radius: 7px; background: rgba(15,160,160,.08);
+  color: #0d7a7a; font-size: 12px; font-weight: 600; cursor: pointer; }
+.pc-draw-reply-opt:hover { background: #0FA0A0; color: #fff; }
+.pc-draw-reply-chosen { color: #0d7a4f; font-weight: 700; font-size: 12px; }
 .pc-draw-rec-text { color: #1e293b; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-draw-rec-sel { margin-top: 2px; color: #0d8f8f; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1970,6 +1982,9 @@ function initDrawLayer(target, opts = {}) {
   const svg = drawSvgEl('svg', { id: 'pc-draw' });
   buildArrowhead(svg);
   host.appendChild(svg);
+  // AI 方案卡層：錨定在標注旁的回覆卡（不依賴 lavish，走自家 reply 通道）。容器不吃指標、卡片才吃。
+  const replyLayer = drawHtmlEl('div', 'pc-draw-reply-layer');
+  host.appendChild(replyLayer);
 
   const state = {
     mode: opts.mode && DRAW_MODES.includes(opts.mode) ? opts.mode : 'off',
@@ -1983,6 +1998,8 @@ function initDrawLayer(target, opts = {}) {
     recordOpen: false, // P6 側邊標注紀錄抽屜開關（預設關 → 不打擾一般使用）
     sentSigs: {},      // {objId: 上次成功送出時的內容簽章} → 面板每列顯示「已送/未送」
     sendUnchecked: {}, // {objId: true} → 該列「不納入送出」（預設全勾；新物件預設納入）
+    replies: [],       // AI 貼回頁面的方案卡（{n, anchor, text, options, chosen?}）
+    replyCursor: 0,    // reply-poll 游標
   };
   const history = makeUndoStack();
   // ── P7 團隊持久（選用）：把 opts.persist 解析成 drawings store（ready store 或 {fb,db,projectId}）。
@@ -2252,6 +2269,52 @@ function initDrawLayer(target, opts = {}) {
     syncToolbar(toolbar, state, history);
     renderRecordPanel(); // P6：標注紀錄面板隨 objects/selection 即時更新
     syncLiveLoop();       // Batch 4：有 anchor 才啟動 live reposition 監聽
+    renderReplies();     // AI 方案卡：錨定貼在標注旁
+  }
+
+  // ── AI 方案卡（reply 通道）：渲染 + 輪詢 + 回送選擇 ─────────────────────────────
+  function renderReplies() {
+    replyLayer.innerHTML = '';
+    const rect = { width: svg.clientWidth || host.clientWidth, height: svg.clientHeight || host.clientHeight };
+    state.replies.forEach(r => {
+      const card = replyCardEl(r, submitChoice);
+      const a = r.anchor || {};
+      const x = a.x != null ? a.x : 50, y = a.y != null ? a.y : 50;
+      card.style.left = pctToPx(x, rect.width) + 'px';
+      card.style.top = pctToPx(y, rect.height) + 'px';
+      replyLayer.appendChild(card);
+    });
+  }
+  // 注入方案卡（poll 收到或測試用）：依 n 去重後併入。
+  function ingestReplies(entries) {
+    (entries || []).forEach(e => { if (!state.replies.some(r => r.n === e.n)) state.replies.push(e); });
+    renderReplies();
+  }
+  // 使用者點方案卡上的選項 → 標記已選 + POST /api/draw-choice（→ AI 端 draw-poll 收到）。
+  async function submitChoice(reply, option) {
+    reply.chosen = option;
+    renderReplies();
+    const endpoint = sameOriginApi('/api/draw-choice');
+    if (endpoint && typeof fetch === 'function') {
+      try {
+        await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ replyId: reply.n, optionId: option.id, optionLabel: option.label }) });
+      } catch (_) { /* 離線：已在卡片標記已選，下次連上可重點 */ }
+    }
+  }
+  // reply-poll 迴圈：long-poll 收 AI 方案卡（僅 opts.replyPoll 開啟時跑；同源 http 才有 endpoint）。
+  let replyPolling = false;
+  async function replyPollLoop() {
+    const endpoint = sameOriginApi('/api/draw-reply-poll');
+    if (!endpoint || typeof fetch !== 'function') return;
+    replyPolling = true;
+    while (replyPolling) {
+      try {
+        const resp = await fetch(endpoint + '?since=' + state.replyCursor);
+        const data = await resp.json();
+        if (data && Array.isArray(data.entries) && data.entries.length) ingestReplies(data.entries);
+        if (data && data.cursor != null) state.replyCursor = data.cursor;
+      } catch (_) { await new Promise(r => setTimeout(r, 2000)); }
+    }
   }
 
   function renderSelection(rect) {
@@ -2734,11 +2797,17 @@ function initDrawLayer(target, opts = {}) {
       return dataURL;
     } catch (_) { return null; }
   }
-  // 實際使用時 flow 由 resolve server 同源服務 → 預設打同源 /api/draw（http(s) 才送；file:// 回 null 不送）。
-  function sameOriginDrawEndpoint() {
+  // 同源 API 路徑（http(s) 才回，file:// 回 null）。resolve server 同源服務 flow + 這些端點。
+  function sameOriginApi(p) {
     try {
       const o = typeof location !== 'undefined' && location.origin;
-      return o && /^https?:/.test(o) ? o + '/api/draw' : null;
+      return o && /^https?:/.test(o) ? o + p : null;
+    } catch (_) { return null; }
+  }
+  // 預設打同源 /api/draw（http(s) 才送；file:// 回 null 不送）。
+  function sameOriginDrawEndpoint() {
+    try {
+      return sameOriginApi('/api/draw');
     } catch (_) { return null; }
   }
   // 組 {json, png} → POST 到 endpoint（可無）；無論有無 server 都回 payload 供 caller/測試讀。
@@ -3008,6 +3077,7 @@ function initDrawLayer(target, opts = {}) {
   applyMode();
   render();
   startSync(); // P7：團隊模式才訂閱 + 載入既有 drawings（dev 模式 drawStore=null → no-op）
+  if (opts.replyPoll) replyPollLoop(); // 開啟才跑 AI 方案卡輪詢（同源 http 才有 endpoint）
 
   return {
     svg, host,
@@ -3038,11 +3108,14 @@ function initDrawLayer(target, opts = {}) {
     sendToAgent,                           // async (opts?) → {json, png, sent}；回 payload
     setExportEndpoint: url => { state.exportEndpoint = url; },
     getAnnotationRows: () => annotationRows(state.objects, state.sentSigs), // P6 面板 row 資料（純函式包裝）
+    ingestReplies, // AI 方案卡：注入回覆（poll 收到或測試用）
+    getReplies: () => state.replies.slice(),
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
-    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sendUnchecked = {}; render(); persistLocalSave(); },
+    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sendUnchecked = {}; state.replies = []; render(); persistLocalSave(); },
     destroy: () => {
       stopLive(); // Batch 4：拆掉 live reposition 監聽/rAF/ResizeObserver
-      svg.remove(); toolbar.remove(); contextMenu.remove();
+      replyPolling = false; // 停掉 AI 方案卡輪詢
+      svg.remove(); toolbar.remove(); contextMenu.remove(); replyLayer.remove();
       recordTab.remove(); recordDrawer.remove();
       window.removeEventListener('resize', render);
       window.removeEventListener('keydown', onKey);
@@ -3393,6 +3466,32 @@ function recordRowEl(row, selected, onClick, checked, onToggle) {
   el.appendChild(badge);
   el.onclick = () => onClick(row.id);
   return el;
+}
+
+// AI 方案卡（錨定貼在標注旁）：標題 + 文字 + 可點選項按鈕；已選則顯示「✓ 已選」。
+// onChoose(reply, option) 在點選項時呼叫。純函式（位置由呼叫端設 style）。
+function replyCardEl(reply, onChoose) {
+  const card = drawHtmlEl('div', 'pc-draw-reply-card');
+  card.dataset.n = reply.n;
+  const head = drawHtmlEl('div', 'pc-draw-reply-head'); head.textContent = '💬 AI 方案';
+  card.appendChild(head);
+  if (reply.text) { const t = drawHtmlEl('div', 'pc-draw-reply-text'); t.textContent = reply.text; card.appendChild(t); }
+  const opts = Array.isArray(reply.options) ? reply.options : [];
+  if (reply.chosen) {
+    const c = drawHtmlEl('div', 'pc-draw-reply-chosen');
+    c.textContent = '✓ 已選：' + (reply.chosen.label || reply.chosen.id);
+    card.appendChild(c);
+  } else if (opts.length) {
+    const row = drawHtmlEl('div', 'pc-draw-reply-opts');
+    opts.forEach(o => {
+      const b = drawHtmlEl('button', 'pc-draw-reply-opt');
+      b.textContent = o.label || o.id;
+      b.onclick = () => onChoose && onChoose(reply, o);
+      row.appendChild(b);
+    });
+    card.appendChild(row);
+  }
+  return card;
 }
 
 // 顏色 popover：8 預設色 swatch ＋ <input type=color> 自訂任意 hex。
