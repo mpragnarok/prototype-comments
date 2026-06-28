@@ -1889,15 +1889,26 @@ export function initDrawLayer(target, opts = {}) {
     if (decs.length) p.decisions = decs.map(d => ({ replyId: d.replyId, optionId: d.optionId, optionLabel: d.optionLabel })); // 方案卡決定隨批送
     return p;
   }
-  // html2canvas 載入：優先用既有 window.html2canvas，否則動態 import CDN（5s 內沒好就放棄）。回 fn 或 null。
+  // html2canvas 載入：優先用既有 window.html2canvas；否則注入 UMD <script>（雙 CDN 後援）。
+  // 用 <script> 而非 ESM import — esm.sh 動態 import 時好時壞，失敗會默默退回透明 SVG-only（截不到底下畫面）。
   let _h2cPromise = null;
+  function injectScript(src) {
+    return new Promise((resolve) => {
+      const s = document.createElement('script');
+      s.src = src; s.async = true;
+      s.onload = () => resolve(window.html2canvas || null);
+      s.onerror = () => resolve(null);
+      document.head.appendChild(s);
+    });
+  }
   function loadHtml2canvas() {
-    if (typeof window !== 'undefined' && window.html2canvas) return Promise.resolve(window.html2canvas);
-    if (typeof window === 'undefined') return Promise.resolve(null);
+    if (typeof window === 'undefined' || typeof document === 'undefined') return Promise.resolve(null);
+    if (window.html2canvas) return Promise.resolve(window.html2canvas);
     if (!_h2cPromise) {
-      const imp = import('https://esm.sh/html2canvas@1.4.1').then(m => (m && (m.default || m)) || null).catch(() => null);
-      const timeout = new Promise(r => setTimeout(() => r(null), 5000));
-      _h2cPromise = Promise.race([imp, timeout]);
+      _h2cPromise = injectScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
+        .then(fn => fn || injectScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'))
+        .then(fn => fn || window.html2canvas || null)
+        .catch(() => null);
     }
     return _h2cPromise;
   }
@@ -2244,7 +2255,7 @@ export function initDrawLayer(target, opts = {}) {
   applyMode();
   render();
   startSync(); // P7：團隊模式才訂閱 + 載入既有 drawings（dev 模式 drawStore=null → no-op）
-  if (opts.replyPoll) replyPollLoop(); // 開啟才跑 AI 方案卡輪詢（同源 http 才有 endpoint）
+  if (opts.replyPoll) { replyPollLoop(); loadHtml2canvas(); } // 跑方案卡輪詢 + 預載 html2canvas（送出時整頁截圖才不會卡/退回透明）
 
   return {
     svg, host,
