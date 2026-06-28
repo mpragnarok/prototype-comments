@@ -1207,11 +1207,18 @@ export function initDrawLayer(target, opts = {}) {
   // 標注紀錄頂部「送出畫面」縮圖：顯示 capturePng() 的結果（=送給 AI 的 PNG）。
   let _previewSig = null, _previewUrl = null, _previewTimer = null;
   function recordPreviewEl() {
-    const img = drawHtmlEl('img', 'pc-draw-rec-preview');
-    img.alt = '送給 AI 的畫面預覽';
-    img.style.cssText = 'display:block;width:100%;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;';
-    if (_previewUrl) img.src = _previewUrl;
-    return img;
+    if (_previewUrl) {
+      const img = drawHtmlEl('img', 'pc-draw-rec-preview');
+      img.alt = '送給 AI 的畫面預覽';
+      img.style.cssText = 'display:block;width:100%;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;';
+      img.src = _previewUrl;
+      return img;
+    }
+    // 截圖尚未備好 → 顯示 placeholder（避免空 src <img> 被瀏覽器畫成破圖）
+    const ph = drawHtmlEl('div', 'pc-draw-rec-preview');
+    ph.textContent = '產生預覽中…';
+    ph.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;color:#8a9099;font-size:12px;';
+    return ph;
   }
   function refreshRecordPreview() {
     if (!state.recordOpen) return;
@@ -1223,8 +1230,10 @@ export function initDrawLayer(target, opts = {}) {
       capturePng().then(url => {
         if (!url) return;
         _previewUrl = url;
-        const img = recordDrawer.querySelector('.pc-draw-rec-preview');
-        if (img) img.src = url;
+        const el = recordDrawer.querySelector('.pc-draw-rec-preview');
+        if (!el) return;
+        if (el.tagName === 'IMG') { el.src = url; return; }
+        el.replaceWith(recordPreviewEl()); // placeholder → 真正的 <img>（_previewUrl 已設）
       });
     }, 180); // debounce：連續操作只在停手後拍一次
   }
@@ -1905,10 +1914,14 @@ export function initDrawLayer(target, opts = {}) {
     if (typeof window === 'undefined' || typeof document === 'undefined') return Promise.resolve(null);
     if (window.html2canvas) return Promise.resolve(window.html2canvas);
     if (!_h2cPromise) {
-      _h2cPromise = injectScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
+      const chain = injectScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
         .then(fn => fn || injectScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'))
         .then(fn => fn || window.html2canvas || null)
         .catch(() => null);
+      // 整體逾時後援：任一/兩個 CDN 請求卡住（pending，不觸發 onload/onerror）時，
+      // 不讓 capturePng 無限等 → 4.5s 後回 null，退回 SVG-only。背景仍可能載完，下次截圖即用整頁。
+      const timeout = new Promise(res => setTimeout(() => res(null), 4500));
+      _h2cPromise = Promise.race([chain, timeout]);
     }
     return _h2cPromise;
   }
