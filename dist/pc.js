@@ -1049,6 +1049,18 @@ function resolveShortcutByCode(code) {
   return null;
 }
 
+// localhost / 本機環境判斷（繪圖是 dev-time 工具，只在本機掛入口；線上不顯示）。
+function isLocalEnv(hostname) {
+  return hostname === 'localhost' || hostname === '127.0.0.1'
+      || hostname === '0.0.0.0' || hostname === '::1' || hostname === '';
+}
+// enableDraw 解析：'auto'(預設)=只 localhost；true=永遠；false=永不。
+function shouldEnableDraw(mode, hostname) {
+  if (mode === true) return true;
+  if (mode === false) return false;
+  return isLocalEnv(hostname); // 'auto' 或 undefined
+}
+
 // ── 純函式（單元測試對象，無 DOM 依賴）──────────────────────────────────────
 // px → viewport-%（沿用 index.js overlay click 的 toFixed(2) 慣例）。
 function pxToPct(px, total) {
@@ -3985,6 +3997,8 @@ export async function initPrototypeComments(opts = {}) {
                                 //   true(live overlay)→ 改成跳到該 note：關面板、(必要時)換頁、捲到
                                 //   對應 .eng-note-row 並開它的討論串。因 note 在 React 抽屜(keepMounted
                                 //   但視覺關閉)，跳轉前先 dispatch `pc:note-jump` 事件讓 consumer 開抽屜。
+    enableDraw        = 'auto', // [ADD 2026-06-27] 繪圖標注層（dev-time 工具，寫 .proto-crit/，0 Firebase）：
+                                //   'auto'(預設)→ 只在 localhost 掛入口、線上不顯示；true→ 永遠掛；false→ 永不。
     _firebase         = null,   // 測試用：注入 in-memory firebase mock，略過 CDN load + 真 Firebase
   } = opts;
 
@@ -5426,9 +5440,38 @@ export async function initPrototypeComments(opts = {}) {
     }
   });
 
+  // ── 繪圖標注入口（localhost-gated，懶載入）──────────────────────────────────
+  // 線上(非 localhost)完全不掛 → 部署站行為不變。本機掛一顆獨立浮鈕（不放 auth bar，
+  // 因 auth bar 每次登入態變動會 innerHTML='' 清空；繪圖也不需登入）。
+  let _draw = null; // 懶載入 handle：首點才 initDrawLayer，後續點重新進 draw。
+  function mountDrawLauncher() {
+    if (!shouldEnableDraw(enableDraw, location.hostname)) return;
+    if (document.getElementById('pc-draw-launch')) return;
+    const btn = document.createElement('button');
+    btn.id = 'pc-draw-launch';
+    btn.textContent = '✏️ 繪圖';
+    btn.title = '繪圖標注（本機）';
+    // 貼左下：auth bar 浮底角、draw 工具列浮底中，彼此不撞。樣式對齊 .pc-draw-toolbar 深色藥丸。
+    btn.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:2147483600;'
+      + 'background:#1e1e1e;color:#fff;border:none;border-radius:20px;'
+      + 'padding:8px 14px;font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)';
+    btn.addEventListener('click', () => {
+      try {
+        if (!_draw) {
+          _draw = initDrawLayer(document.querySelector(designTarget) || document.body, { projectId });
+        }
+        _draw.setMode('draw');
+      } catch (e) {
+        console.error('[prototype-comments] draw-layer 啟動失敗（不影響留言系統）:', e);
+      }
+    });
+    document.body.appendChild(btn);
+  }
+
   // ── Bootstrap ─────────────────────────────────────────────────────────────
   mountAuthBar();
   mountOverlay();
+  mountDrawLauncher();
 
   subscribe();
 
