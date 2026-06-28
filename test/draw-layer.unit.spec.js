@@ -14,7 +14,7 @@ import {
   taperScale, outlineWidths, taperedOutline, brushStyle, DRAW_BRUSHES,
   TOOL_SHORTCUTS, resolveShortcut, resolveShortcutByCode,
   reorderIds, reorderMany, rectsIntersect, marqueeSelect, applyStylePatch, eyedropperSupported,
-  distPointToSegment, pointNearPolyline, pointHitsObject,
+  distPointToSegment, pointNearPolyline, pointHitsObject, objHitDist,
   applyCommand, invertCommand, makeUndoStack,
   DEFAULT_DRAW_STYLE, DRAW_MODES, DRAW_TOOLS, MIN_DRAW_SIZE_PCT,
   DRAW_FONT_SIZES,
@@ -1062,6 +1062,24 @@ test('pointHitsObject: 外框 ellipse 用外框（中心不命中、外框上命
   const el = makeDrawObject({ tool: 'ellipse', geom: { x: 0, y: 0, w: 20, h: 20 } });
   assert(!pointHitsObject(el, { x: 10, y: 10 }, 2), '橢圓中心空白 → 不命中');
   assert(pointHitsObject(el, { x: 0.5, y: 10 }, 2), '橢圓外框左緣 → 命中');
+});
+test('objHitDist: 命中回幾何距離、未命中回 Infinity', () => {
+  const arrow = makeDrawObject({ tool: 'arrow', geom: { from: { x: 10, y: 50 }, to: { x: 90, y: 50 } } });
+  eq(objHitDist(arrow, { x: 50, y: 50 }, 2.5), 0, '正在線段上 → 距離 0');
+  eq(objHitDist(arrow, { x: 50, y: 80 }, 2.5), Infinity, '離線段遠 → Infinity');
+  const filled = makeDrawObject({ tool: 'rect', geom: { x: 0, y: 0, w: 20, h: 20 }, style: { fill: '#f00' } });
+  eq(objHitDist(filled, { x: 10, y: 10 }, 2.5), 0, '填充內部 → 距離 0');
+});
+test('objHitDist: 箭頭穿過外框橢圓時，線上點離箭頭比離外框近（修穿框誤選）', () => {
+  // 橢圓中心(50,50) rx20 ry15 外框；箭頭水平穿過中心 y=50
+  const ellipse = makeDrawObject({ tool: 'ellipse', geom: { x: 30, y: 35, w: 40, h: 30 } });
+  const arrow = makeDrawObject({ tool: 'arrow', geom: { from: { x: 10, y: 50 }, to: { x: 90, y: 50 } } });
+  // 點在箭頭線上、且落在橢圓外框 2.5% 容差內（入口附近）→ 兩者皆命中，但箭頭距離應更小
+  const p = { x: 31, y: 50 };
+  const dArrow = objHitDist(arrow, p, 2.5);
+  const dEllipse = objHitDist(ellipse, p, 2.5);
+  assert(dArrow !== Infinity && dEllipse !== Infinity, '入口附近兩者皆在容差內');
+  assert(dArrow < dEllipse, `箭頭(${dArrow.toFixed(3)})應比外框(${dEllipse.toFixed(3)})近 → hitTest 選箭頭`);
 });
 test('resolveShortcutByCode: 用 e.code 對應工具（注音/IME 不影響）', () => {
   eq(resolveShortcutByCode('KeyR'), 'rect');
