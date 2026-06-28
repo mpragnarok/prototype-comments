@@ -2313,6 +2313,29 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(sel.length === 1 && sel[0] === pid, `未重疊時點捲線內側應靠 bbox 後援選到鉛筆，實際 ${JSON.stringify(sel)}`);
   });
 
+  await test('文字物件：雙擊 → 編輯內容（預填原文字、改後更新）', async () => {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); window.__drawTest.api.setTool('text'); });
+    await page.mouse.click(220, 160);
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 3000 });
+    await page.fill('.pc-draw-text-input', '原文字');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(30);
+    const t1 = await page.evaluate(() => { const o = window.__drawTest.api.getObjects().find(o => o.tool === 'text'); return o && o.text; });
+    assert(t1 === '原文字', `建立文字內容，實際 ${t1}`);
+    await page.evaluate(() => window.__drawTest.api.setTool('select'));
+    const pos = await page.evaluate(() => { const o = window.__drawTest.api.getObjects().find(o => o.tool === 'text'); const r = document.querySelector('#pc-draw').getBoundingClientRect(); return { x: r.left + o.geom.x / 100 * r.width, y: r.top + o.geom.y / 100 * r.height }; });
+    await page.mouse.dblclick(pos.x, pos.y);
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 3000 });
+    const prefill = await page.evaluate(() => document.querySelector('.pc-draw-text-input').value);
+    assert(prefill === '原文字', `雙擊編輯框應預填原文字，實際 ${prefill}`);
+    await page.fill('.pc-draw-text-input', '改後文字');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(30);
+    const t2 = await page.evaluate(() => { const o = window.__drawTest.api.getObjects().find(o => o.tool === 'text'); return o && o.text; });
+    console.log('     text edit:', t1, '→', t2);
+    assert(t2 === '改後文字', `雙擊編輯後文字應更新，實際 ${t2}`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
