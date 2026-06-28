@@ -1098,8 +1098,8 @@ async function dragDraw(page, x1, y1, x2, y2) {
     }));
     console.log('     context menu:', JSON.stringify(menu), 'after front:', JSON.stringify(r));
     assert(menu.open, '右鍵應開啟 context menu');
-    assert(menu.items.join(',') === 'front,forward,backward,back,delete', `選單項目應齊全，實際 ${menu.items}`);
-    assert(menu.labels.join(',') === '置頂,上移一層,下移一層,置底,刪除', `選單中文標籤，實際 ${menu.labels}`);
+    assert(menu.items.join(',') === 'front,forward,backward,back,group,ungroup,delete', `選單項目應齊全，實際 ${menu.items}`);
+    assert(menu.labels.join(',') === '置頂,上移一層,下移一層,置底,群組,解散群組,刪除', `選單中文標籤，實際 ${menu.labels}`);
     assert(r.domOrder[r.domOrder.length - 1] === ids[0], '「置頂」後 A 應排到 SVG 最後（最上層）');
     assert(r.menuClosed, '點項目後選單關閉');
   });
@@ -2236,6 +2236,51 @@ async function dragDraw(page, x1, y1, x2, y2) {
     const selIds = await page.evaluate(() => window.__drawTest.api.getSelectedIds());
     console.log('     undo group selIds:', JSON.stringify(selIds));
     assert(selIds.length === 1, `undo 群組後點一個應只選一個，實際 ${selIds.length}`);
+  });
+
+  // ── 右鍵選單：群組／解散（Option A）────────────────────────────────────────────
+  console.log('\ndraw-layer e2e — 右鍵選單 群組/解散:');
+  await test('右鍵選單：選 ≥2 顯示「群組」、未群組時隱藏「解散群組」→ 點擊群組化', async () => {
+    await resetGroup();
+    const ids = await draw2RectsForGroup();
+    await page.evaluate(ids => { window.__drawTest.api.setTool('select'); window.__drawTest.api.selectIds(ids); }, ids);
+    await page.mouse.click(110, 230, { button: 'right' }); // 右鍵已選成員 → 開選單
+    await page.waitForTimeout(20);
+    const vis = await page.evaluate(() => {
+      const g = document.querySelector('#pc-draw-context.open [data-action="group"]');
+      const u = document.querySelector('#pc-draw-context.open [data-action="ungroup"]');
+      return { group: !!(g && g.style.display !== 'none'), ungroup: !!(u && u.style.display !== 'none') };
+    });
+    console.log('     menu vis (≥2 selected):', JSON.stringify(vis));
+    assert(vis.group, '選 ≥2 時「群組」應顯示');
+    assert(!vis.ungroup, '尚未群組時「解散群組」應隱藏');
+    await page.click('#pc-draw-context.open [data-action="group"]');
+    await page.waitForTimeout(30);
+    const gids = await page.evaluate(() => window.__drawTest.api.getObjects().map(o => o.groupId));
+    assert(gids[0] && gids[0] === gids[1], `點「群組」後兩物件應同 groupId，實際 ${JSON.stringify(gids)}`);
+  });
+  await test('右鍵選單：選到群組成員顯示「解散群組」→ 點擊解散', async () => {
+    await page.evaluate(() => { window.__drawTest.api.selectIds([]); window.__drawTest.api.setTool('select'); });
+    await page.mouse.click(110, 230); // 點成員 → 選整組
+    await page.waitForTimeout(20);
+    await page.mouse.click(110, 230, { button: 'right' });
+    await page.waitForTimeout(20);
+    const ungroup = await page.evaluate(() => { const u = document.querySelector('#pc-draw-context.open [data-action="ungroup"]'); return !!(u && u.style.display !== 'none'); });
+    assert(ungroup, '選到群組成員時「解散群組」應顯示');
+    await page.click('#pc-draw-context.open [data-action="ungroup"]');
+    await page.waitForTimeout(30);
+    const gids = await page.evaluate(() => window.__drawTest.api.getObjects().map(o => o.groupId || null));
+    console.log('     after 解散 groupIds:', JSON.stringify(gids));
+    assert(gids.every(g => !g), `解散後不應有 groupId，實際 ${JSON.stringify(gids)}`);
+  });
+  await test('右鍵選單：單選時「群組」隱藏', async () => {
+    await resetGroup();
+    const ids = await draw2RectsForGroup();
+    await page.evaluate(id => { window.__drawTest.api.setTool('select'); window.__drawTest.api.selectIds([id]); }, ids[0]);
+    await page.mouse.click(110, 230, { button: 'right' });
+    await page.waitForTimeout(20);
+    const group = await page.evaluate(() => { const g = document.querySelector('#pc-draw-context.open [data-action="group"]'); return !!(g && g.style.display !== 'none'); });
+    assert(!group, '單選時「群組」應隱藏');
   });
 
   await browser.close();
