@@ -1619,6 +1619,44 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); window.__drawTest.api.clear(); });
   });
 
+  await test('方案卡關閉鈕 + 佇列決定可單獨移除', async () => {
+    await reset('select');
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.ingestReplies([{ n: 3, anchor: { x: 40, y: 50 }, text: '挑', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] }]); });
+    assert(await page.evaluate(() => !!document.querySelector('.pc-draw-reply-card')), '應有方案卡');
+    await page.click('.pc-draw-reply-close'); // 關閉鈕
+    await page.waitForFunction(() => !document.querySelector('.pc-draw-reply-card'), { timeout: 3000 });
+    assert(await page.evaluate(() => window.__drawTest.api.getReplies().length) === 0, '關閉後 replies 應清空');
+    // 決定移除
+    await page.evaluate(() => window.__drawTest.api.ingestReplies([{ n: 4, anchor: { x: 40, y: 50 }, text: '挑', options: [{ id: 'a', label: 'A' }] }]));
+    await page.click('.pc-draw-reply-opt');
+    await page.waitForFunction(() => window.__drawTest.api.getDecisions().length > 0, { timeout: 3000 });
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (!d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
+    await page.click('.pc-draw-rec-remove');
+    await page.waitForFunction(() => window.__drawTest.api.getDecisions().length === 0, { timeout: 3000 });
+    console.log('     close+remove ok');
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); window.__drawTest.api.clear(); });
+  });
+
+  await test('整頁截圖：有 html2canvas → 合成整頁 + ignoreElements 排除工具列/未勾選標注', async () => {
+    await reset('ellipse');
+    await page.evaluate(() => window.__drawTest.api.clear());
+    await dragDraw(page, 120, 90, 220, 170);
+    const r = await page.evaluate(async () => {
+      window.__h2cEl = null;
+      window.html2canvas = (el, opts) => { window.__h2cOpts = opts; window.__h2cEl = el && el.tagName; return Promise.resolve({ toDataURL: () => 'data:image/png;base64,FULLPAGEOK' }); };
+      const dataUrl = await window.__drawTest.api.capturePng();
+      const opts = window.__h2cOpts;
+      const tb = document.querySelector('.pc-draw-toolbar');
+      return { dataUrl, el: window.__h2cEl, ignoresToolbar: opts && opts.ignoreElements ? opts.ignoreElements(tb) : null, bg: opts && opts.backgroundColor };
+    });
+    console.log('     full-page capture:', JSON.stringify({ el: r.el, ignoresToolbar: r.ignoresToolbar, bg: r.bg }));
+    assert(r.dataUrl === 'data:image/png;base64,FULLPAGEOK', `應用 html2canvas 合成整頁，實際 ${r.dataUrl}`);
+    assert(r.el === 'BODY', `應截 document.body，實際 ${r.el}`);
+    assert(r.ignoresToolbar === true, '應排除工具列 chrome');
+    assert(r.bg === '#ffffff', '應白底');
+    await page.evaluate(() => { delete window.html2canvas; window.__drawTest.api.clear(); });
+  });
+
   await test('標注紀錄頂部顯示「送出畫面」縮圖（.pc-draw-rec-preview）', async () => {
     await reset('ellipse');
     await dragDraw(page, 110, 80, 210, 160);
