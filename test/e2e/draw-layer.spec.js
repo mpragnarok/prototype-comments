@@ -1453,7 +1453,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.disabled, '送出後短暫 disabled（防連點）');
   });
 
-  await test('Fix2 footer 送出鈕：AI 未連線(listening:false) → 顯示「📥 已排佇列」且可在 2s 後重送', async () => {
+  await test('Fix2 footer 送出鈕：AI 未連線→「📥 已排佇列」；送出後維持 disabled「✅ 已送出」(不會以為沒送)', async () => {
     await reset('ellipse');
     await dragDraw(page, 110, 80, 210, 160);
     await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (!d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
@@ -1467,13 +1467,16 @@ async function dragDraw(page, x1, y1, x2, y2) {
     const r1 = await page.evaluate(() => { const b = document.querySelector('.pc-draw-rec-send-btn'); return { text: b.textContent.trim(), queued: b.classList.contains('pc-draw-rec-queued') }; });
     assert(/已排佇列/.test(r1.text), `AI 未連線應顯示「📥 已排佇列」，實際 ${r1.text}`);
     assert(r1.queued, 'AI 未連線應有 queued 樣式');
-    // 2s 後按鈕恢復成可再送（同一批可重送）
-    await page.waitForFunction(() => { const b = document.querySelector('.pc-draw-rec-send-btn'); return b && !b.disabled && /送給 AI/.test(b.textContent); }, { timeout: 3000 });
-    await page.click('.pc-draw-rec-send-btn');
-    await page.waitForFunction(() => window.__fetchQueued >= 2, { timeout: 3000 });
-    const cnt = await page.evaluate(() => window.__fetchQueued);
-    console.log('     queued re-send fetchCount:', cnt);
-    assert(cnt >= 2, `同一批應可重送（再觸發一次 fetch），實際 ${cnt}`);
+    // 送出後（inflight 結束）→ 維持 disabled 並顯示「✅ 已送出」，不會回到看起來沒送的狀態
+    await page.waitForFunction(() => { const b = document.querySelector('.pc-draw-rec-send-btn'); return b && !b.dataset.inflight; }, { timeout: 3000 });
+    const r2 = await page.evaluate(() => { const b = document.querySelector('.pc-draw-rec-send-btn'); return { text: b.textContent.trim(), disabled: b.disabled }; });
+    console.log('     after-send sticky:', JSON.stringify(r2));
+    assert(/已送出/.test(r2.text) && r2.disabled, `送出後應維持 disabled「✅ 已送出」，實際 ${JSON.stringify(r2)}`);
+    // 內容改變（再畫一筆）→ 按鈕恢復可送
+    await page.evaluate(() => window.__drawTest.api.setTool('ellipse'));
+    await dragDraw(page, 250, 250, 320, 320);
+    const r3 = await page.evaluate(() => { const b = document.querySelector('.pc-draw-rec-send-btn'); return { text: b.textContent.trim(), disabled: b.disabled }; });
+    assert(/送給 AI/.test(r3.text) && !r3.disabled, `有新標注後應恢復可送，實際 ${JSON.stringify(r3)}`);
     await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
   });
 

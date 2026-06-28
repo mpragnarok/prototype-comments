@@ -1110,7 +1110,10 @@ export function initDrawLayer(target, opts = {}) {
     recordTab.classList.toggle('show', !state.recordOpen);
     recordDrawer.classList.toggle('open', state.recordOpen);
     const rows = annotationRows(state.objects, state.sentSigs);
-    const checkedCount = rows.filter(r => !state.sendUnchecked[r.id]).length; // 納入送出的數量
+    const checkedObjs = state.objects.filter(o => !state.sendUnchecked[o.id]); // 納入送出的物件
+    const checkedCount = checkedObjs.length;
+    // 勾選的裡面有沒有「還沒送、或送出後又改過」的 → 有才需要送（決定按鈕亮/暗）
+    const hasUnsent = checkedObjs.some(o => state.sentSigs[o.id] !== annotationSig(o));
     const count = recordDrawer.querySelector('.pc-draw-rec-count');
     if (count) count.textContent = String(rows.length);
     // 全選框：全勾→checked、部分→indeterminate、空清單→disabled
@@ -1125,9 +1128,14 @@ export function initDrawLayer(target, opts = {}) {
     if (sendBtn) {
       if (!rows.length) delete sendBtn.dataset.inflight; // clear → 強制重設
       if (!sendBtn.dataset.inflight) {
-        sendBtn.textContent = `送給 AI（${checkedCount}）`;
-        sendBtn.disabled = checkedCount === 0;
         sendBtn.classList.remove('pc-draw-rec-queued');
+        if (checkedCount === 0) {            // 沒勾任何標注 → 不能送
+          sendBtn.textContent = '送給 AI（0）'; sendBtn.disabled = true;
+        } else if (!hasUnsent) {             // 勾選的都送過且沒再改 → 維持「已送出」disabled（明確看出送過了）
+          sendBtn.textContent = `✅ 已送出（${checkedCount} 筆）`; sendBtn.disabled = true;
+        } else {                             // 有新的/改過的 → 可送
+          sendBtn.textContent = `送給 AI（${checkedCount}）`; sendBtn.disabled = false;
+        }
       }
     }
     const list = recordDrawer.querySelector('.pc-draw-rec-list');
