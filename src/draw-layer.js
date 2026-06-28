@@ -123,6 +123,18 @@ export function resolveShortcutByCode(code) {
   return null;
 }
 
+// localhost / 本機環境判斷（繪圖是 dev-time 工具，只在本機掛入口；線上不顯示）。
+export function isLocalEnv(hostname) {
+  return hostname === 'localhost' || hostname === '127.0.0.1'
+      || hostname === '0.0.0.0' || hostname === '::1' || hostname === '';
+}
+// enableDraw 解析：'auto'(預設)=只 localhost；true=永遠；false=永不。
+export function shouldEnableDraw(mode, hostname) {
+  if (mode === true) return true;
+  if (mode === false) return false;
+  return isLocalEnv(hostname); // 'auto' 或 undefined
+}
+
 // ── 純函式（單元測試對象，無 DOM 依賴）──────────────────────────────────────
 // px → viewport-%（沿用 index.js overlay click 的 toFixed(2) 慣例）。
 export function pxToPct(px, total) {
