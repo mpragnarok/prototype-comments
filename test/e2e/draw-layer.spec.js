@@ -2283,6 +2283,24 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(!group, '單選時「群組」應隱藏');
   });
 
+  await test('精準命中：點鉛筆筆畫 → 選到鉛筆（即使被箭頭 bbox 蓋住）', async () => {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); });
+    // 鉛筆：水平短線 y=150
+    await page.evaluate(() => window.__drawTest.api.setTool('pencil'));
+    await page.mouse.move(150, 150); await page.mouse.down(); await page.mouse.move(200, 150); await page.mouse.move(250, 150); await page.mouse.up();
+    const pencilId = await page.evaluate(() => window.__drawTest.api.getObjects().find(o => o.tool === 'pencil').id);
+    // 箭頭：斜線，bbox 蓋住鉛筆，但線在 (200,150) 離很遠
+    await page.evaluate(() => window.__drawTest.api.setTool('arrow'));
+    await page.mouse.move(120, 120); await page.mouse.down(); await page.mouse.move(300, 260); await page.mouse.up();
+    // 點 (200,150)：在鉛筆筆畫上、在箭頭 bbox 內但離箭頭線遠
+    await page.evaluate(() => { window.__drawTest.api.setTool('select'); window.__drawTest.api.selectIds([]); });
+    await page.mouse.click(200, 150);
+    await page.waitForTimeout(30);
+    const sel = await page.evaluate(() => window.__drawTest.api.getSelectedIds());
+    console.log('     precise-hit selIds:', JSON.stringify(sel), 'pencil:', pencilId);
+    assert(sel.length === 1 && sel[0] === pencilId, `點鉛筆筆畫應選到鉛筆，實際 ${JSON.stringify(sel)}`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

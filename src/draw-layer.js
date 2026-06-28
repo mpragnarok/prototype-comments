@@ -580,6 +580,37 @@ export function marqueeSelect(objects, mrect) {
   return objects.filter(o => rectsIntersect(geomBBox(o), mrect)).map(o => o.id);
 }
 
+// 點到線段最短距離（% 空間）。
+export function distPointToSegment(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+// 點是否靠近折線（pencil 的 points，[x,y][]）。
+export function pointNearPolyline(p, points, tol) {
+  if (!points || !points.length) return false;
+  if (points.length === 1) return Math.hypot(p.x - points[0][0], p.y - points[0][1]) <= tol;
+  for (let i = 1; i < points.length; i++) {
+    const a = { x: points[i - 1][0], y: points[i - 1][1] }, b = { x: points[i][0], y: points[i][1] };
+    if (distPointToSegment(p, a, b) <= tol) return true;
+  }
+  return false;
+}
+// 點是否命中物件：細線(arrow/line/pencil)用「實際幾何 + 容差」，避免大空白 bbox 蓋住底下物件；
+// 填充形狀(rect/ellipse/diamond/image/text)用 bbox。ends＝arrow/line 解析後端點（選用）。
+export function pointHitsObject(o, p, tol, ends) {
+  if (o.tool === 'arrow' || o.tool === 'line') {
+    const e = ends || o.geom;
+    return distPointToSegment(p, e.from, e.to) <= tol;
+  }
+  if (o.tool === 'pencil') return pointNearPolyline(p, o.geom.points, tol);
+  const b = geomBBox(o);
+  return p.x >= b.x - tol && p.x <= b.x + b.w + tol && p.y >= b.y - tol && p.y <= b.y + b.h + tol;
+}
+
 // z-order：把 id 在 id 陣列中往前/後/頂/底重排（陣列尾＝最上層）。回傳新陣列。
 export function reorderIds(ids, id, op) {
   const i = ids.indexOf(id);
@@ -1418,11 +1449,11 @@ export function initDrawLayer(target, opts = {}) {
     startMove(rect, p);                                               // 拖曳 → 整個選取一起移動
   }
   function hitTest(p) {
+    const tol = 2; // % 容差（細線靠近即命中；填充形狀為 bbox 外擴）
     for (let i = state.objects.length - 1; i >= 0; i--) {
-      const b = geomBBox(state.objects[i], resolveO);
-      const pad = 1.5;
-      if (p.x >= b.x - pad && p.x <= b.x + b.w + pad && p.y >= b.y - pad && p.y <= b.y + b.h + pad)
-        return state.objects[i];
+      const o = state.objects[i];
+      const ends = (o.tool === 'arrow' || o.tool === 'line') ? resolveO(o) : null;
+      if (pointHitsObject(o, p, tol, ends)) return o;
     }
     return null;
   }
