@@ -895,6 +895,9 @@ const DRAW_STYLES = `
   display: flex; align-items: center; justify-content: center; transition: background .12s;
 }
 .pc-draw-tool:hover { background: #333; }
+/* 只有「目前工具」該highlight。滑鼠點過/快捷鍵切換後殘留的瀏覽器 focus 外框會讓上一個工具看起來也被選 →
+   滑鼠 focus 不顯外框（鍵盤 Tab 導覽的 :focus-visible 仍保留，維持無障礙）。 */
+.pc-draw-tool:focus:not(:focus-visible) { outline: none; }
 .pc-draw-tool.active { background: #0FA0A0; color: #fff; }
 .pc-draw-tool svg { display: block; }
 /* 常駐數字快捷鍵徽章（Excalidraw 風格，右下角、不擋點擊、不位移圖示） */
