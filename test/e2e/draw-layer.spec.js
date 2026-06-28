@@ -1433,23 +1433,48 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r1.text === '送給 AI（1）', `footer 送出鈕文字應為「送給 AI（1）」，實際 ${r1.text}`);
   });
 
-  await test('Fix2 footer 送出鈕：點擊 → 觸發一次 fetch + 顯示已送出狀態（1.8s disabled）', async () => {
+  await test('Fix2 footer 送出鈕：AI 在線(listening:true) → 顯示「✅ 已送達 AI」', async () => {
     // 承接上一個 test：畫布有 1 筆標注、抽屜已開
     await page.evaluate(() => {
       window.__fetchCallsFix2 = [];
-      window.fetch = (url, opts) => { window.__fetchCallsFix2.push({ url }); return Promise.resolve({ ok: true, json: () => Promise.resolve({}) }); };
+      window.fetch = (url, opts) => { window.__fetchCallsFix2.push({ url }); return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, n: 1, listening: true }) }); };
       window.__drawTest.api.setExportEndpoint('http://x/api/draw');
     });
     await page.click('.pc-draw-rec-send-btn');
     await page.waitForFunction(() => window.__fetchCallsFix2 && window.__fetchCallsFix2.length > 0, { timeout: 3000 });
     const r = await page.evaluate(() => {
       const btn = document.querySelector('.pc-draw-rec-send-btn');
-      return { fetchCount: window.__fetchCallsFix2.length, btnText: btn && btn.textContent.trim(), disabled: btn && btn.disabled };
+      return { fetchCount: window.__fetchCallsFix2.length, btnText: btn && btn.textContent.trim(), disabled: btn && btn.disabled, queued: btn && btn.classList.contains('pc-draw-rec-queued') };
     });
-    console.log('     footer send result:', JSON.stringify(r));
+    console.log('     footer send (online) result:', JSON.stringify(r));
     assert(r.fetchCount === 1, `應恰好 fetch 一次，實際 ${r.fetchCount}`);
-    assert(/已送出/.test(r.btnText), `送出後 btn 應顯示「✅ 已送出」，實際 ${r.btnText}`);
-    assert(r.disabled, '送出後 1.8s 內 btn 應保持 disabled');
+    assert(/已送達/.test(r.btnText), `AI 在線送出後應顯示「✅ 已送達 AI」，實際 ${r.btnText}`);
+    assert(!r.queued, 'AI 在線不應有 queued 樣式');
+    assert(r.disabled, '送出後短暫 disabled（防連點）');
+  });
+
+  await test('Fix2 footer 送出鈕：AI 未連線(listening:false) → 顯示「📥 已排佇列」且可在 2s 後重送', async () => {
+    await reset('ellipse');
+    await dragDraw(page, 110, 80, 210, 160);
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (!d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
+    await page.evaluate(() => {
+      window.__fetchQueued = 0;
+      window.fetch = () => { window.__fetchQueued++; return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, n: 1, listening: false }) }); };
+      window.__drawTest.api.setExportEndpoint('http://x/api/draw');
+    });
+    await page.click('.pc-draw-rec-send-btn');
+    await page.waitForFunction(() => window.__fetchQueued > 0, { timeout: 3000 });
+    const r1 = await page.evaluate(() => { const b = document.querySelector('.pc-draw-rec-send-btn'); return { text: b.textContent.trim(), queued: b.classList.contains('pc-draw-rec-queued') }; });
+    assert(/已排佇列/.test(r1.text), `AI 未連線應顯示「📥 已排佇列」，實際 ${r1.text}`);
+    assert(r1.queued, 'AI 未連線應有 queued 樣式');
+    // 2s 後按鈕恢復成可再送（同一批可重送）
+    await page.waitForFunction(() => { const b = document.querySelector('.pc-draw-rec-send-btn'); return b && !b.disabled && /送給 AI/.test(b.textContent); }, { timeout: 3000 });
+    await page.click('.pc-draw-rec-send-btn');
+    await page.waitForFunction(() => window.__fetchQueued >= 2, { timeout: 3000 });
+    const cnt = await page.evaluate(() => window.__fetchQueued);
+    console.log('     queued re-send fetchCount:', cnt);
+    assert(cnt >= 2, `同一批應可重送（再觸發一次 fetch），實際 ${cnt}`);
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
   });
 
   await test('標注紀錄頂部顯示「送出畫面」縮圖（.pc-draw-rec-preview）', async () => {

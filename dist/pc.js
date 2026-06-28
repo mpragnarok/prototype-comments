@@ -1930,6 +1930,9 @@ const DRAW_STYLES = `
 }
 .pc-draw-rec-send-btn:disabled { opacity: .5; cursor: not-allowed; }
 .pc-draw-rec-send-btn:not(:disabled):hover { background: #0d8f8f; }
+/* AI 未連線、已排佇列：用琥珀色與「已送達」的綠/teal 區隔，讓使用者一眼看出差異。 */
+.pc-draw-rec-send-btn.pc-draw-rec-queued { background: #B7791F; }
+.pc-draw-rec-send-btn.pc-draw-rec-queued:disabled { opacity: .85; }
 `;
 
 function injectDrawStyles() {
@@ -2019,6 +2022,7 @@ function initDrawLayer(target, opts = {}) {
       if (!sendBtn.dataset.inflight) {
         sendBtn.textContent = `送給 AI（${rows.length}）`;
         sendBtn.disabled = rows.length === 0;
+        sendBtn.classList.remove('pc-draw-rec-queued');
       }
     }
     const list = recordDrawer.querySelector('.pc-draw-rec-list');
@@ -2699,14 +2703,16 @@ function initDrawLayer(target, opts = {}) {
   // 組 {json, png} → POST 到 endpoint（可無）；無論有無 server 都回 payload 供 caller/測試讀。
   async function sendToAgent(opts2 = {}) {
     const json = exportPayload();
-    if (!json.annotations.length) return { json, png: null, sent: false }; // 沒標注 → 不做事
+    if (!json.annotations.length) return { json, png: null, sent: false, listening: false }; // 沒標注 → 不做事
     const png = await capturePng();
-    const payload = { json, png, sent: false };
+    const payload = { json, png, sent: false, listening: false };
     const endpoint = opts2.endpoint || state.exportEndpoint || sameOriginDrawEndpoint();
     if (endpoint && typeof fetch === 'function') {
       try {
-        await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ json, png }) });
+        const resp = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ json, png }) });
         payload.sent = true;
+        // server 回 { ok, n, listening }：listening＝此刻 AI 是否在線（有 long-poll 連線）。
+        try { const data = await resp.json(); if (data) { payload.listening = !!data.listening; payload.n = data.n; } } catch (_) { /* 無 JSON body 也算送出成功 */ }
       } catch (_) { payload.sent = false; }
     }
     return payload;
@@ -2723,8 +2729,11 @@ function initDrawLayer(target, opts = {}) {
     let result;
     try { result = await sendToAgent(); } catch (_) { result = { sent: false }; }
     if (result && result.sent) {
-      sendBtn.textContent = `✅ 已送出 ${n} 筆`;
-      setTimeout(() => { delete sendBtn.dataset.inflight; renderRecordPanel(); }, 1800);
+      // 分「AI 在線＝立即送達」與「AI 未連線＝已排佇列（之後連上自動收）」，讓使用者看得出狀態。
+      sendBtn.textContent = result.listening ? `✅ 已送達 AI（${n} 筆）` : `📥 已排佇列（${n} 筆，AI 未連線）`;
+      sendBtn.classList.toggle('pc-draw-rec-queued', !result.listening);
+      // 2 秒後恢復成可再送（同一批可重送；server 不去重、AI 端 cursor 會收到）。
+      setTimeout(() => { delete sendBtn.dataset.inflight; renderRecordPanel(); }, 2000);
       return;
     }
     sendBtn.textContent = '⚠️ 送出失敗，再試一次';
