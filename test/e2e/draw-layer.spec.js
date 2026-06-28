@@ -196,7 +196,15 @@ async function dragDraw(page, x1, y1, x2, y2) {
 
   // 共用：清空畫布、回到指定工具。
   async function reset(tool = 'select') {
-    await page.evaluate(t => { window.__drawTest.api.clear(); window.__drawTest.api.setTool(t); }, tool);
+    await page.evaluate(t => {
+      window.__drawTest.api.clear();
+      window.__drawTest.api.setTool(t);
+      // 收尾：關閉上個測試可能留開的標注紀錄抽屜，避免其 footer 鈕攔截後續工具列點擊
+      const d = document.getElementById('pc-draw-rec-drawer');
+      if (d && d.classList.contains('open')) d.classList.remove('open');
+      const tab = document.getElementById('pc-draw-rec-tab');
+      if (tab) tab.classList.add('show');
+    }, tool);
   }
 
   await test('rect 工具 → 拉出 <rect>（物件層直接子節點，非選取 handle）', async () => {
