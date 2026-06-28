@@ -1477,6 +1477,29 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
   });
 
+  await test('面板每列「已送/未送」：送出後該列標已送、新畫的標未送、改過的回未送', async () => {
+    await reset('ellipse');
+    await dragDraw(page, 110, 80, 210, 160); // 第 1 筆
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (!d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
+    // 送出前：未送
+    const before = await page.evaluate(() => [...document.querySelectorAll('.pc-draw-rec-status')].map(s => s.textContent.trim()));
+    assert(before.length === 1 && /未送/.test(before[0]), `送出前應全未送，實際 ${JSON.stringify(before)}`);
+    // 送出（AI 在線）
+    await page.evaluate(() => {
+      window.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, n: 1, listening: true }) });
+      window.__drawTest.api.setExportEndpoint('http://x/api/draw');
+    });
+    await page.click('.pc-draw-rec-send-btn');
+    await page.waitForFunction(() => { const s = document.querySelector('.pc-draw-rec-status'); return s && /已送/.test(s.textContent); }, { timeout: 3000 });
+    // 再畫第 2 筆 → 它未送、第 1 筆仍已送
+    await page.evaluate(() => window.__drawTest.api.setTool('ellipse'));
+    await dragDraw(page, 250, 250, 320, 310);
+    const rows = await page.evaluate(() => [...document.querySelectorAll('.pc-draw-rec-row')].map(r => { const s = r.querySelector('.pc-draw-rec-status'); return s && (s.classList.contains('is-sent') ? 'sent' : 'unsent'); }));
+    console.log('     per-row sent state:', JSON.stringify(rows));
+    assert(rows.length === 2 && rows.filter(x => x === 'sent').length === 1 && rows.filter(x => x === 'unsent').length === 1, `應 1 已送 + 1 未送，實際 ${JSON.stringify(rows)}`);
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
+  });
+
   await test('標注紀錄頂部顯示「送出畫面」縮圖（.pc-draw-rec-preview）', async () => {
     await reset('ellipse');
     await dragDraw(page, 110, 80, 210, 160);
