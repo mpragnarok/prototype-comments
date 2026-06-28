@@ -243,6 +243,10 @@ const ANNOTATION_TOOL_LABELS = {
 export function annotationSig(o) {
   return JSON.stringify({ tool: o.tool, geom: o.geom, text: o.text, label: o.label, anchor: o.anchor, style: o.style });
 }
+// 決定（在 AI 方案卡上選的選項）進佇列的簽章：改選不同選項 → 簽章變 → 回未送。
+export function decisionSig(d) {
+  return JSON.stringify({ replyId: d.replyId, optionId: d.optionId, optionLabel: d.optionLabel });
+}
 // sentSigs＝{objId: 上次成功送出時的簽章}；row.sent＝目前簽章與已送簽章相符（送出後沒再改）。
 export function annotationRows(objects, sentSigs) {
   return (objects || []).map(o => {
@@ -1087,6 +1091,7 @@ export function initDrawLayer(target, opts = {}) {
     sendUnchecked: {}, // {objId: true} → 該列「不納入送出」（預設全勾；新物件預設納入）
     replies: [],       // AI 貼回頁面的方案卡（{n, anchor, text, options, chosen?}）
     replyCursor: 0,    // reply-poll 游標
+    decisions: [],     // 在方案卡上選的「決定」佇列（{id, replyId, optionId, optionLabel, text}）→ 進標注紀錄、隨批送出
   };
   const history = makeUndoStack();
   // ── P7 團隊持久（選用）：把 opts.persist 解析成 drawings store（ready store 或 {fb,db,projectId}）。
@@ -1125,6 +1130,7 @@ export function initDrawLayer(target, opts = {}) {
   if (drawerSendBtn) drawerSendBtn.onclick = () => handleDrawerSend();
   // 標注紀錄「送出時納入哪些」勾選集合：unchecked 內的不送（預設全送）。
   const checkedObjects = () => state.objects.filter(o => !state.sendUnchecked[o.id]);
+  const checkedDecisions = () => state.decisions.filter(d => !state.sendUnchecked[d.id]);
   const onToggleSendChecked = (id, checked) => { if (checked) delete state.sendUnchecked[id]; else state.sendUnchecked[id] = true; renderRecordPanel(); };
   const drawerAllBox = recordDrawer.querySelector('.pc-draw-rec-all');
   if (drawerAllBox) drawerAllBox.onchange = () => {
@@ -1139,11 +1145,17 @@ export function initDrawLayer(target, opts = {}) {
   function renderRecordPanel() {
     recordTab.classList.toggle('show', !state.recordOpen);
     recordDrawer.classList.toggle('open', state.recordOpen);
-    const rows = annotationRows(state.objects, state.sentSigs);
-    const checkedObjs = state.objects.filter(o => !state.sendUnchecked[o.id]); // 納入送出的物件
-    const checkedCount = checkedObjs.length;
+    // 佇列＝畫的標注 + 在方案卡上做的「決定」，兩者都可勾選/送出/標已送。
+    const annRows = annotationRows(state.objects, state.sentSigs);
+    const decRows = state.decisions.map(d => ({
+      id: d.id, tool: 'text', icon: 'text', text: '✅ ' + d.text, selector: null, color: '#0d7a4f',
+      sent: state.sentSigs[d.id] === decisionSig(d), isDecision: true,
+    }));
+    const rows = annRows.concat(decRows);
+    const checkedRows = rows.filter(r => !state.sendUnchecked[r.id]); // 納入送出的列
+    const checkedCount = checkedRows.length;
     // 勾選的裡面有沒有「還沒送、或送出後又改過」的 → 有才需要送（決定按鈕亮/暗）
-    const hasUnsent = checkedObjs.some(o => state.sentSigs[o.id] !== annotationSig(o));
+    const hasUnsent = checkedRows.some(r => !r.sent);
     const count = recordDrawer.querySelector('.pc-draw-rec-count');
     if (count) count.textContent = String(rows.length);
     // 全選框：全勾→checked、部分→indeterminate、空清單→disabled
@@ -1378,15 +1390,13 @@ export function initDrawLayer(target, opts = {}) {
     renderReplies();
   }
   // 使用者點方案卡上的選項 → 標記已選 + POST /api/draw-choice（→ AI 端 draw-poll 收到）。
-  async function submitChoice(reply, option) {
+  // 在方案卡選選項 → 卡片標已選 + 把「決定」加進標注紀錄佇列（不立即送；最後一次送出隨批帶給 AI）。
+  function submitChoice(reply, option) {
     reply.chosen = option;
-    renderReplies();
-    const endpoint = sameOriginApi('/api/draw-choice');
-    if (endpoint && typeof fetch === 'function') {
-      try {
-        await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ replyId: reply.n, optionId: option.id, optionLabel: option.label }) });
-      } catch (_) { /* 離線：已在卡片標記已選，下次連上可重點 */ }
-    }
+    const id = 'dec-' + reply.n; // 同一張卡重選 → 取代舊決定
+    state.decisions = state.decisions.filter(d => d.id !== id);
+    state.decisions.push({ id, replyId: reply.n, optionId: option.id, optionLabel: option.label, text: '決定：' + (option.label || option.id) });
+    render(); // 更新方案卡(已選) + 標注紀錄(新佇列項) + 送出鈕計數/狀態
   }
   // reply-poll 迴圈：long-poll 收 AI 方案卡（僅 opts.replyPoll 開啟時跑；同源 http 才有 endpoint）。
   let replyPolling = false;
@@ -1854,7 +1864,10 @@ export function initDrawLayer(target, opts = {}) {
   }
 
   function exportPayload() {
-    return buildExport(checkedObjects(), { w: svg.clientWidth || host.clientWidth, h: svg.clientHeight || host.clientHeight });
+    const p = buildExport(checkedObjects(), { w: svg.clientWidth || host.clientWidth, h: svg.clientHeight || host.clientHeight });
+    const decs = checkedDecisions();
+    if (decs.length) p.decisions = decs.map(d => ({ replyId: d.replyId, optionId: d.optionId, optionLabel: d.optionLabel })); // 方案卡決定隨批送
+    return p;
   }
   // 把 #pc-draw SVG（含貼圖 + 標注）轉 PNG dataURL（XMLSerializer → img → canvas）。async。
   async function capturePng() {
@@ -1900,7 +1913,7 @@ export function initDrawLayer(target, opts = {}) {
   // 組 {json, png} → POST 到 endpoint（可無）；無論有無 server 都回 payload 供 caller/測試讀。
   async function sendToAgent(opts2 = {}) {
     const json = exportPayload();
-    if (!json.annotations.length) return { json, png: null, sent: false, listening: false }; // 沒標注 → 不做事
+    if (!json.annotations.length && !(json.decisions && json.decisions.length)) return { json, png: null, sent: false, listening: false }; // 沒標注也沒決定 → 不做事
     const png = await capturePng();
     const payload = { json, png, sent: false, listening: false };
     const endpoint = opts2.endpoint || state.exportEndpoint || sameOriginDrawEndpoint();
@@ -1919,7 +1932,7 @@ export function initDrawLayer(target, opts = {}) {
   async function handleDrawerSend() {
     const sendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
     if (!sendBtn || sendBtn.disabled || sendBtn.dataset.inflight) return;
-    const n = checkedObjects().length; // 實際送出的筆數（只算勾選的）
+    const n = checkedObjects().length + checkedDecisions().length; // 實際送出的筆數（勾選的標注＋決定）
     if (!n) return; // 全沒勾 → 不送
     sendBtn.dataset.inflight = '1';
     sendBtn.disabled = true;
@@ -1930,8 +1943,9 @@ export function initDrawLayer(target, opts = {}) {
       // 分「AI 在線＝立即送達」與「AI 未連線＝已排佇列（之後連上自動收）」，讓使用者看得出狀態。
       sendBtn.textContent = result.listening ? `✅ 已送達 AI（${n} 筆）` : `📥 已排佇列（${n} 筆，AI 未連線）`;
       sendBtn.classList.toggle('pc-draw-rec-queued', !result.listening);
-      // 記下這批「實際送出（勾選）」物件的簽章 → 面板那幾列標「已送」（改動後簽章變、自動回「未送」）。
+      // 記下這批「實際送出（勾選）」的標注＋決定簽章 → 面板那幾列標「已送」（改動後簽章變、自動回「未送」）。
       checkedObjects().forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
+      checkedDecisions().forEach(d => { state.sentSigs[d.id] = decisionSig(d); });
       renderRecordPanel(); // 立刻更新各列「已送」標記（inflight 仍在 → 不會蓋掉按鈕狀態文字）
       // 2 秒後恢復成可再送（同一批可重送；server 不去重、AI 端 cursor 會收到）。
       setTimeout(() => { delete sendBtn.dataset.inflight; renderRecordPanel(); }, 2000);
@@ -2197,8 +2211,9 @@ export function initDrawLayer(target, opts = {}) {
     getAnnotationRows: () => annotationRows(state.objects, state.sentSigs), // P6 面板 row 資料（純函式包裝）
     ingestReplies, // AI 方案卡：注入回覆（poll 收到或測試用）
     getReplies: () => state.replies.slice(),
+    getDecisions: () => state.decisions.slice(), // 方案卡選擇進的佇列
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
-    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sendUnchecked = {}; state.replies = []; render(); persistLocalSave(); },
+    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sendUnchecked = {}; state.replies = []; state.decisions = []; render(); persistLocalSave(); },
     destroy: () => {
       stopLive(); // Batch 4：拆掉 live reposition 監聽/rAF/ResizeObserver
       replyPolling = false; // 停掉 AI 方案卡輪詢

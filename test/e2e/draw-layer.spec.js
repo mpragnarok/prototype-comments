@@ -1539,11 +1539,10 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
   });
 
-  await test('AI 方案卡：ingestReplies 渲染錨定卡(文字+選項)；點選項 → POST choice + 標已選', async () => {
+  await test('AI 方案卡：點選項 → 卡片標已選 + 決定進佇列(不立即送)', async () => {
     await reset('select');
     await page.evaluate(() => {
-      window.__choiceBody = null;
-      window.fetch = (url, opts) => { if (/draw-choice/.test(url)) { try { window.__choiceBody = JSON.parse(opts.body); } catch (_) {} } return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) }); };
+      window.__drawTest.api.clear();
       window.__drawTest.api.ingestReplies([{ n: 1, anchor: { x: 40, y: 50 }, text: '建議改多選', options: [{ id: 'multi', label: '多選+其他' }, { id: 'select', label: '下拉' }] }]);
     });
     const card = await page.evaluate(() => {
@@ -1554,20 +1553,22 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(card.text === '建議改多選', `卡片文字，實際 ${card.text}`);
     assert(card.opts.length === 2 && card.opts[0] === '多選+其他', `應有 2 個選項，實際 ${JSON.stringify(card.opts)}`);
     await page.click('.pc-draw-reply-opt'); // 點第一個選項
-    await page.waitForFunction(() => window.__choiceBody, { timeout: 3000 });
-    const body = await page.evaluate(() => window.__choiceBody);
-    console.log('     reply choice body:', JSON.stringify(body));
-    assert(body.replyId === 1 && body.optionId === 'multi', `choice body 應帶 replyId/optionId，實際 ${JSON.stringify(body)}`);
+    await page.waitForFunction(() => window.__drawTest.api.getDecisions().length > 0, { timeout: 3000 });
+    const decs = await page.evaluate(() => window.__drawTest.api.getDecisions());
+    console.log('     decisions after choose:', JSON.stringify(decs));
+    assert(decs.length === 1 && decs[0].optionId === 'multi', `選擇應進佇列(決定)，實際 ${JSON.stringify(decs)}`);
     const chosen = await page.evaluate(() => { const c = document.querySelector('.pc-draw-reply-chosen'); return c && c.textContent; });
     assert(chosen && /已選/.test(chosen), `點後卡片應顯示「已選」，實際 ${chosen}`);
-    await page.evaluate(() => window.__drawTest.api.clear && window.__drawTest.api.clear());
+    await page.evaluate(() => window.__drawTest.api.clear());
   });
 
-  await test('AI 方案卡：選項帶 html(真實 UI) + desc → 渲染真實元件 + 「選這個方案」鈕送 choice', async () => {
+  await test('AI 方案卡：真實 UI + 「選這個方案」→ 決定進佇列、隨「送給 AI」批次送出、送後 sticky disabled', async () => {
     await reset('select');
     await page.evaluate(() => {
-      window.__choiceBody2 = null;
-      window.fetch = (url, opts) => { if (/draw-choice/.test(url)) { try { window.__choiceBody2 = JSON.parse(opts.body); } catch (_) {} } return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) }); };
+      window.__drawTest.api.clear();
+      window.__sendBody3 = null;
+      window.fetch = (url, opts) => { if (/api\/draw$/.test(url)) { try { window.__sendBody3 = JSON.parse(opts.body); } catch (_) {} } return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, n: 1, listening: true }) }); };
+      window.__drawTest.api.setExportEndpoint('http://x/api/draw');
       window.__drawTest.api.ingestReplies([{ n: 7, anchor: { x: 40, y: 50 }, text: '挑一種', options: [
         { id: 'multi', label: '多選核取＋其他', desc: '可複選多項', html: '<div class="field"><span>飲食需求</span><label class="check"><input type="checkbox" checked> 素食</label></div>' },
         { id: 'select', label: '單選下拉', desc: '一次一個', html: '<div class="field"><span>飲食需求</span><select><option>無</option></select></div>' },
@@ -1575,24 +1576,30 @@ async function dragDraw(page, x1, y1, x2, y2) {
     });
     const r = await page.evaluate(() => {
       const c = document.querySelector('.pc-draw-reply-card');
-      return {
-        rich: !!c.querySelector('.pc-draw-reply-opts.is-rich'),
-        mocks: c.querySelectorAll('.pc-draw-reply-mock').length,
-        realCheckbox: !!c.querySelector('.pc-draw-reply-mock input[type="checkbox"]'),
-        realSelect: !!c.querySelector('.pc-draw-reply-mock select'),
-        chooseBtns: c.querySelectorAll('.pc-draw-reply-choose').length,
-      };
+      return { rich: !!c.querySelector('.pc-draw-reply-opts.is-rich'), mocks: c.querySelectorAll('.pc-draw-reply-mock').length, realCheckbox: !!c.querySelector('.pc-draw-reply-mock input[type="checkbox"]'), realSelect: !!c.querySelector('.pc-draw-reply-mock select'), chooseBtns: c.querySelectorAll('.pc-draw-reply-choose').length };
     });
     console.log('     real-ui reply card:', JSON.stringify(r));
-    assert(r.rich && r.mocks === 2, `應為圖文卡片式 + 2 個真實 UI mock，實際 ${JSON.stringify(r)}`);
-    assert(r.realCheckbox && r.realSelect, '應渲染真實 checkbox 與 select');
-    assert(r.chooseBtns === 2, `每個方案應有「選這個方案」鈕，實際 ${r.chooseBtns}`);
-    // 點第一個方案的「選這個方案」鈕 → 送 choice
+    assert(r.rich && r.mocks === 2 && r.realCheckbox && r.realSelect, `應渲染真實 UI mock，實際 ${JSON.stringify(r)}`);
+    assert(r.chooseBtns === 2, `每方案應有「選這個方案」鈕，實際 ${r.chooseBtns}`);
+    // 點第一個方案 → 決定進佇列（不立即送）
     await page.click('.pc-draw-reply-choose');
-    await page.waitForFunction(() => window.__choiceBody2, { timeout: 3000 });
-    const body = await page.evaluate(() => window.__choiceBody2);
-    assert(body.optionId === 'multi', `選這個方案應送對應 optionId，實際 ${JSON.stringify(body)}`);
-    await page.evaluate(() => window.__drawTest.api.clear && window.__drawTest.api.clear());
+    await page.waitForFunction(() => window.__drawTest.api.getDecisions().length > 0, { timeout: 3000 });
+    assert(await page.evaluate(() => window.__sendBody3) === null, '選擇當下不應立即送出（要等批次送）');
+    // 開抽屜 → 決定出現在標注紀錄佇列
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (!d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
+    const hasDecisionRow = await page.evaluate(() => [...document.querySelectorAll('.pc-draw-rec-text')].some(t => /決定：多選核取/.test(t.textContent)));
+    assert(hasDecisionRow, '決定應出現在標注紀錄佇列列');
+    // 送給 AI → 批次帶 decisions
+    await page.click('.pc-draw-rec-send-btn');
+    await page.waitForFunction(() => window.__sendBody3, { timeout: 3000 });
+    const body = await page.evaluate(() => window.__sendBody3);
+    console.log('     batch decisions:', JSON.stringify(body.json.decisions));
+    assert(body.json.decisions && body.json.decisions[0].optionId === 'multi', `批次送出應帶 decisions，實際 ${JSON.stringify(body.json.decisions)}`);
+    // 送後按鈕 sticky disabled（已送、沒再改）
+    await page.waitForFunction(() => { const b = document.querySelector('.pc-draw-rec-send-btn'); return b && !b.dataset.inflight; }, { timeout: 3000 });
+    const btn = await page.evaluate(() => { const b = document.querySelector('.pc-draw-rec-send-btn'); return { text: b.textContent.trim(), disabled: b.disabled }; });
+    assert(/已送出/.test(btn.text) && btn.disabled, `送後決定應 sticky disabled，實際 ${JSON.stringify(btn)}`);
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); window.__drawTest.api.clear(); });
   });
 
   await test('標注紀錄頂部顯示「送出畫面」縮圖（.pc-draw-rec-preview）', async () => {
