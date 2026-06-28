@@ -10,7 +10,7 @@ import {
   makeDrawObject, serializeDrawObject, drawingToDoc,
   serializeObjectsForLocal, hydrateObjectsFromLocal,
   geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath, diamondPoints, labelAnchor, imageGeom,
-  cssSelectorFor, buildExport, annotationRows,
+  cssSelectorFor, buildExport, annotationRows, annotationSig,
   taperScale, outlineWidths, taperedOutline, brushStyle, DRAW_BRUSHES,
   TOOL_SHORTCUTS, resolveShortcut, resolveShortcutByCode,
   reorderIds, reorderMany, rectsIntersect, marqueeSelect, applyStylePatch, eyedropperSupported,
@@ -430,6 +430,21 @@ test('annotationRows: text 解析 label → text → 工具友善預設', () => 
 test('annotationRows: ellipse 無文字 → 友善預設「圈選」、line → 「直線」', () => {
   eq(annotationRows([{ id: 'e', tool: 'ellipse', style: {} }])[0].text, '圈選');
   eq(annotationRows([{ id: 'l', tool: 'line', style: {} }])[0].text, '直線');
+});
+test('annotationSig: 內容相同→同簽章；改幾何/文字/顏色→簽章變', () => {
+  const base = { id: 'a', tool: 'ellipse', geom: { x: 1, y: 2, w: 3, h: 4 }, style: { color: '#f00' } };
+  eq(annotationSig(base), annotationSig({ ...base }), '同內容同簽章');
+  assert(annotationSig(base) !== annotationSig({ ...base, geom: { x: 9, y: 2, w: 3, h: 4 } }), '改幾何→變');
+  assert(annotationSig(base) !== annotationSig({ ...base, text: '新' }), '改文字→變');
+  assert(annotationSig(base) !== annotationSig({ ...base, style: { color: '#00f' } }), '改顏色→變');
+});
+test('annotationRows: sent 旗標＝目前簽章與 sentSigs 相符（送出後沒再改＝已送）', () => {
+  const o = { id: 'a', tool: 'ellipse', geom: { x: 1, y: 2, w: 3, h: 4 }, style: { color: '#f00' } };
+  eq(annotationRows([o])[0].sent, false, '無 sentSigs → 未送');
+  const sigs = { a: annotationSig(o) };
+  eq(annotationRows([o], sigs)[0].sent, true, '簽章相符 → 已送');
+  const moved = { ...o, geom: { x: 50, y: 2, w: 3, h: 4 } };
+  eq(annotationRows([moved], sigs)[0].sent, false, '送出後改過 → 回未送');
 });
 test('annotationRows: selector 取 anchor（無則 null）、color 取 style.color', () => {
   const rows = annotationRows([

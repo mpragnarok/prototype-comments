@@ -239,7 +239,12 @@ const ANNOTATION_TOOL_LABELS = {
 //   text：label（綁定標籤）優先 → text（文字工具）→ 工具友善預設（圈選/箭頭…）。
 //   selector：取 anchor（elementFromPoint 擷取的元件），無則 null。
 //   color：取 style.color。icon：對映合法的工具圖示名（無對應者退回 'rect'）。
-export function annotationRows(objects) {
+// 標注內容簽章：捕捉「送出時會帶的使用者可見內容」。改幾何/文字/顏色/錨點 → 簽章變 → 視為未送。
+export function annotationSig(o) {
+  return JSON.stringify({ tool: o.tool, geom: o.geom, text: o.text, label: o.label, anchor: o.anchor, style: o.style });
+}
+// sentSigs＝{objId: 上次成功送出時的簽章}；row.sent＝目前簽章與已送簽章相符（送出後沒再改）。
+export function annotationRows(objects, sentSigs) {
   return (objects || []).map(o => {
     const text = (o.label != null && o.label !== '') ? o.label
       : (o.text != null && o.text !== '') ? o.text
@@ -251,6 +256,7 @@ export function annotationRows(objects) {
       text,
       selector: o.anchor != null ? o.anchor : null,
       color: (o.style && o.style.color) || null,
+      sent: !!(sentSigs && sentSigs[o.id] === annotationSig(o)),
     };
   });
 }
@@ -991,6 +997,9 @@ const DRAW_STYLES = `
 .pc-draw-rec-icon svg { display: block; }
 .pc-draw-rec-swatch { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); }
 .pc-draw-rec-body { min-width: 0; flex: 1; }
+.pc-draw-rec-status { flex: none; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 999px; white-space: nowrap; }
+.pc-draw-rec-status.is-sent { color: #0d7a4f; background: rgba(22,163,74,.12); }
+.pc-draw-rec-status.is-unsent { color: #9a6a00; background: rgba(183,121,31,.14); }
 .pc-draw-rec-text { color: #1e293b; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-draw-rec-sel { margin-top: 2px; color: #0d8f8f; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1004,6 +1013,9 @@ const DRAW_STYLES = `
 }
 .pc-draw-rec-send-btn:disabled { opacity: .5; cursor: not-allowed; }
 .pc-draw-rec-send-btn:not(:disabled):hover { background: #0d8f8f; }
+/* AI 未連線、已排佇列：用琥珀色與「已送達」的綠/teal 區隔，讓使用者一眼看出差異。 */
+.pc-draw-rec-send-btn.pc-draw-rec-queued { background: #B7791F; }
+.pc-draw-rec-send-btn.pc-draw-rec-queued:disabled { opacity: .85; }
 `;
 
 function injectDrawStyles() {
@@ -1040,6 +1052,7 @@ export function initDrawLayer(target, opts = {}) {
     brushType: 'pen', // 自由筆刷類型 pen/marker/highlighter
     exportEndpoint: opts.exportEndpoint || null, // 「送給 AI」POST 目標（無則只回 payload）
     recordOpen: false, // P6 側邊標注紀錄抽屜開關（預設關 → 不打擾一般使用）
+    sentSigs: {},      // {objId: 上次成功送出時的內容簽章} → 面板每列顯示「已送/未送」
   };
   const history = makeUndoStack();
   // ── P7 團隊持久（選用）：把 opts.persist 解析成 drawings store（ready store 或 {fb,db,projectId}）。
@@ -1083,7 +1096,7 @@ export function initDrawLayer(target, opts = {}) {
   function renderRecordPanel() {
     recordTab.classList.toggle('show', !state.recordOpen);
     recordDrawer.classList.toggle('open', state.recordOpen);
-    const rows = annotationRows(state.objects);
+    const rows = annotationRows(state.objects, state.sentSigs);
     const count = recordDrawer.querySelector('.pc-draw-rec-count');
     if (count) count.textContent = String(rows.length);
     // footer 送出鈕：畫布清空時強制重設（否則 in-flight 中若 clear 仍殘留舊狀態）
@@ -1093,6 +1106,7 @@ export function initDrawLayer(target, opts = {}) {
       if (!sendBtn.dataset.inflight) {
         sendBtn.textContent = `送給 AI（${rows.length}）`;
         sendBtn.disabled = rows.length === 0;
+        sendBtn.classList.remove('pc-draw-rec-queued');
       }
     }
     const list = recordDrawer.querySelector('.pc-draw-rec-list');
@@ -1773,14 +1787,16 @@ export function initDrawLayer(target, opts = {}) {
   // 組 {json, png} → POST 到 endpoint（可無）；無論有無 server 都回 payload 供 caller/測試讀。
   async function sendToAgent(opts2 = {}) {
     const json = exportPayload();
-    if (!json.annotations.length) return { json, png: null, sent: false }; // 沒標注 → 不做事
+    if (!json.annotations.length) return { json, png: null, sent: false, listening: false }; // 沒標注 → 不做事
     const png = await capturePng();
-    const payload = { json, png, sent: false };
+    const payload = { json, png, sent: false, listening: false };
     const endpoint = opts2.endpoint || state.exportEndpoint || sameOriginDrawEndpoint();
     if (endpoint && typeof fetch === 'function') {
       try {
-        await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ json, png }) });
+        const resp = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ json, png }) });
         payload.sent = true;
+        // server 回 { ok, n, listening }：listening＝此刻 AI 是否在線（有 long-poll 連線）。
+        try { const data = await resp.json(); if (data) { payload.listening = !!data.listening; payload.n = data.n; } } catch (_) { /* 無 JSON body 也算送出成功 */ }
       } catch (_) { payload.sent = false; }
     }
     return payload;
@@ -1797,8 +1813,14 @@ export function initDrawLayer(target, opts = {}) {
     let result;
     try { result = await sendToAgent(); } catch (_) { result = { sent: false }; }
     if (result && result.sent) {
-      sendBtn.textContent = `✅ 已送出 ${n} 筆`;
-      setTimeout(() => { delete sendBtn.dataset.inflight; renderRecordPanel(); }, 1800);
+      // 分「AI 在線＝立即送達」與「AI 未連線＝已排佇列（之後連上自動收）」，讓使用者看得出狀態。
+      sendBtn.textContent = result.listening ? `✅ 已送達 AI（${n} 筆）` : `📥 已排佇列（${n} 筆，AI 未連線）`;
+      sendBtn.classList.toggle('pc-draw-rec-queued', !result.listening);
+      // 記下這批每個物件的簽章 → 面板每列標「已送」（改動後簽章變、自動回「未送」）。
+      state.objects.forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
+      renderRecordPanel(); // 立刻更新各列「已送」標記（inflight 仍在 → 不會蓋掉按鈕狀態文字）
+      // 2 秒後恢復成可再送（同一批可重送；server 不去重、AI 端 cursor 會收到）。
+      setTimeout(() => { delete sendBtn.dataset.inflight; renderRecordPanel(); }, 2000);
       return;
     }
     sendBtn.textContent = '⚠️ 送出失敗，再試一次';
@@ -2057,9 +2079,9 @@ export function initDrawLayer(target, opts = {}) {
     capturePng,                            // async → PNG dataURL
     sendToAgent,                           // async (opts?) → {json, png, sent}；回 payload
     setExportEndpoint: url => { state.exportEndpoint = url; },
-    getAnnotationRows: () => annotationRows(state.objects), // P6 面板 row 資料（純函式包裝）
+    getAnnotationRows: () => annotationRows(state.objects, state.sentSigs), // P6 面板 row 資料（純函式包裝）
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
-    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; render(); persistLocalSave(); },
+    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; render(); persistLocalSave(); },
     destroy: () => {
       stopLive(); // Batch 4：拆掉 live reposition 監聽/rAF/ResizeObserver
       svg.remove(); toolbar.remove(); contextMenu.remove();
@@ -2394,6 +2416,10 @@ function recordRowEl(row, selected, onClick) {
     body.appendChild(sel);
   }
   el.appendChild(body);
+  // 已送/未送 標記：送出後沒再改＝已送（綠勾）；新建或改過＝未送（琥珀）。
+  const badge = drawHtmlEl('span', 'pc-draw-rec-status ' + (row.sent ? 'is-sent' : 'is-unsent'));
+  badge.textContent = row.sent ? '✓ 已送' : '● 未送';
+  el.appendChild(badge);
   el.onclick = () => onClick(row.id);
   return el;
 }
