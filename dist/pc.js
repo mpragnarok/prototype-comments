@@ -1947,6 +1947,12 @@ const DRAW_STYLES = `
 .pc-draw-reply-opt-desc { font-weight: 400; color: #475569; font-size: 12px; margin-top: 2px; }
 .pc-draw-reply-preview { margin: 6px 0 0; padding: 6px 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px;
   font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #334155; white-space: pre; overflow-x: auto; }
+/* 真實 UI 預覽：用頁面全域樣式渲染。pointer-events:none → 戳不會誤觸；margin 歸零避免卡片內過寬留白。 */
+.pc-draw-reply-mock { margin: 6px 0; padding: 8px; background: #fff; border: 1px dashed #cbd5e1; border-radius: 6px; pointer-events: none; }
+.pc-draw-reply-mock .field, .pc-draw-reply-mock fieldset { margin: 0 !important; }
+.pc-draw-reply-choose { margin-top: 8px; width: 100%; padding: 6px 10px; border: none; border-radius: 7px;
+  background: #0FA0A0; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
+.pc-draw-reply-choose:hover { background: #0d8f8f; }
 .pc-draw-reply-chosen { color: #0d7a4f; font-weight: 700; font-size: 12px; }
 .pc-draw-rec-text { color: #1e293b; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-draw-rec-sel { margin-top: 2px; color: #0d8f8f; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -3484,7 +3490,8 @@ function replyCardEl(reply, onChoose) {
   card.appendChild(head);
   if (reply.text) { const t = drawHtmlEl('div', 'pc-draw-reply-text'); t.textContent = reply.text; card.appendChild(t); }
   const opts = Array.isArray(reply.options) ? reply.options : [];
-  const rich = opts.some(o => o.desc || o.preview); // 有說明/示意圖 → 圖文卡片式；否則純按鈕
+  // 有 html(真實 UI)/desc(說明)/preview(文字示意) → 圖文卡片式；否則純按鈕。
+  const rich = opts.some(o => o.html || o.desc || o.preview);
   if (reply.chosen) {
     const c = drawHtmlEl('div', 'pc-draw-reply-chosen');
     c.textContent = '✓ 已選：' + (reply.chosen.label || reply.chosen.id);
@@ -3493,13 +3500,21 @@ function replyCardEl(reply, onChoose) {
     const row = drawHtmlEl('div', 'pc-draw-reply-opts' + (rich ? ' is-rich' : ''));
     opts.forEach(o => {
       const b = drawHtmlEl('div', 'pc-draw-reply-opt');
-      b.setAttribute('role', 'button'); b.setAttribute('tabindex', '0');
-      const lbl = drawHtmlEl('div', 'pc-draw-reply-opt-label'); lbl.textContent = o.label || o.id;
-      b.appendChild(lbl);
+      if (!rich) { // 純按鈕：整塊可點（向後相容）
+        b.setAttribute('role', 'button'); b.setAttribute('tabindex', '0');
+        b.textContent = o.label || o.id;
+        b.onclick = () => onChoose && onChoose(reply, o);
+        row.appendChild(b);
+        return;
+      }
+      const lbl = drawHtmlEl('div', 'pc-draw-reply-opt-label'); lbl.textContent = o.label || o.id; b.appendChild(lbl);
       if (o.desc) { const d = drawHtmlEl('div', 'pc-draw-reply-opt-desc'); d.textContent = o.desc; b.appendChild(d); }
-      // preview＝純文字示意圖（textContent，安全；monospace 等寬呈現）
-      if (o.preview) { const p = drawHtmlEl('pre', 'pc-draw-reply-preview'); p.textContent = o.preview; b.appendChild(p); }
-      b.onclick = () => onChoose && onChoose(reply, o);
+      // html＝真實 UI 畫面：用頁面全域 styles 渲染，長得跟真的一樣（本地單人信任來源，故 innerHTML）。
+      // 設 pointer-events:none（CSS）→ 戳 mockup 不會誤觸；用下面「選這個方案」鈕才送出。
+      if (o.html) { const m = drawHtmlEl('div', 'pc-draw-reply-mock'); m.innerHTML = o.html; b.appendChild(m); }
+      else if (o.preview) { const p = drawHtmlEl('pre', 'pc-draw-reply-preview'); p.textContent = o.preview; b.appendChild(p); }
+      const choose = drawHtmlEl('button', 'pc-draw-reply-choose'); choose.textContent = '選這個方案';
+      choose.onclick = () => onChoose && onChoose(reply, o); b.appendChild(choose);
       row.appendChild(b);
     });
     card.appendChild(row);

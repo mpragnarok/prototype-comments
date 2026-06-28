@@ -1563,26 +1563,35 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => window.__drawTest.api.clear && window.__drawTest.api.clear());
   });
 
-  await test('AI 方案卡：選項帶 desc + preview → 圖文卡片式渲染', async () => {
+  await test('AI 方案卡：選項帶 html(真實 UI) + desc → 渲染真實元件 + 「選這個方案」鈕送 choice', async () => {
     await reset('select');
     await page.evaluate(() => {
+      window.__choiceBody2 = null;
+      window.fetch = (url, opts) => { if (/draw-choice/.test(url)) { try { window.__choiceBody2 = JSON.parse(opts.body); } catch (_) {} } return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) }); };
       window.__drawTest.api.ingestReplies([{ n: 7, anchor: { x: 40, y: 50 }, text: '挑一種', options: [
-        { id: 'multi', label: '多選核取＋其他', desc: '可複選多項', preview: '☑ 素食  ☐ 不吃牛\n☐ 其他：[____]' },
-        { id: 'select', label: '單選下拉', desc: '一次一個', preview: '[ 無        ▾ ]' },
+        { id: 'multi', label: '多選核取＋其他', desc: '可複選多項', html: '<div class="field"><span>飲食需求</span><label class="check"><input type="checkbox" checked> 素食</label></div>' },
+        { id: 'select', label: '單選下拉', desc: '一次一個', html: '<div class="field"><span>飲食需求</span><select><option>無</option></select></div>' },
       ] }]);
     });
     const r = await page.evaluate(() => {
       const c = document.querySelector('.pc-draw-reply-card');
       return {
         rich: !!c.querySelector('.pc-draw-reply-opts.is-rich'),
-        descs: [...c.querySelectorAll('.pc-draw-reply-opt-desc')].map(d => d.textContent),
-        previews: [...c.querySelectorAll('.pc-draw-reply-preview')].map(p => p.textContent),
+        mocks: c.querySelectorAll('.pc-draw-reply-mock').length,
+        realCheckbox: !!c.querySelector('.pc-draw-reply-mock input[type="checkbox"]'),
+        realSelect: !!c.querySelector('.pc-draw-reply-mock select'),
+        chooseBtns: c.querySelectorAll('.pc-draw-reply-choose').length,
       };
     });
-    console.log('     rich reply card:', JSON.stringify(r));
-    assert(r.rich, '應為圖文卡片式（is-rich）');
-    assert(r.descs.length === 2 && r.descs[0] === '可複選多項', `應渲染 desc，實際 ${JSON.stringify(r.descs)}`);
-    assert(r.previews.length === 2 && /素食/.test(r.previews[0]), `應渲染 preview 示意圖，實際 ${JSON.stringify(r.previews)}`);
+    console.log('     real-ui reply card:', JSON.stringify(r));
+    assert(r.rich && r.mocks === 2, `應為圖文卡片式 + 2 個真實 UI mock，實際 ${JSON.stringify(r)}`);
+    assert(r.realCheckbox && r.realSelect, '應渲染真實 checkbox 與 select');
+    assert(r.chooseBtns === 2, `每個方案應有「選這個方案」鈕，實際 ${r.chooseBtns}`);
+    // 點第一個方案的「選這個方案」鈕 → 送 choice
+    await page.click('.pc-draw-reply-choose');
+    await page.waitForFunction(() => window.__choiceBody2, { timeout: 3000 });
+    const body = await page.evaluate(() => window.__choiceBody2);
+    assert(body.optionId === 'multi', `選這個方案應送對應 optionId，實際 ${JSON.stringify(body)}`);
     await page.evaluate(() => window.__drawTest.api.clear && window.__drawTest.api.clear());
   });
 
