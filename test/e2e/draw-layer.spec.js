@@ -2336,6 +2336,33 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(t2 === '改後文字', `雙擊編輯後文字應更新，實際 ${t2}`);
   });
 
+  await test('外框形狀不蓋住底下：點箭頭(在橢圓內部)→ 選到箭頭而非橢圓', async () => {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); });
+    // 先畫箭頭（底層）：水平線 y=200
+    await page.evaluate(() => window.__drawTest.api.setTool('arrow'));
+    await page.mouse.move(180, 200); await page.mouse.down(); await page.mouse.move(320, 200); await page.mouse.up();
+    const arrowId = await page.evaluate(() => window.__drawTest.api.getObjects().find(o => o.tool === 'arrow').id);
+    // 再畫橢圓（上層，外框，內部空白覆蓋箭頭）
+    await page.evaluate(() => window.__drawTest.api.setTool('ellipse'));
+    await page.mouse.move(150, 150); await page.mouse.down(); await page.mouse.move(350, 250); await page.mouse.up();
+    // 點 (250,200)：在箭頭線上、在橢圓內部空白
+    await page.evaluate(() => { window.__drawTest.api.setTool('select'); window.__drawTest.api.selectIds([]); });
+    await page.mouse.click(250, 200);
+    await page.waitForTimeout(30);
+    const sel = await page.evaluate(() => window.__drawTest.api.getSelectedIds());
+    console.log('     arrow-under-ellipse selIds:', JSON.stringify(sel), 'arrow:', arrowId);
+    assert(sel.length === 1 && sel[0] === arrowId, `點橢圓內的箭頭應選到箭頭，實際 ${JSON.stringify(sel)}`);
+  });
+  await test('快捷鍵：IME 開著(e.key=Process)仍用 e.code 切工具', async () => {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); window.__drawTest.api.setTool('select'); });
+    await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Process', code: 'KeyO', bubbles: true })));
+    await page.waitForTimeout(20);
+    await dragDraw(page, 150, 150, 230, 210);
+    const tool = await page.evaluate(() => { const os = window.__drawTest.api.getObjects(); return os.length ? os[os.length - 1].tool : null; });
+    console.log('     IME(e.code=KeyO) → drawn tool:', tool);
+    assert(tool === 'ellipse', `IME 開著時 e.code=KeyO 應切到 ellipse，實際 ${tool}`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

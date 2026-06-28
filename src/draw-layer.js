@@ -112,6 +112,14 @@ export function resolveShortcut(key) {
   if (key == null) return null;
   return TOOL_SHORTCUTS[String(key).toLowerCase()] || null;
 }
+// 用實體按鍵位置（e.code）解析快捷鍵：注音/非英文輸入法會把 e.key 變成組字字元，
+// 但 e.code 仍是 "KeyR"/"Digit2"，據此映回原本的 TOOL_SHORTCUTS。
+export function resolveShortcutByCode(code) {
+  if (typeof code !== 'string') return null;
+  if (/^Digit[1-9]$/.test(code)) return resolveShortcut(code.slice(5));
+  if (/^Key[A-Z]$/.test(code)) return resolveShortcut(code.slice(3).toLowerCase());
+  return null;
+}
 
 // ── 純函式（單元測試對象，無 DOM 依賴）──────────────────────────────────────
 // px → viewport-%（沿用 index.js overlay click 的 toFixed(2) 慣例）。
@@ -599,8 +607,22 @@ export function pointNearPolyline(p, points, tol) {
   }
   return false;
 }
-// 點是否命中物件：細線(arrow/line/pencil)用「實際幾何 + 容差」，避免大空白 bbox 蓋住底下物件；
-// 填充形狀(rect/ellipse/diamond/image/text)用 bbox。ends＝arrow/line 解析後端點（選用）。
+// 點是否靠近多邊形邊（pts＝[{x,y}] 依序，閉合）。
+function pointNearPolygon(p, pts, tol) {
+  for (let i = 0; i < pts.length; i++) {
+    if (distPointToSegment(p, pts[i], pts[(i + 1) % pts.length]) <= tol) return true;
+  }
+  return false;
+}
+// 點是否靠近橢圓外框（radial 偏離 1 換回 % 距離）。
+function pointNearEllipseOutline(p, b, tol) {
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2, rx = b.w / 2, ry = b.h / 2;
+  if (rx <= 0 || ry <= 0) return Math.hypot(p.x - cx, p.y - cy) <= tol;
+  const k = Math.hypot((p.x - cx) / rx, (p.y - cy) / ry); // =1 在外框上
+  return Math.abs(k - 1) * Math.min(rx, ry) <= tol;
+}
+// 點是否命中物件：細線(arrow/line/pencil)用實際幾何；外框形狀(fill:none 的 rect/ellipse/diamond)
+// 用「外框線」避免大空白內部蓋住底下物件；填充形狀 / image / text 用 bbox 內部。ends＝解析後端點（選用）。
 export function pointHitsObject(o, p, tol, ends) {
   if (o.tool === 'arrow' || o.tool === 'line') {
     const e = ends || o.geom;
@@ -608,6 +630,15 @@ export function pointHitsObject(o, p, tol, ends) {
   }
   if (o.tool === 'pencil') return pointNearPolyline(p, o.geom.points, tol);
   const b = geomBBox(o);
+  const outlined = (o.tool === 'rect' || o.tool === 'ellipse' || o.tool === 'diamond')
+    && !(o.style && o.style.fill && o.style.fill !== 'none');
+  if (outlined) {
+    if (o.tool === 'ellipse') return pointNearEllipseOutline(p, b, tol);
+    const pts = o.tool === 'diamond'
+      ? [{ x: b.x + b.w / 2, y: b.y }, { x: b.x + b.w, y: b.y + b.h / 2 }, { x: b.x + b.w / 2, y: b.y + b.h }, { x: b.x, y: b.y + b.h / 2 }]
+      : [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }, { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h }];
+    return pointNearPolygon(p, pts, tol);
+  }
   return p.x >= b.x - tol && p.x <= b.x + b.w + tol && p.y >= b.y - tol && p.y <= b.y + b.h + tol;
 }
 
@@ -1908,7 +1939,7 @@ export function initDrawLayer(target, opts = {}) {
     }
     // 工具切換快捷鍵（純按鍵；排除 Cmd/Ctrl/Alt 以免撞 undo/redo/瀏覽器）。打字已在上方 guard 擋掉。
     if (!meta && !e.altKey) {
-      const action = resolveShortcut(e.key);
+      const action = resolveShortcut(e.key) || resolveShortcutByCode(e.code); // e.code → 注音/IME 開著也能切工具
       if (action) {
         e.preventDefault();
         if (action === 'eyedropper') openEyedropper();
