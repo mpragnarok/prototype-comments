@@ -2320,6 +2320,8 @@ function initDrawLayer(target, opts = {}) {
     if (action === 'delete') return deleteSelected();
     if (action === 'undo') return doUndo();
     if (action === 'redo') return doRedo();
+    if (action === 'group') return doGroupSelected();
+    if (action === 'ungroup') return doUngroupSelected();
     return zorder(action); // front / back / forward / backward
   }
 
@@ -2783,7 +2785,17 @@ function initDrawLayer(target, opts = {}) {
     render();
     openContextMenu(e.clientX, e.clientY);
   }
+  // 依選取狀態動態顯示 群組（選 ≥2）／解散群組（選到群組成員）。
+  function syncContextItems() {
+    const canGroup = state.selectedIds.length >= 2;
+    const canUngroup = state.selectedIds.some(id => { const o = findById(state.objects, id); return !!(o && o.groupId); });
+    const g = contextMenu.querySelector('[data-action="group"]');
+    const u = contextMenu.querySelector('[data-action="ungroup"]');
+    if (g) g.style.display = canGroup ? '' : 'none';
+    if (u) u.style.display = canUngroup ? '' : 'none';
+  }
   function openContextMenu(x, y) {
+    syncContextItems();
     contextMenu.style.left = x + 'px';
     contextMenu.style.top = y + 'px';
     contextMenu.classList.add('open');
@@ -3112,15 +3124,18 @@ function brushButton(type, actions) {
 }
 
 // 右鍵 context menu：z-order + 刪除，作用於目前選取集合。
+const CTX_SYM = { group: '⧉', ungroup: '⊟' }; // 群組/解散沒有 icon → 用符號
 function buildContextMenu(actions) {
   const menu = drawHtmlEl('div', 'pc-draw-context');
   menu.id = 'pc-draw-context';
-  [['front', '置頂'], ['forward', '上移一層'], ['backward', '下移一層'], ['back', '置底'], ['delete', '刪除']]
+  [['front', '置頂'], ['forward', '上移一層'], ['backward', '下移一層'], ['back', '置底'],
+    ['group', '群組'], ['ungroup', '解散群組'], ['delete', '刪除']]
     .forEach(([action, label]) => {
       const item = drawHtmlEl('button', 'pc-draw-context-item');
       item.dataset.action = action;
       item.setAttribute('aria-label', label);
-      item.innerHTML = icon(action, 18) + `<span>${label}</span>`;
+      const head = CTX_SYM[action] ? `<span style="display:inline-block;width:18px;text-align:center;font-size:15px">${CTX_SYM[action]}</span>` : icon(action, 18);
+      item.innerHTML = head + `<span>${label}</span>`;
       item.onclick = () => { actions.act(action); actions.closeContext(); };
       menu.appendChild(item);
     });
