@@ -1539,6 +1539,30 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
   });
 
+  await test('AI 方案卡：ingestReplies 渲染錨定卡(文字+選項)；點選項 → POST choice + 標已選', async () => {
+    await reset('select');
+    await page.evaluate(() => {
+      window.__choiceBody = null;
+      window.fetch = (url, opts) => { if (/draw-choice/.test(url)) { try { window.__choiceBody = JSON.parse(opts.body); } catch (_) {} } return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) }); };
+      window.__drawTest.api.ingestReplies([{ n: 1, anchor: { x: 40, y: 50 }, text: '建議改多選', options: [{ id: 'multi', label: '多選+其他' }, { id: 'select', label: '下拉' }] }]);
+    });
+    const card = await page.evaluate(() => {
+      const c = document.querySelector('.pc-draw-reply-card');
+      return { present: !!c, text: c && c.querySelector('.pc-draw-reply-text').textContent, opts: c ? [...c.querySelectorAll('.pc-draw-reply-opt')].map(b => b.textContent) : [] };
+    });
+    assert(card.present, '應渲染 AI 方案卡');
+    assert(card.text === '建議改多選', `卡片文字，實際 ${card.text}`);
+    assert(card.opts.length === 2 && card.opts[0] === '多選+其他', `應有 2 個選項，實際 ${JSON.stringify(card.opts)}`);
+    await page.click('.pc-draw-reply-opt'); // 點第一個選項
+    await page.waitForFunction(() => window.__choiceBody, { timeout: 3000 });
+    const body = await page.evaluate(() => window.__choiceBody);
+    console.log('     reply choice body:', JSON.stringify(body));
+    assert(body.replyId === 1 && body.optionId === 'multi', `choice body 應帶 replyId/optionId，實際 ${JSON.stringify(body)}`);
+    const chosen = await page.evaluate(() => { const c = document.querySelector('.pc-draw-reply-chosen'); return c && c.textContent; });
+    assert(chosen && /已選/.test(chosen), `點後卡片應顯示「已選」，實際 ${chosen}`);
+    await page.evaluate(() => window.__drawTest.api.clear && window.__drawTest.api.clear());
+  });
+
   await test('標注紀錄頂部顯示「送出畫面」縮圖（.pc-draw-rec-preview）', async () => {
     await reset('ellipse');
     await dragDraw(page, 110, 80, 210, 160);
