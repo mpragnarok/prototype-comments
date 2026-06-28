@@ -1721,6 +1721,30 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r && r.kind === 'obj' && r.objId === rectId, `畫線終點應即時吸附 rect，實際 ${JSON.stringify(r)}`);
   });
 
+  // ── Batch 6：端點箭頭（單／雙向）──────────────────────────────────────────────
+  console.log('\ndraw-layer e2e — Batch 6 端點箭頭 heads:');
+  await test('arrow 預設 → 有 marker-end、無 marker-start', async () => {
+    await reset('arrow');
+    await dragDraw(page, 120, 100, 260, 180);
+    const r = await page.evaluate(() => { const l = document.querySelector('#pc-draw line'); return { end: !!l.getAttribute('marker-end'), start: !!l.getAttribute('marker-start') }; });
+    assert(r.end, 'arrow 應有 marker-end');
+    assert(!r.start, 'arrow 預設不應有 marker-start');
+  });
+  await test('setHeads(both) → 雙箭頭（marker-start + marker-end）', async () => {
+    await page.evaluate(() => window.__drawTest.api.setHeads('both')); // 承上：arrow 已選取
+    const r = await page.evaluate(() => { const l = document.querySelector('#pc-draw line'); return { end: !!l.getAttribute('marker-end'), start: !!l.getAttribute('marker-start') }; });
+    assert(r.start && r.end, `雙向應有兩端 marker，實際 ${JSON.stringify(r)}`);
+  });
+  await test('line 預設無箭頭 → setHeads(end) 變單箭頭', async () => {
+    await reset('line');
+    await dragDraw(page, 120, 100, 260, 180);
+    const before = await page.evaluate(() => !!document.querySelector('#pc-draw line').getAttribute('marker-end'));
+    await page.evaluate(() => window.__drawTest.api.setHeads('end'));
+    const after = await page.evaluate(() => !!document.querySelector('#pc-draw line').getAttribute('marker-end'));
+    assert(!before, 'line 預設不應有 marker-end');
+    assert(after, 'setHeads(end) 後 line 應有 marker-end');
+  });
+
   // ── P7 團隊持久（Firestore 向量同步，用 mock firebase）─────────────────────────────
   // 在獨立分頁跑（避免與上方共用 #canvas 的 P1–P6 draw layer 互相干擾）。
   const teamPage = await browser.newPage({ viewport: { width: 800, height: 600 } });

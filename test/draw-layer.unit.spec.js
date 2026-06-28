@@ -17,6 +17,7 @@ import {
   applyCommand, invertCommand, makeUndoStack,
   DEFAULT_DRAW_STYLE, DRAW_MODES, DRAW_TOOLS, MIN_DRAW_SIZE_PCT,
   DRAW_FONT_SIZES,
+  DRAW_HEAD_MODES, arrowHeads,
   setEndpoint,
   assignGroupId, clearGroupId, expandSelectionToGroups, groupMembers,
   rectAnchorPoints, nearestPointOnRect, objectSnapPoints, nearestSnap,
@@ -1028,6 +1029,34 @@ test('resolveEndpoints: obj rel anchor 隨目標移動而更新（live 跟隨）
   const moved = makeDrawObject({ id: 'bx', tool: 'rect', geom: { x: 50, y: 50, w: 20, h: 20 } });
   const e = resolveEndpoints(o, null, [moved, o]);
   eq(e.to.x, 70); eq(e.to.y, 70); // 右下角 = 50+20,50+20
+});
+
+test('arrowHeads: arrow 預設（無 heads）→ 終點箭頭', () => {
+  const h = arrowHeads({ tool: 'arrow', style: {} });
+  eq(h.start, false); eq(h.end, true);
+});
+test('arrowHeads: line 預設（無 heads）→ 無箭頭', () => {
+  const h = arrowHeads({ tool: 'line', style: {} });
+  eq(h.start, false); eq(h.end, false);
+});
+test('arrowHeads: heads=both → 雙向箭頭（起點+終點）', () => {
+  const h = arrowHeads({ tool: 'line', style: { heads: 'both' } });
+  eq(h.start, true); eq(h.end, true);
+});
+test('arrowHeads: heads=start → 只起點；heads=none 蓋過 arrow 預設', () => {
+  eq(arrowHeads({ tool: 'arrow', style: { heads: 'start' } }).start, true);
+  eq(arrowHeads({ tool: 'arrow', style: { heads: 'start' } }).end, false);
+  const none = arrowHeads({ tool: 'arrow', style: { heads: 'none' } });
+  eq(none.start, false); eq(none.end, false);
+});
+test('arrowHeads: 非 line/arrow → 無箭頭', () => {
+  const h = arrowHeads({ tool: 'rect', style: { heads: 'both' } });
+  eq(h.start, false); eq(h.end, false);
+});
+test('normalizeStyle/serialize: heads 保留並 round-trip', () => {
+  const o = makeDrawObject({ tool: 'line', geom: { from: { x: 0, y: 0 }, to: { x: 1, y: 1 } }, style: { heads: 'both' } });
+  eq(o.style.heads, 'both', 'normalizeStyle 保留 heads');
+  eq(serializeDrawObject(o).style.heads, 'both', 'serialize 帶 heads');
 });
 
 test('geomBBox: 對有 anchor 的 arrow 用注入的 resolver 端點', () => {
