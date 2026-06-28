@@ -952,7 +952,7 @@ function createNoteModule({
 
 // ── 常數 ────────────────────────────────────────────────────────────────────
 const DRAW_MODES = ['comment', 'draw', 'off'];
-const DRAW_TOOLS = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'pencil', 'text'];
+const DRAW_TOOLS = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'pencil', 'text', 'comment'];
 const DEFAULT_DRAW_STYLE = { color: '#E5484D', strokeWidth: 2, fill: 'none', fontSize: 16 };
 // Excalidraw/Figma 風格預設色（8 色）＋ picker 另附 <input type=color> 自訂任意 hex。
 const DRAW_COLORS = ['#1e1e1e', '#e03131', '#2f9e44', '#1971c2', '#f08c00', '#9c36b5', '#0c8599', '#868e96'];
@@ -994,6 +994,7 @@ const ICON_PATHS = {
   brush: 'M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37l-1.34-1.34c-.39-.39-1.02-.39-1.41 0L9 12.25 11.75 15l8.96-8.96c.39-.39.39-1.02 0-1.41z', // brush（麥克筆）
   highlighter: 'M17.75 7L14 3.25l-10 10V17h3.75l10-10zm2.96-2.96c.39-.39.39-1.02 0-1.41L18.37.29c-.2-.2-.45-.29-.71-.29s-.51.1-.7.29L15 2.25 18.75 6l1.96-1.96zM0 20h24v4H0z', // border_color（螢光筆）
   send: 'M2.01 21L23 12 2.01 3 2 10l15 2-15 2z', // send（送給 AI）
+  comment: 'M21.99 4c0-1.1-.89-2-1.99-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4-.01-18zM18 14H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z', // comment（指元件留言）
 };
 
 // 一個 Material 圖示 → inline SVG 字串（currentColor → 跟著 active/hover 文字色變化）。
@@ -1027,11 +1028,12 @@ const TOOL_SHORTCUTS = {
   6: 'line', l: 'line',
   7: 'pencil', p: 'pencil',
   8: 'text', t: 'text',
+  c: 'comment', // 指元件留言（無數字鍵；數字 1–8 已滿、9 留給未實作 image）
   i: 'eyedropper',
 };
 // 工具的中文標籤與主要字母提示（tooltip / aria）。
-const TOOL_LABELS_ZH = { select: '選取', ellipse: '橢圓', arrow: '箭頭', pencil: '自由筆', text: '文字', rect: '矩形', diamond: '菱形', line: '直線' };
-const TOOL_KEY = { select: 'V', rect: 'R', diamond: 'D', ellipse: 'O', arrow: 'A', line: 'L', pencil: 'P', text: 'T' };
+const TOOL_LABELS_ZH = { select: '選取', ellipse: '橢圓', arrow: '箭頭', pencil: '自由筆', text: '文字', rect: '矩形', diamond: '菱形', line: '直線', comment: '指元件' };
+const TOOL_KEY = { select: 'V', rect: 'R', diamond: 'D', ellipse: 'O', arrow: 'A', line: 'L', pencil: 'P', text: 'T', comment: 'C' };
 
 // key（單鍵）→ 工具名 / 'eyedropper' / null。大小寫不敏感。純函式。
 function resolveShortcut(key) {
@@ -1159,8 +1161,17 @@ function buildExport(objects, viewport = {}) {
 // 每個工具的友善預設標籤（物件無 label/text 時，面板顯示這個 → 比 'ellipse' 易讀）。
 const ANNOTATION_TOOL_LABELS = {
   ellipse: '圈選', arrow: '箭頭', line: '直線', rect: '矩形', diamond: '菱形',
-  pencil: '手繪', text: '文字', image: '參考圖',
+  pencil: '手繪', text: '文字', image: '參考圖', comment: '指元件',
 };
+// 指元件 comment 的畫布外框幾何：每幀用 anchor selector 重解析底層元件 rect（隨元件移位/捲動跟著貼）；
+// 無 anchor 或解析失敗（元件消失）→ 退回建立時存的 o.geom。純函式（getRect 注入，可單測）。
+function commentViewGeom(o, getRect) {
+  if (o && o.anchor) {
+    const r = getRect(o.anchor);
+    if (r) return r;
+  }
+  return o ? o.geom : undefined;
+}
 // DrawObject[] → 側邊「標注紀錄」面板的 row 資料。純函式：
 //   text：label（綁定標籤）優先 → text（文字工具）→ 工具友善預設（圈選/箭頭…）。
 //   selector：取 anchor（elementFromPoint 擷取的元件），無則 null。
@@ -1298,6 +1309,7 @@ function geomBBox(o, resolve) {
     const x = Math.min(...xs), y = Math.min(...ys);
     return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
   }
+  if (o.tool === 'comment') return { x: g.x, y: g.y, w: g.w || 0, h: g.h || 0 }; // [fix2] 元件外框尺寸，不套 text 小框估算
   const w = Math.max(4, (o.text ? o.text.length : 1) * 1.2); // text：估一個可命中的框
   return { x: g.x, y: g.y - 2.5, w, h: 3.5 };
 }
@@ -2182,6 +2194,7 @@ function initDrawLayer(target, opts = {}) {
     if (!DRAW_TOOLS.includes(tool)) return;
     state.tool = tool;
     if (tool !== 'select') state.selectedIds = []; // 切到繪圖工具 → 取消選取（避免新物件被回頭改色）
+    if (tool !== 'comment') snapHighlight = null;   // 離開指元件 → 清掉殘留的 hover 外框
     setMode('draw'); // 任何工具（含 select）都進 draw → SVG 吃事件
     render();
   }
@@ -2215,6 +2228,7 @@ function initDrawLayer(target, opts = {}) {
       const e = resolveO(o);
       return { ...o, geom: { ...o.geom, from: e.from, to: e.to } };
     }
+    if (o.tool === 'comment') return { ...o, geom: commentViewGeom(o, getRectPct) }; // 每幀重解析元件外框
     return o;
   }
 
@@ -2243,6 +2257,7 @@ function initDrawLayer(target, opts = {}) {
   function anchoredSelectors() {
     const sels = new Set();
     state.objects.forEach(o => {
+      if (o.tool === 'comment' && o.anchor) sels.add(o.anchor); // 指元件也綁元件 → 捲動/resize 要重解析
       const ea = o.endAnchors; if (!ea) return;
       ['from', 'to'].forEach(w => { if (ea[w] && ea[w].kind === 'el') sels.add(ea[w].selector); });
     });
@@ -2260,6 +2275,7 @@ function initDrawLayer(target, opts = {}) {
     liveRaf = (liveOn && typeof requestAnimationFrame === 'function') ? requestAnimationFrame(liveTick) : null; // render→syncLiveLoop 可能已 stopLive，勿排程鬼魂 rAF
   }
   function hasElAnchor(o) {
+    if (o.tool === 'comment' && o.anchor) return true; // [fix0b] 指元件：anchor selector → live loop 追蹤
     const ea = o.endAnchors; if (!ea) return false;
     return (ea.from && ea.from.kind === 'el') || (ea.to && ea.to.kind === 'el');
   }
@@ -2287,11 +2303,17 @@ function initDrawLayer(target, opts = {}) {
     stampZ();
     while (svg.childNodes.length > 1) svg.removeChild(svg.lastChild); // 保留 <defs>
     const rect = { width: svg.clientWidth || host.clientWidth, height: svg.clientHeight || host.clientHeight };
+    // [fix5] stable badge 序號：以 state.objects 中 comment 的插入順序為準（不受 render 過濾影響）
+    const _commentSeqMap = new Map(
+      state.objects.filter(o => o.tool === 'comment').map((o, i) => [o.id, i + 1])
+    );
+    let _commentSeqFallback = _commentSeqMap.size; // draft 用 next 號
     [...state.objects, state.draft].forEach(o => {
       if (!o) return;
       if (o !== state.draft && isSent(o)) return; // 已送出 → 不畫在畫布（保留在標注紀錄）
       if (o.id === state.editingId) return;       // 正在編輯的文字 → 隱藏原件，只留輸入框（不重疊兩個）
       const vo = viewObject(o); // arrow/line anchor → 解析後端點渲染
+      if (vo.tool === 'comment') vo.seq = _commentSeqMap.get(o.id) ?? ++_commentSeqFallback; // [fix5] stable
       const node = renderObject(vo, rect, svg);
       node.setAttribute('data-id', o.id);
       // 物件不吃指標事件 → 所有點擊都落在穩定的 <svg>（hit-test 用幾何）。
@@ -2741,6 +2763,7 @@ function initDrawLayer(target, opts = {}) {
     state.selectedIds = [];
     const rect = svg.getBoundingClientRect();
     if (state.tool === 'text') { startTextInput(e.clientX, e.clientY, rect); return; }
+    if (state.tool === 'comment') { startCommentInput(e.clientX, e.clientY, rect); return; }
     const p0 = clientToPct(e.clientX, e.clientY, rect);
     let start = p0, fromAnchor;
     if (isEndpointTool(state.tool)) { // 起點也可吸附（畫線時 from 黏元件/形狀）
@@ -2974,6 +2997,52 @@ function initDrawLayer(target, opts = {}) {
     input.addEventListener('blur', commit);
   }
 
+  // ── 指元件 comment：點底層元件 → 收 prompt → 建一筆帶 anchor 的留言 ────────────────
+  // 抓游標下 app 元件 selector；抓不到具體元件（body/overlay/toolbar）→ 不開輸入框、不建留言
+  //（強制每筆 comment 都有錨點，AI 才知道指誰）。建出的物件沿用既有佇列/送出/已送全鏈。
+  function startCommentInput(clientX, clientY, rect) {
+    const selector = elSnapSelector(elementUnderPoint(clientX, clientY));
+    if (!selector) return;
+    const input = drawHtmlEl('input', 'pc-draw-text-input');
+    input.type = 'text';
+    input.style.left = (clientX - rect.left) + 'px';
+    input.style.top = (clientY - rect.top) + 'px';
+    host.appendChild(input);
+    setTimeout(() => input.focus(), 0);
+    const point = clientToPct(clientX, clientY, rect);
+    let done = false;
+    const commit = () => {
+      if (done) return;            // Enter 與 blur 都會觸發 → 防重複
+      done = true;
+      const text = input.value.trim();
+      input.remove();
+      snapHighlight = null; // [fix7] 空輸入也要清 hover 高亮、重繪（移到 early-return 前）
+      if (!text) { render(); return; }
+      // geom 存建立時的元件 rect（fallback 落點）；render 時再用 anchor 重解析以跟著元件移位。
+      const g = getRectPct(selector);
+      const geom = g ? g : { ...point, w: 0, h: 0 }; // [fix3] selector 此刻沒回 rect → 至少給 {x,y,w:0,h:0}
+      const o = makeDrawObject({ tool: 'comment', geom, text, style: opts.style });
+      o.anchor = selector; // buildExport→selector、annotationRows→selector、隨元件移位重解析外框
+      runCommand({ type: 'create', obj: o });
+    };
+    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('blur', commit);
+  }
+  // 指元件 hover：游標下若有可標注 app 元件 → 顯示虛線外框（重用 snapHighlight 渲染）。
+  let _cHoverRaf = null;
+  function onCommentHover(e) {
+    if (state.mode !== 'draw' || state.tool !== 'comment' || drag) return;
+    if (host.querySelector('.pc-draw-text-input')) return; // [fix8a] 輸入框開著時不更新 hover
+    if (_cHoverRaf) return;                               // [fix8b] rAF throttle（pointermove 連觸過頻）
+    const cx = e.clientX, cy = e.clientY;
+    _cHoverRaf = (typeof requestAnimationFrame === 'function' ? requestAnimationFrame : f => setTimeout(f, 16))(() => {
+      _cHoverRaf = null;
+      const sel = elSnapSelector(elementUnderPoint(cx, cy));
+      const prevSel = snapHighlight && snapHighlight.selector;
+      if (sel !== prevSel) { snapHighlight = sel ? { selector: sel } : null; render(); }
+    });
+  }
+
   // ── 雙擊：在物件上加/編輯綁定標籤（Excalidraw bound text）────────────────────────
   function onDblClick(e) {
     if (state.mode !== 'draw' || state.tool !== 'select') return;
@@ -3161,6 +3230,8 @@ function initDrawLayer(target, opts = {}) {
   function onDocPointer(e) { if (!contextMenu.contains(e.target)) closeContextMenu(); }
 
   svg.addEventListener('pointerdown', onDown);
+  svg.addEventListener('pointermove', onCommentHover);                       // 指元件 hover 外框
+  svg.addEventListener('pointerleave', () => { if (snapHighlight && state.tool === 'comment') { snapHighlight = null; render(); } });
   svg.addEventListener('dblclick', onDblClick);
   svg.addEventListener('contextmenu', onContextMenu);
   svg.addEventListener('dragover', onDragOver);
@@ -3276,6 +3347,22 @@ function isDrawn(o) {
 function renderObject(o, rect, svg) {
   const s = o.style || DEFAULT_DRAW_STYLE;
   const stroke = { stroke: s.color, 'stroke-width': s.strokeWidth, fill: s.fill || 'none' };
+  if (o.tool === 'comment') {
+    // 指元件：被標注元件的虛線外框 + 左上角 💬+序號 角標。geom 已由 viewObject 重解析成元件 rect。
+    const g = o.geom || { x: 0, y: 0, w: 0, h: 0 };
+    const x = pctToPx(g.x, rect.width), y = pctToPx(g.y, rect.height);
+    const w = pctToPx(g.w || 0, rect.width), h = pctToPx(g.h || 0, rect.height);
+    const grp = drawSvgEl('g', { class: 'pc-draw-comment' });
+    grp.appendChild(drawSvgEl('rect', {
+      x, y, width: w, height: h, fill: 'none',
+      stroke: s.color, 'stroke-width': s.strokeWidth, 'stroke-dasharray': '5 4', rx: 4,
+    }));
+    const badgeY = y >= 10 ? y - 5 : y + 13; // [fix4] 元件貼頂時 badge 畫在框內，防 y<0 裁切
+    const badge = drawSvgEl('text', { x: x + 3, y: badgeY, fill: s.color, 'font-size': 13, 'font-weight': 700 });
+    badge.textContent = '💬' + (o.seq || '');
+    grp.appendChild(badge);
+    return grp;
+  }
   if (o.tool === 'ellipse') {
     const g = o.geom;
     return drawSvgEl('ellipse', {
@@ -3409,7 +3496,7 @@ function ensureArrowMarker(svg, color) {
 
 // ── 工具列 UI（Material 圖示 + 顏色/線粗 popover）────────────────────────────
 // 工具列上的工具排序（Excalidraw 數字順序）；pencil 槽位用 3 個筆刷取代（無獨立鉛筆鈕）。
-const TOOLBAR_TOOL_ORDER = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'pencil', 'text'];
+const TOOLBAR_TOOL_ORDER = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'pencil', 'text', 'comment'];
 function buildToolbar(state, actions) {
   const bar = drawHtmlEl('div', 'pc-draw-toolbar');
   bar.id = 'pc-draw-toolbar';

@@ -10,7 +10,7 @@ import {
   makeDrawObject, serializeDrawObject, drawingToDoc,
   serializeObjectsForLocal, hydrateObjectsFromLocal,
   geomFromDrag, geomBBox, translateGeom, remapGeom, resizeBBox, freehandPath, diamondPoints, labelAnchor, imageGeom,
-  cssSelectorFor, buildExport, annotationRows, annotationSig,
+  cssSelectorFor, buildExport, annotationRows, annotationSig, commentViewGeom,
   taperScale, outlineWidths, taperedOutline, brushStyle, DRAW_BRUSHES,
   TOOL_SHORTCUTS, resolveShortcut, resolveShortcutByCode,
   reorderIds, reorderMany, rectsIntersect, marqueeSelect, applyStylePatch, eyedropperSupported,
@@ -1181,6 +1181,62 @@ test('hydrateObjectsFromLocal: endAnchors round-trip', () => {
   o.endAnchors = { to: { kind: 'el', selector: '#k', relX: 0.25, relY: 0.75 } };
   const back = hydrateObjectsFromLocal([serializeDrawObject(o)]);
   eq(back[0].endAnchors.to.relX, 0.25, '應還原 endAnchors');
+});
+
+// ── 功能① 指元件 comment 工具（純函式）──────────────────────────────────────────
+// 註：tool id 'comment' 與 DRAW_MODES 的 'comment' mode 命名相同但分屬不同 namespace
+//（DRAW_TOOLS vs DRAW_MODES）；draw-layer 內無 mode==='comment' 分支，無 runtime 衝突。
+test('DRAW_TOOLS 含 comment（指元件工具已註冊）', () => {
+  assert(DRAW_TOOLS.includes('comment'), 'DRAW_TOOLS 應含 comment');
+});
+test('TOOL_SHORTCUTS：字母 c → comment（大小寫不敏感）', () => {
+  eq(TOOL_SHORTCUTS.c, 'comment');
+  eq(resolveShortcut('c'), 'comment');
+  eq(resolveShortcut('C'), 'comment');
+});
+test('TOOL_SHORTCUTS：comment 不占用任何數字鍵（無數字徽章）', () => {
+  const digit = Object.keys(TOOL_SHORTCUTS).find(k => /^[0-9]$/.test(k) && TOOL_SHORTCUTS[k] === 'comment');
+  eq(digit, undefined, 'comment 應只有字母鍵');
+});
+test('annotationRows：comment 無文字 → 友善預設「指元件」、icon=comment、selector 取 anchor', () => {
+  const rows = annotationRows([{ id: 'c1', tool: 'comment', anchor: '#meal', style: { color: '#0FA0A0' } }]);
+  eq(rows[0].text, '指元件', '無文字 → 友善預設');
+  eq(rows[0].icon, 'comment', 'comment 有專屬圖示（不退回 rect）');
+  eq(rows[0].selector, '#meal', 'selector 取 anchor');
+});
+test('annotationRows：comment 有 prompt 文字 → 顯示該文字', () => {
+  const rows = annotationRows([{ id: 'c2', tool: 'comment', anchor: '#meal', text: '改成多選', style: {} }]);
+  eq(rows[0].text, '改成多選');
+});
+test('buildExport：comment → tool/selector/text 完整匯出給 AI', () => {
+  const out = buildExport([{ id: 'c3', tool: 'comment', anchor: '#meal', text: '加其他欄',
+    style: { color: '#0FA0A0' }, geom: { x: 5, y: 6, w: 10, h: 8 } }], { w: 100, h: 100 });
+  const a = out.annotations[0];
+  eq(a.tool, 'comment'); eq(a.selector, '#meal'); eq(a.text, '加其他欄');
+});
+test('commentViewGeom：anchor 可解析 → 回傳重解析後的 rect（隨元件移位）', () => {
+  const o = { tool: 'comment', anchor: '#meal', geom: { x: 0, y: 0, w: 1, h: 1 } };
+  const live = { x: 10, y: 20, w: 30, h: 40 };
+  eq(JSON.stringify(commentViewGeom(o, sel => (sel === '#meal' ? live : null))), JSON.stringify(live));
+});
+test('commentViewGeom：anchor 解析失敗（元件消失）→ 退回 o.geom', () => {
+  const o = { tool: 'comment', anchor: '#gone', geom: { x: 3, y: 4, w: 5, h: 6 } };
+  eq(JSON.stringify(commentViewGeom(o, () => null)), JSON.stringify(o.geom));
+});
+test('commentViewGeom：無 anchor → 退回 o.geom（不呼叫 getRect）', () => {
+  const o = { tool: 'comment', geom: { x: 7, y: 8, w: 9, h: 1 } };
+  let called = false;
+  const r = commentViewGeom(o, () => { called = true; return { x: 0, y: 0, w: 0, h: 0 }; });
+  eq(JSON.stringify(r), JSON.stringify(o.geom));
+  eq(called, false, '無 anchor 不應呼叫 getRect');
+});
+test('geomBBox：comment → 用元件 rect（不落到 text 小框估算，hitTest/marquee 才命中得到）', () => {
+  const b = geomBBox({ tool: 'comment', anchor: '#x', geom: { x: 10, y: 20, w: 30, h: 15 } });
+  eq(b.x, 10); eq(b.y, 20); eq(b.w, 30); eq(b.h, 15);
+});
+test('geomBBox：comment 無 w/h（落點 fallback）→ 不丟例外、回 0 尺寸', () => {
+  const b = geomBBox({ tool: 'comment', geom: { x: 5, y: 6 } });
+  eq(b.x, 5); eq(b.y, 6); eq(b.w, 0); eq(b.h, 0);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

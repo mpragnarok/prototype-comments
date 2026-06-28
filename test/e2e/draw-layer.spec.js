@@ -684,7 +684,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
       return { seq };
     });
     console.log('     toolbar seq:', JSON.stringify(r.seq));
-    const expected = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'brush:pen', 'brush:marker', 'brush:highlighter', 'text'];
+    const expected = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'brush:pen', 'brush:marker', 'brush:highlighter', 'text', 'comment'];
     assert(r.seq.join(',') === expected.join(','), `工具列順序不符，實際 ${r.seq}`);
   });
 
@@ -2596,6 +2596,66 @@ async function dragDraw(page, x1, y1, x2, y2) {
     const tool = await page.evaluate(() => { const os = window.__drawTest.api.getObjects(); return os.length ? os[os.length - 1].tool : null; });
     console.log('     IME(e.code=KeyO) → drawn tool:', tool);
     assert(tool === 'ellipse', `IME 開著時 e.code=KeyO 應切到 ellipse，實際 ${tool}`);
+  });
+
+  // ── 功能① 指元件 comment 工具 ────────────────────────────────────────────────
+  await test('指元件：工具列出現 comment 按鈕', async () => {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); });
+    const has = await page.evaluate(() => !!document.querySelector('#pc-draw-toolbar [data-tool="comment"]'));
+    assert(has, '工具列應有 data-tool=comment 按鈕');
+  });
+  await test('指元件：點底層元件 → 開輸入框 → 打字 Enter → 建出帶 anchor 的 comment', async () => {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); window.__drawTest.api.setTool('comment'); });
+    await page.mouse.click(160, 120); // #price-card 中心（80,60 + 160x120/2）
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.fill('.pc-draw-text-input', '改成可多選＋加其他欄'); // fill：原子聚焦+設值（避免 keyboard race）
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(60);
+    const o = await page.evaluate(() => { const os = window.__drawTest.api.getObjects(); return os[os.length - 1]; });
+    assert(o && o.tool === 'comment', `應建出 comment 物件，實際 ${o && o.tool}`);
+    assert(o.anchor === '#price-card', `anchor 應為 #price-card，實際 ${o.anchor}`);
+    assert(o.text === '改成可多選＋加其他欄', `text 應為 prompt，實際 ${o.text}`);
+  });
+  await test('指元件：點空白處（抓不到具體元件）→ 不建立留言', async () => {
+    // toolbar 自身會被 elSnapSelector 排除 → 點在 toolbar 上拿不到 app 元件 selector
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); window.__drawTest.api.setTool('comment'); });
+    const before = await page.evaluate(() => window.__drawTest.api.getObjects().length);
+    await page.evaluate(() => {
+      const bar = document.getElementById('pc-draw-toolbar');
+      const r = bar.getBoundingClientRect();
+      document.getElementById('pc-draw').dispatchEvent(new PointerEvent('pointerdown',
+        { bubbles: true, clientX: r.left + 5, clientY: r.top + 5 }));
+    });
+    await page.waitForTimeout(40);
+    const after = await page.evaluate(() => window.__drawTest.api.getObjects().length);
+    const hasInput = await page.evaluate(() => !!document.querySelector('.pc-draw-text-input'));
+    assert(after === before, `空白點擊不應建立留言（before ${before} after ${after}）`);
+    assert(!hasInput, '空白點擊不應開輸入框');
+  });
+  await test('指元件：hover 底層元件 → snapHighlight 虛線外框出現', async () => {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); window.__drawTest.api.setTool('comment'); });
+    await page.mouse.move(90, 100);
+    await page.mouse.move(160, 120); // 移到 #price-card 上
+    await page.waitForTimeout(40);
+    const hl = await page.evaluate(() => document.querySelectorAll('#pc-draw .pc-draw-snap-hl').length);
+    assert(hl >= 1, `hover 元件應出現 snapHighlight 外框，實際 ${hl}`);
+  });
+  await test('指元件：render → 虛線外框 + 💬 角標徽章', async () => {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); window.__drawTest.api.setTool('comment'); });
+    await page.mouse.click(160, 120);
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.fill('.pc-draw-text-input', '留言內容'); // fill：原子聚焦+設值（避免 keyboard race）
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(60);
+    const r = await page.evaluate(() => {
+      const g = document.querySelector('#pc-draw .pc-draw-comment');
+      const rect = g && g.querySelector('rect');
+      const badge = g && g.textContent;
+      return { hasG: !!g, dashed: rect && rect.getAttribute('stroke-dasharray'), badge };
+    });
+    assert(r.hasG, '應渲染 .pc-draw-comment 群組');
+    assert(r.dashed, '外框應為虛線（stroke-dasharray）');
+    assert(r.badge && r.badge.includes('💬'), `應有 💬 角標，實際 ${JSON.stringify(r.badge)}`);
   });
 
   await browser.close();
