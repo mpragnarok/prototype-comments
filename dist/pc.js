@@ -1931,15 +1931,22 @@ const DRAW_STYLES = `
 .pc-draw-rec-all { width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: #0FA0A0; }
 /* AI 方案卡層：錨定在標注旁。容器不吃指標，卡片本身吃。 */
 .pc-draw-reply-layer { position: absolute; inset: 0; pointer-events: none; z-index: 2147483640; }
-.pc-draw-reply-card { position: absolute; pointer-events: auto; max-width: 260px; transform: translate(12px, 12px);
+.pc-draw-reply-card { position: absolute; pointer-events: auto; max-width: 300px; transform: translate(12px, 12px);
   background: #fff; border: 1.5px solid #0FA0A0; border-radius: 10px; padding: 10px 12px;
   box-shadow: 0 6px 24px rgba(15,160,160,.22); font: 13px/1.5 system-ui, -apple-system, sans-serif; color: #1e293b; }
 .pc-draw-reply-head { font-size: 11px; font-weight: 700; color: #0d8f8f; margin-bottom: 4px; }
 .pc-draw-reply-text { margin-bottom: 8px; white-space: pre-wrap; }
 .pc-draw-reply-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.pc-draw-reply-opts.is-rich { flex-direction: column; flex-wrap: nowrap; gap: 8px; }
 .pc-draw-reply-opt { padding: 6px 10px; border: 1px solid #0FA0A0; border-radius: 7px; background: rgba(15,160,160,.08);
   color: #0d7a7a; font-size: 12px; font-weight: 600; cursor: pointer; }
 .pc-draw-reply-opt:hover { background: #0FA0A0; color: #fff; }
+.pc-draw-reply-opts.is-rich .pc-draw-reply-opt { background: #f8fafc; color: #1e293b; }
+.pc-draw-reply-opts.is-rich .pc-draw-reply-opt:hover { background: #eef7f7; border-color: #0d8f8f; color: #1e293b; }
+.pc-draw-reply-opt-label { font-weight: 700; color: #0d7a7a; font-size: 13px; }
+.pc-draw-reply-opt-desc { font-weight: 400; color: #475569; font-size: 12px; margin-top: 2px; }
+.pc-draw-reply-preview { margin: 6px 0 0; padding: 6px 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px;
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #334155; white-space: pre; overflow-x: auto; }
 .pc-draw-reply-chosen { color: #0d7a4f; font-weight: 700; font-size: 12px; }
 .pc-draw-rec-text { color: #1e293b; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-draw-rec-sel { margin-top: 2px; color: #0d8f8f; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -3477,15 +3484,21 @@ function replyCardEl(reply, onChoose) {
   card.appendChild(head);
   if (reply.text) { const t = drawHtmlEl('div', 'pc-draw-reply-text'); t.textContent = reply.text; card.appendChild(t); }
   const opts = Array.isArray(reply.options) ? reply.options : [];
+  const rich = opts.some(o => o.desc || o.preview); // 有說明/示意圖 → 圖文卡片式；否則純按鈕
   if (reply.chosen) {
     const c = drawHtmlEl('div', 'pc-draw-reply-chosen');
     c.textContent = '✓ 已選：' + (reply.chosen.label || reply.chosen.id);
     card.appendChild(c);
   } else if (opts.length) {
-    const row = drawHtmlEl('div', 'pc-draw-reply-opts');
+    const row = drawHtmlEl('div', 'pc-draw-reply-opts' + (rich ? ' is-rich' : ''));
     opts.forEach(o => {
-      const b = drawHtmlEl('button', 'pc-draw-reply-opt');
-      b.textContent = o.label || o.id;
+      const b = drawHtmlEl('div', 'pc-draw-reply-opt');
+      b.setAttribute('role', 'button'); b.setAttribute('tabindex', '0');
+      const lbl = drawHtmlEl('div', 'pc-draw-reply-opt-label'); lbl.textContent = o.label || o.id;
+      b.appendChild(lbl);
+      if (o.desc) { const d = drawHtmlEl('div', 'pc-draw-reply-opt-desc'); d.textContent = o.desc; b.appendChild(d); }
+      // preview＝純文字示意圖（textContent，安全；monospace 等寬呈現）
+      if (o.preview) { const p = drawHtmlEl('pre', 'pc-draw-reply-preview'); p.textContent = o.preview; b.appendChild(p); }
       b.onclick = () => onChoose && onChoose(reply, o);
       row.appendChild(b);
     });
