@@ -2495,6 +2495,11 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.waitForSelector('.pc-draw-text-input', { timeout: 3000 });
     const prefill = await page.evaluate(() => document.querySelector('.pc-draw-text-input').value);
     assert(prefill === '原文字', `雙擊編輯框應預填原文字，實際 ${prefill}`);
+    // 編輯中：原文字 <text> 與選取框都隱藏 → 畫面只有一個輸入框（不重疊兩個）
+    const during = await page.evaluate(() => ({ canvasTexts: document.querySelectorAll('#pc-draw text').length, sel: document.querySelectorAll('#pc-draw .pc-draw-selection').length, inputs: document.querySelectorAll('.pc-draw-text-input').length }));
+    console.log('     during edit:', JSON.stringify(during));
+    assert(during.canvasTexts === 0, `編輯中應隱藏原文字，實際 canvas <text>=${during.canvasTexts}`);
+    assert(during.sel === 0 && during.inputs === 1, `編輯中應只有 1 個輸入框、無選取框，實際 ${JSON.stringify(during)}`);
     await page.fill('.pc-draw-text-input', '改後文字');
     await page.keyboard.press('Enter');
     await page.waitForTimeout(30);

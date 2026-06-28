@@ -2021,6 +2021,7 @@ function initDrawLayer(target, opts = {}) {
     replies: [],       // AI 貼回頁面的方案卡（{n, anchor, text, options, chosen?}）
     replyCursor: 0,    // reply-poll 游標
     decisions: [],     // 在方案卡上選的「決定」佇列（{id, replyId, optionId, optionLabel, text}）→ 進標注紀錄、隨批送出
+    editingId: null,   // 正在以輸入框編輯的文字物件 id（render 時隱藏原件，避免重疊兩個框）
   };
   const history = makeUndoStack();
   // ── P7 團隊持久（選用）：把 opts.persist 解析成 drawings store（ready store 或 {fb,db,projectId}）。
@@ -2284,6 +2285,7 @@ function initDrawLayer(target, opts = {}) {
     [...state.objects, state.draft].forEach(o => {
       if (!o) return;
       if (o !== state.draft && isSent(o)) return; // 已送出 → 不畫在畫布（保留在標注紀錄）
+      if (o.id === state.editingId) return;       // 正在編輯的文字 → 隱藏原件，只留輸入框（不重疊兩個）
       const vo = viewObject(o); // arrow/line anchor → 解析後端點渲染
       const node = renderObject(vo, rect, svg);
       node.setAttribute('data-id', o.id);
@@ -2347,7 +2349,7 @@ function initDrawLayer(target, opts = {}) {
   }
 
   function renderSelection(rect) {
-    const objs = selectedObjects().filter(o => !isSent(o)); // 已送出隱藏者不畫選取框
+    const objs = selectedObjects().filter(o => !isSent(o) && o.id !== state.editingId); // 已送出/編輯中者不畫選取框
     if (!objs.length) return;
     const g = drawSvgEl('g', { class: 'pc-draw-selection' });
     objs.forEach(o => {
@@ -2951,6 +2953,8 @@ function initDrawLayer(target, opts = {}) {
   }
   // 雙擊文字物件 → 編輯其內容（o.text）；清空則刪除該物件。
   function startTextEdit(o, rect) {
+    state.editingId = o.id; // 隱藏原件 → 編輯時只看到一個輸入框
+    render();
     const input = drawHtmlEl('input', 'pc-draw-text-input');
     input.type = 'text';
     input.value = o.text || '';
@@ -2963,16 +2967,19 @@ function initDrawLayer(target, opts = {}) {
     const commit = () => {
       if (done) return;
       done = true;
+      state.editingId = null; // 還原顯示
       const text = input.value.trim();
       input.remove();
       if (text === (o.text || '')) { render(); return; } // 無變更
       if (!text) { // 清空 → 刪除該文字物件
         const index = state.objects.findIndex(x => x.id === o.id);
         if (index >= 0) runCommand({ type: 'deleteMany', items: [{ obj: o, index }] });
+        else render();
         return;
       }
       o.text = text;                               // 立即套用（預覽）
       pushHistory({ type: 'update', id: o.id, before, after: { text } });
+      render();
     };
     input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
     input.addEventListener('blur', commit);
