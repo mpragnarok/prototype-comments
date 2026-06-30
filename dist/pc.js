@@ -1107,12 +1107,17 @@ function imageGeom(natW, natH, canvasW, canvasH, atPoint, maxFrac = 0.6) {
   const r2 = n => parseFloat(n.toFixed(2));
   const CW = canvasW || 1, CH = canvasH || 1;
   const scale = Math.min(1, (maxFrac * CW) / (natW || 1), (maxFrac * CH) / (natH || 1)); // 等比、不放大
-  const wPct = (natW * scale / CW) * 100;
-  const hPct = (natH * scale / CH) * 100;
-  let x = atPoint ? atPoint.x - wPct / 2 : 50 - wPct / 2;
-  let y = atPoint ? atPoint.y - hPct / 2 : 50 - hPct / 2;
-  x = Math.max(0, Math.min(x, 100 - wPct)); // 夾進畫布
-  y = Math.max(0, Math.min(y, 100 - hPct));
+  // 單一參考軸：px → % 兩軸皆除以「寬」（與 render 一致）；置中用真實畫布中心 px。
+  const wPx = natW * scale, hPx = natH * scale;
+  const wPct = (wPx / CW) * 100;
+  const hPct = (hPx / CW) * 100;
+  const cxPx = atPoint ? (atPoint.x / 100) * CW : CW / 2;
+  const cyPx = atPoint ? (atPoint.y / 100) * CW : CH / 2;
+  const fullH = (CH / CW) * 100; // 可視畫布高在「寬-%」下的範圍
+  let x = ((cxPx - wPx / 2) / CW) * 100;
+  let y = ((cyPx - hPx / 2) / CW) * 100;
+  x = Math.max(0, Math.min(x, 100 - wPct));        // 夾進畫布（寬）
+  y = Math.max(0, Math.min(y, fullH - hPct));      // 夾進可視畫布（高）
   return { x: r2(x), y: r2(y), w: r2(wPct), h: r2(hPct) };
 }
 
@@ -2030,6 +2035,14 @@ function initDrawLayer(target, opts = {}) {
   const svg = drawSvgEl('svg', { id: 'pc-draw' });
   buildArrowhead(svg);
   host.appendChild(svg);
+  // ── 單一參考軸座標系 ──────────────────────────────────────────────────────
+  // x、y 都以「畫布寬」換算 → 上下拉動視窗 / 手機網址列收合（只改高度）時，標注不縮放、不變形。
+  // 回傳保留 left/top（hit-test 用），width、height 皆為畫布寬的方形參考 rect。
+  function coordRect() {
+    const r = svg.getBoundingClientRect();
+    const w = svg.clientWidth || host.clientWidth || r.width;
+    return { left: r.left, top: r.top, width: w, height: w };
+  }
   // AI 方案卡層：錨定在標注旁的回覆卡（不依賴 lavish，走自家 reply 通道）。容器不吃指標、卡片才吃。
   const replyLayer = drawHtmlEl('div', 'pc-draw-reply-layer');
   host.appendChild(replyLayer);
@@ -2157,11 +2170,18 @@ function initDrawLayer(target, opts = {}) {
   // 標注紀錄頂部「送出畫面」縮圖：顯示 capturePng() 的結果（=送給 AI 的 PNG）。
   let _previewSig = null, _previewUrl = null, _previewTimer = null;
   function recordPreviewEl() {
-    const img = drawHtmlEl('img', 'pc-draw-rec-preview');
-    img.alt = '送給 AI 的畫面預覽';
-    img.style.cssText = 'display:block;width:100%;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;';
-    if (_previewUrl) img.src = _previewUrl;
-    return img;
+    if (_previewUrl) {
+      const img = drawHtmlEl('img', 'pc-draw-rec-preview');
+      img.alt = '送給 AI 的畫面預覽';
+      img.style.cssText = 'display:block;width:100%;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;';
+      img.src = _previewUrl;
+      return img;
+    }
+    // 截圖尚未備好 → 顯示 placeholder（避免空 src <img> 被瀏覽器畫成破圖）
+    const ph = drawHtmlEl('div', 'pc-draw-rec-preview');
+    ph.textContent = '產生預覽中…';
+    ph.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;color:#8a9099;font-size:12px;';
+    return ph;
   }
   function refreshRecordPreview() {
     if (!state.recordOpen) return;
@@ -2173,8 +2193,10 @@ function initDrawLayer(target, opts = {}) {
       capturePng().then(url => {
         if (!url) return;
         _previewUrl = url;
-        const img = recordDrawer.querySelector('.pc-draw-rec-preview');
-        if (img) img.src = url;
+        const el = recordDrawer.querySelector('.pc-draw-rec-preview');
+        if (!el) return;
+        if (el.tagName === 'IMG') { el.src = url; return; }
+        el.replaceWith(recordPreviewEl()); // placeholder → 真正的 <img>（_previewUrl 已設）
       });
     }, 180); // debounce：連續操作只在停手後拍一次
   }
@@ -2226,10 +2248,10 @@ function initDrawLayer(target, opts = {}) {
     try { el = document.querySelector(selector); } catch (_) { return null; }
     if (!el || typeof el.getBoundingClientRect !== 'function') return null;
     const er = el.getBoundingClientRect();
-    const hr = svg.getBoundingClientRect();
+    const hr = coordRect();
     return {
-      x: pxToPct(er.left - hr.left, hr.width), y: pxToPct(er.top - hr.top, hr.height),
-      w: pxToPct(er.width, hr.width), h: pxToPct(er.height, hr.height),
+      x: pxToPct(er.left - hr.left, hr.width), y: pxToPct(er.top - hr.top, hr.width),
+      w: pxToPct(er.width, hr.width), h: pxToPct(er.height, hr.width),
     };
   }
   // 綁定 resolver：供 render/geomBBox/labelAnchor 取得 arrow/line 解析後端點。
@@ -2255,7 +2277,7 @@ function initDrawLayer(target, opts = {}) {
       if (t) r = geomBBox(t, resolveO);
     }
     if (!r) return;
-    const rect = { width: svg.clientWidth || host.clientWidth, height: svg.clientHeight || host.clientHeight };
+    const rect = coordRect();
     const b = toPxBox(r, rect);
     svg.appendChild(drawSvgEl('rect', {
       class: 'pc-draw-snap-hl', x: b.x, y: b.y, width: b.w, height: b.h, fill: 'none',
@@ -2314,7 +2336,7 @@ function initDrawLayer(target, opts = {}) {
   function render() {
     stampZ();
     while (svg.childNodes.length > 1) svg.removeChild(svg.lastChild); // 保留 <defs>
-    const rect = { width: svg.clientWidth || host.clientWidth, height: svg.clientHeight || host.clientHeight };
+    const rect = coordRect();
     // [fix5] stable badge 序號：以 state.objects 中 comment 的插入順序為準（不受 render 過濾影響）
     const _commentSeqMap = new Map(
       state.objects.filter(o => o.tool === 'comment').map((o, i) => [o.id, i + 1])
@@ -2347,7 +2369,7 @@ function initDrawLayer(target, opts = {}) {
   // ── AI 方案卡（reply 通道）：渲染 + 輪詢 + 回送選擇 ─────────────────────────────
   function renderReplies() {
     replyLayer.innerHTML = '';
-    const rect = { width: svg.clientWidth || host.clientWidth, height: svg.clientHeight || host.clientHeight };
+    const rect = coordRect();
     state.replies.forEach(r => {
       const card = replyCardEl(r, submitChoice, closeReply);
       const a = r.anchor || {};
@@ -2587,7 +2609,7 @@ function initDrawLayer(target, opts = {}) {
 
   // ── pointer：select 模式（選取 / 多選 / marquee / 移動 / 縮放）──────────────────
   function onSelectDown(e) {
-    const rect = svg.getBoundingClientRect();
+    const rect = coordRect();
     // 端點拖曳（arrow/line）：優先於 bbox handle 分支
     const endpoint = e.target?.dataset?.endpoint;
     if (endpoint && state.selectedIds.length === 1) { startEndpointDrag(e, endpoint, rect); return; }
@@ -2773,7 +2795,7 @@ function initDrawLayer(target, opts = {}) {
     if (state.tool === 'select') { onSelectDown(e); return; }
     e.preventDefault();
     state.selectedIds = [];
-    const rect = svg.getBoundingClientRect();
+    const rect = coordRect();
     if (state.tool === 'text') { startTextInput(e.clientX, e.clientY, rect); return; }
     if (state.tool === 'comment') { startCommentInput(e.clientX, e.clientY, rect); return; }
     const p0 = clientToPct(e.clientX, e.clientY, rect);
@@ -2836,7 +2858,7 @@ function initDrawLayer(target, opts = {}) {
   }
   function captureAnchor(obj) {
     if (!ANCHOR_TOOLS.includes(obj.tool)) return;
-    const rect = svg.getBoundingClientRect();
+    const rect = coordRect();
     const a = labelAnchor(obj); // bbox 中心 / 線中點
     const el = elementUnderPoint(rect.left + pctToPx(a.x, rect.width), rect.top + pctToPx(a.y, rect.height));
     if (!el || el === document.body || el === document.documentElement) return; // 空畫布 → anchor 留 null
@@ -2866,10 +2888,14 @@ function initDrawLayer(target, opts = {}) {
     if (typeof window === 'undefined' || typeof document === 'undefined') return Promise.resolve(null);
     if (window.html2canvas) return Promise.resolve(window.html2canvas);
     if (!_h2cPromise) {
-      _h2cPromise = injectScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
+      const chain = injectScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
         .then(fn => fn || injectScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'))
         .then(fn => fn || window.html2canvas || null)
         .catch(() => null);
+      // 整體逾時後援：任一/兩個 CDN 請求卡住（pending，不觸發 onload/onerror）時，
+      // 不讓 capturePng 無限等 → 4.5s 後回 null，退回 SVG-only。背景仍可能載完，下次截圖即用整頁。
+      const timeout = new Promise(res => setTimeout(() => res(null), 4500));
+      _h2cPromise = Promise.race([chain, timeout]);
     }
     return _h2cPromise;
   }
@@ -3058,7 +3084,7 @@ function initDrawLayer(target, opts = {}) {
   // ── 雙擊：在物件上加/編輯綁定標籤（Excalidraw bound text）────────────────────────
   function onDblClick(e) {
     if (state.mode !== 'draw' || state.tool !== 'select') return;
-    const rect = svg.getBoundingClientRect();
+    const rect = coordRect();
     const hit = hitTest(clientToPct(e.clientX, e.clientY, rect));
     if (hit) {
       e.preventDefault();
@@ -3211,7 +3237,7 @@ function initDrawLayer(target, opts = {}) {
   function onContextMenu(e) {
     if (state.mode !== 'draw' || state.tool !== 'select') return;
     e.preventDefault(); // 擋掉瀏覽器原生選單
-    const rect = svg.getBoundingClientRect();
+    const rect = coordRect();
     const hit = hitTest(clientToPct(e.clientX, e.clientY, rect));
     if (!hit) { closeContextMenu(); return; }
     if (!isSelected(hit.id)) selectOnly(hit.id); // 右鍵未選物件 → 先選它

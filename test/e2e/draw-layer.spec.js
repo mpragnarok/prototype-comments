@@ -303,6 +303,36 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(after.w > before.w + 1 && after.h > before.h + 1, 'resize 後寬高應變大');
   });
 
+  await test('視窗高度改變 → 標注不縮放/不變形（單一參考軸：x、y 都吃寬）', async () => {
+    await reset('ellipse');
+    // 基準畫布 600×400，畫 300×200 box 的橢圓（中心 300,200）→ rx≈150, ry≈100
+    await page.evaluate(() => {
+      const c = document.getElementById('canvas');
+      c.style.width = '600px'; c.style.height = '400px';
+      window.dispatchEvent(new Event('resize'));
+    });
+    await dragDraw(page, 150, 100, 450, 300);
+    const before = await page.evaluate(() => {
+      const el = document.querySelector('#pc-draw ellipse');
+      return { rx: +el.getAttribute('rx'), ry: +el.getAttribute('ry') };
+    });
+    // 視窗高 400→200（模擬上下拉動視窗 / 手機網址列收合），觸發 render
+    const after = await page.evaluate(() => {
+      document.getElementById('canvas').style.height = '200px';
+      window.dispatchEvent(new Event('resize'));
+      const el = document.querySelector('#pc-draw ellipse');
+      return { rx: +el.getAttribute('rx'), ry: +el.getAttribute('ry') };
+    });
+    // 還原畫布，避免污染後續以 600×400 為前提的測試
+    await page.evaluate(() => {
+      document.getElementById('canvas').style.height = '400px';
+      window.dispatchEvent(new Event('resize'));
+    });
+    console.log('     高 400→200  rx/ry:', before.rx, before.ry, '→', after.rx, after.ry);
+    assert(Math.abs(after.rx - before.rx) < 1, `寬未變，rx 應不變：${before.rx}→${after.rx}`);
+    assert(Math.abs(after.ry - before.ry) < 1, `改高度不應壓縮標注（bug：ry 被壓縮）：${before.ry}→${after.ry}`);
+  });
+
   await test('z-order：bringToFront → SVG DOM 順序重排（選取物件移到最後）', async () => {
     await reset('rect');
     await dragDraw(page, 60, 60, 140, 140);   // A
@@ -1885,7 +1915,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
     return page.evaluate(() => {
       const o = window.__drawTest.api.getObjects().find(o => o.tool === 'rect');
       const r = document.querySelector('#pc-draw').getBoundingClientRect();
-      return { x: r.left + (o.geom.x + o.geom.w / 2) / 100 * r.width, y: r.top + o.geom.y / 100 * r.height };
+      return { x: r.left + (o.geom.x + o.geom.w / 2) / 100 * r.width, y: r.top + o.geom.y / 100 * r.width };
     });
   }
 
@@ -2536,7 +2566,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
     const t1 = await page.evaluate(() => { const o = window.__drawTest.api.getObjects().find(o => o.tool === 'text'); return o && o.text; });
     assert(t1 === '原文字', `建立文字內容，實際 ${t1}`);
     await page.evaluate(() => window.__drawTest.api.setTool('select'));
-    const pos = await page.evaluate(() => { const o = window.__drawTest.api.getObjects().find(o => o.tool === 'text'); const r = document.querySelector('#pc-draw').getBoundingClientRect(); return { x: r.left + o.geom.x / 100 * r.width, y: r.top + o.geom.y / 100 * r.height }; });
+    const pos = await page.evaluate(() => { const o = window.__drawTest.api.getObjects().find(o => o.tool === 'text'); const r = document.querySelector('#pc-draw').getBoundingClientRect(); return { x: r.left + o.geom.x / 100 * r.width, y: r.top + o.geom.y / 100 * r.width }; });
     await page.mouse.dblclick(pos.x, pos.y);
     await page.waitForSelector('.pc-draw-text-input', { timeout: 3000 });
     const prefill = await page.evaluate(() => document.querySelector('.pc-draw-text-input').value);
