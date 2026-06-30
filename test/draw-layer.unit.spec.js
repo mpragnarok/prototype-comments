@@ -315,29 +315,32 @@ test('diamond: DRAW_TOOLS 含 diamond、serialize 保留 tool', () => {
 });
 
 // ── P3 貼圖 image：imageGeom 尺寸 + serialize imageRef + box 幾何 ──────────────────
-test('imageGeom: 大圖等比縮到 ≤60% 畫布、置中', () => {
+test('imageGeom: 大圖等比縮到 ≤60% 畫布、置中（單一參考軸：% 皆除以寬）', () => {
   const g = imageGeom(1200, 800, 600, 400); // 自然 200%×200% → 縮到 60%
-  // 視覺像素長寬比應 = 1200/800 = 1.5
-  const wpx = g.w / 100 * 600, hpx = g.h / 100 * 400;
-  close(wpx / hpx, 1200 / 800, '像素長寬比應保留');
-  assert(g.w <= 60 + 1e-6 && g.h <= 60 + 1e-6, `應 ≤60% 畫布，實際 ${g.w}×${g.h}`);
-  close(g.x + g.w / 2, 50, '水平置中'); close(g.y + g.h / 2, 50, '垂直置中');
+  // 單一參考軸：兩軸都除以寬 → g.w/g.h 直接等於自然長寬比 1200/800 = 1.5
+  close(g.w / g.h, 1200 / 800, '像素長寬比應保留');
+  const wpx = g.w / 100 * 600, hpx = g.h / 100 * 600; // 兩軸皆乘寬
+  assert(wpx <= 0.6 * 600 + 1e-6 && hpx <= 0.6 * 400 + 1e-6, `應 ≤60% 畫布，實際 ${wpx}×${hpx}px`);
+  close(g.x + g.w / 2, 50, '水平置中（寬中點）');
+  // g.* 經 r2 兩位捨入，導數量級用 0.01 容差比對
+  assert(Math.abs((g.y + g.h / 2) - 200 / 600 * 100) < 0.01, `垂直置中（高中點，以寬-% 表示）— got ${g.y + g.h / 2}`);
 });
 test('imageGeom: 非等比畫布也保留像素長寬比（正方形圖）', () => {
   const g = imageGeom(800, 800, 600, 400); // 正方形圖，畫布非正方
-  const wpx = g.w / 100 * 600, hpx = g.h / 100 * 400;
+  const wpx = g.w / 100 * 600, hpx = g.h / 100 * 600; // 兩軸皆乘寬
   close(wpx, hpx, '正方形圖應渲染成正方形像素');
   assert(hpx <= 0.6 * 400 + 1e-6, `高度受 60% 高限制，實際 ${hpx}`);
 });
-test('imageGeom: 小圖不放大（scale=1）', () => {
-  const g = imageGeom(60, 40, 600, 400); // 自然 10%×10%，遠小於 60%
-  eq(g.w, 10); eq(g.h, 10);
+test('imageGeom: 小圖不放大（scale=1），% 皆除以寬', () => {
+  const g = imageGeom(60, 40, 600, 400); // 自然 60px×40px
+  eq(g.w, 10); eq(g.h, 6.67); // 寬 60/600=10%；高 40/600≈6.67%（r2 兩位）
 });
-test('imageGeom: atPoint → 以該點為中心並夾進畫布', () => {
+test('imageGeom: atPoint（寬-%）→ 以該點為中心並夾進畫布', () => {
   const g = imageGeom(120, 80, 600, 400, { x: 5, y: 5 }); // 想置中於(5,5)，但會被夾住不出界
   assert(g.x >= 0 && g.y >= 0 && g.x + g.w <= 100 + 1e-6 && g.y + g.h <= 100 + 1e-6, '不應超出畫布');
   const mid = imageGeom(120, 80, 600, 400, { x: 50, y: 50 });
-  close(mid.x + mid.w / 2, 50); close(mid.y + mid.h / 2, 50, '畫布內的點 → 真正以該點為中心');
+  close(mid.x + mid.w / 2, 50);
+  assert(Math.abs((mid.y + mid.h / 2) - 50) < 0.01, `畫布內的點 → 真正以該點為中心 — got ${mid.y + mid.h / 2}`);
 });
 test('image: makeDrawObject 帶 imageRef、serialize 一併輸出', () => {
   const o = makeDrawObject({ id: 'im1', tool: 'image', geom: { x: 0, y: 0, w: 30, h: 20 }, imageRef: 'data:image/png;base64,AAA' });
