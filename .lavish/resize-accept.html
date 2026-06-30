@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>viewBox 修法 — resize 截圖驗收</title>
+<style>
+  :root { --ink:#1a1a1a; --teal:#0FA0A0; --bg:#f5f6f7; --card:#fff; --good:#1f9d57; --line:#e2e4e7; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui,-apple-system,"PingFang TC",sans-serif; background:var(--bg); color:var(--ink); padding:24px; line-height:1.5; }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:#666; font-size:14px; margin:0 0 20px; }
+  .pass { display:inline-flex; align-items:center; gap:8px; background:#e7f7ee; color:var(--good); font-weight:700; padding:8px 16px; border-radius:999px; font-size:15px; margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media (max-width:740px){ .grid{ grid-template-columns:1fr; } }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; min-width:0; }
+  .panel h2 { font-size:15px; margin:0 0 10px; display:flex; align-items:center; gap:8px; }
+  .panel .tag { font-size:11px; padding:2px 8px; border-radius:999px; font-weight:700; background:#eef1f3; color:#555; }
+  .panel img { width:100%; border:1px solid var(--line); border-radius:8px; display:block; background:#fff; }
+  .px { font-family:ui-monospace,Menlo,monospace; font-weight:700; color:var(--teal); font-variant-numeric:tabular-nums; }
+  .readout { margin-top:10px; font-size:13px; }
+  table { width:100%; border-collapse:collapse; margin-top:16px; font-size:13px; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { color:#666; font-weight:600; }
+  td.mono { font-family:ui-monospace,Menlo,monospace; }
+  .note { font-size:12px; color:#888; margin-top:16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎯 viewBox 修法 — resize 截圖驗收</h1>
+  <p class="sub">單一參考軸（x、y 都吃寬）。畫一個 300×200 橢圓，把畫布高 400→200 砍半，證明標注不縮放、不變形。</p>
+  <div class="pass">✓ PASS — 高度砍半後 rx/ry 不變（300×200 仍 300×200）</div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>BEFORE<span class="tag">畫布高 400px</span></h2>
+      <img src="resize-before.png" alt="resize 前" />
+      <div class="readout">橢圓 rx=150 ry=99.99 → 渲染 <span class="px">300 × 200</span></div>
+    </div>
+    <div class="panel">
+      <h2>AFTER<span class="tag">畫布高 200px（砍半）</span></h2>
+      <img src="resize-after.png" alt="resize 後" />
+      <div class="readout">橢圓 rx=150 ry=99.99 → 渲染 <span class="px">300 × 200</span>（不變，僅因容器變矮而超出底邊）</div>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th>測試套件</th><th>結果</th><th>備註</th></tr></thead>
+    <tbody>
+      <tr><td>draw-layer.unit.spec.js</td><td class="mono">191 / 0</td><td>含 imageGeom 改吃寬（4 個斷言更新）</td></tr>
+      <tr><td>draw-layer.spec.js（e2e）</td><td class="mono">139 / 0</td><td>新增「視窗高度改變→不縮放」測試 + 3 個 hit-test helper 修為單一參考軸</td></tr>
+      <tr><td>e2e-mock.spec.js</td><td class="mono">9 / 0</td><td>—</td></tr>
+      <tr><td>e2e-comments.spec.js</td><td class="mono">34 / 0</td><td>—</td></tr>
+      <tr><td>draw-overlay.cdn.spec.js</td><td class="mono">1 / 0</td><td>—</td></tr>
+      <tr><td>visual-shot.js</td><td class="mono">identical</td><td>0 px 差異（留言 pin 樣式未動）</td></tr>
+    </tbody>
+  </table>
+
+  <p class="note">改動：src/draw-layer.js 新增 <span class="px">coordRect()</span> 方形參考 rect（取代 9 處 rect 建構）、getRectPct y 軸吃寬、imageGeom px→% 改吃寬 + 真實畫布中心置中。代價：非正方畫布上舊存標注的垂直位置語意改變（已知並接受的相容性取捨）。尚未 commit / build bundle，等你確認。</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>draw 座標系修法 — 互動比較</title>
+<style>
+  :root {
+    --ink: #1a1a1a; --teal: #0FA0A0; --bg: #f5f6f7; --card: #fff;
+    --bad: #d64545; --good: #1f9d57; --line: #e2e4e7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, "PingFang TC", sans-serif;
+    background: var(--bg); color: var(--ink); padding: 24px; line-height: 1.5;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #666; font-size: 14px; margin: 0 0 20px; }
+  .controls {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 20px; margin-bottom: 20px; display: flex; gap: 28px; flex-wrap: wrap; align-items: center;
+  }
+  .ctrl { display: flex; flex-direction: column; gap: 4px; min-width: 220px; }
+  .ctrl label { font-size: 13px; font-weight: 600; display: flex; justify-content: space-between; }
+  .ctrl label b { color: var(--teal); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--teal); }
+  .presets { display: flex; gap: 8px; align-items: flex-end; }
+  .presets button {
+    font-size: 12px; padding: 7px 12px; border: 1px solid var(--line); background: #fff;
+    border-radius: 8px; cursor: pointer; color: var(--ink);
+  }
+  .presets button:hover { border-color: var(--teal); color: var(--teal); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0;
+  }
+  .panel h2 { font-size: 15px; margin: 0 0 2px; display: flex; align-items: center; gap: 8px; }
+  .panel .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 700; }
+  .tag.cur { background: #fdecec; color: var(--bad); }
+  .tag.fix { background: #e7f7ee; color: var(--good); }
+  .panel .desc { font-size: 12px; color: #777; margin: 2px 0 12px; min-height: 32px; }
+  .stage-outer {
+    background: repeating-linear-gradient(45deg,#fafafa,#fafafa 8px,#f0f0f0 8px,#f0f0f0 16px);
+    border: 1px dashed #cfd2d6; border-radius: 8px; padding: 0; overflow: hidden;
+    display: flex; align-items: center; justify-content: center; height: 420px;
+  }
+  .stage {
+    position: relative; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.12);
+    transition: width .08s linear, height .08s linear;
+  }
+  .shape {
+    position: absolute; border: 2.5px solid var(--teal);
+    background: rgba(15,160,160,.14); border-radius: 50%;
+  }
+  .readout {
+    margin-top: 12px; font-size: 13px; font-variant-numeric: tabular-nums;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .readout .px { font-family: ui-monospace, Menlo, monospace; font-weight: 700; }
+  .verdict { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+  .verdict.ok { background: #e7f7ee; color: var(--good); }
+  .verdict.warn { background: #fdecec; color: var(--bad); }
+  .note { font-size: 12px; color: #888; margin-top: 16px; }
+  .baseline { font-size: 12px; color: #999; margin-top: 6px; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: #666; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎯 draw 座標系修法 — 拉滑桿看差異</h1>
+  <p class="sub">同一個橢圓（基準畫布 600×400 時為 <b>300×200</b>、置中）。拉動下方「視窗高 / 寬」，看兩種座標模型的渲染。重點看<b>「拉高度」</b>那一刻。</p>
+
+  <div class="controls">
+    <div class="ctrl">
+      <label>視窗寬 <b><span id="wVal">600</span> px</b></label>
+      <input type="range" id="wSlider" min="300" max="800" value="600" step="2" />
+    </div>
+    <div class="ctrl">
+      <label>視窗高 <b><span id="hVal">400</span> px</b></label>
+      <input type="range" id="hSlider" min="200" max="420" value="400" step="2" />
+    </div>
+    <div class="presets">
+      <button data-w="600" data-h="400">基準 600×400</button>
+      <button data-w="600" data-h="250">只縮高 → 250</button>
+      <button data-w="450" data-h="400">只縮寬 → 450</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <!-- 現況 -->
+    <div class="panel">
+      <h2>現況（分軸 %）<span class="tag cur">目前線上 · bug</span></h2>
+      <p class="desc">x 吃寬、y 吃高。視窗高一變，y 軸獨立壓縮 → 圓被壓成扁橢圓（你回報的問題）。</p>
+      <div class="stage-outer">
+        <div class="stage" id="stageCur"><div class="shape" id="shapeCur"></div></div>
+      </div>
+      <div class="readout">
+        <span>渲染尺寸 <span class="px" id="pxCur">300 × 200</span></span>
+        <span class="verdict" id="vCur">基準</span>
+      </div>
+    </div>
+
+    <!-- 修法 -->
+    <div class="panel">
+      <h2>單一參考軸（x、y 都吃寬）<span class="tag fix">你選的修法</span></h2>
+      <p class="desc">兩軸都以寬度換算。改高度 → 完全不動（300×200 仍 300×200）；改寬度 → 等比縮放、不變形。</p>
+      <div class="stage-outer">
+        <div class="stage" id="stageFix"><div class="shape" id="shapeFix"></div></div>
+      </div>
+      <div class="readout">
+        <span>渲染尺寸 <span class="px" id="pxFix">300 × 200</span></span>
+        <span class="verdict" id="vFix">基準</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span>🟦 同一個橢圓</span>
+    <span>斜紋 = 視窗可用區，白底 = 繪圖畫布（隨滑桿縮放）</span>
+  </div>
+  <p class="note">驗收標準：<b>拉「只縮高 → 250」時，右邊應仍顯示 300×200（綠），左邊會掉到 300×125（紅）。</b>
+  代價（右邊）：非正方畫布上，舊存標注的垂直位置語意會隨之改變（這是你已知並接受的相容性取捨）。</p>
+  <p class="baseline">※ 基準：橢圓在 600×400 畫布上為置中 300×200。所有 % 在此基準下凍結，之後只改畫布尺寸。</p>
+</div>
+
+<script>
+  // 基準畫布：600×400，橢圓置中、300×200。
+  const BASE_W = 600, BASE_H = 400;
+  const SHAPE_W = 300, SHAPE_H = 200;
+  const cx = BASE_W / 2, cy = BASE_H / 2;            // 中心 (300,200)
+  const left0 = cx - SHAPE_W / 2, top0 = cy - SHAPE_H / 2; // 左上 (150,100)
+
+  // 現況：分軸存（x/w, y/h）。
+  const cur = {
+    x: left0 / BASE_W * 100,   // 25%
+    y: top0  / BASE_H * 100,   // 25%
+    w: SHAPE_W / BASE_W * 100, // 50%
+    h: SHAPE_H / BASE_H * 100, // 50%
+  };
+  // 單一參考軸：x、y、w、h 全部以「寬」換算。
+  const fix = {
+    x: left0 / BASE_W * 100,   // 25%
+    y: top0  / BASE_W * 100,   // 16.67%
+    w: SHAPE_W / BASE_W * 100, // 50%
+    h: SHAPE_H / BASE_W * 100, // 33.33%
+  };
+
+  const wSlider = document.getElementById('wSlider');
+  const hSlider = document.getElementById('hSlider');
+  const wVal = document.getElementById('wVal'), hVal = document.getElementById('hVal');
+
+  function applyShape(shapeEl, stageEl, model, useHeightForY, W, H) {
+    stageEl.style.width = W + 'px';
+    stageEl.style.height = H + 'px';
+    const px = {
+      left: model.x / 100 * W,
+      top:  model.y / 100 * (useHeightForY ? H : W),
+      w:    model.w / 100 * W,
+      h:    model.h / 100 * (useHeightForY ? H : W),
+    };
+    shapeEl.style.left = px.left + 'px';
+    shapeEl.style.top = px.top + 'px';
+    shapeEl.style.width = px.w + 'px';
+    shapeEl.style.height = px.h + 'px';
+    return { w: Math.round(px.w), h: Math.round(px.h) };
+  }
+
+  function verdict(el, size) {
+    const stable = Math.abs(size.w - SHAPE_W) < 1 && Math.abs(size.h - SHAPE_H) < 1;
+    const proportional = Math.abs(size.w / size.h - SHAPE_W / SHAPE_H) < 0.02;
+    if (stable) { el.textContent = '✓ 仍 300×200'; el.className = 'verdict ok'; }
+    else if (proportional) { el.textContent = '○ 等比縮、不變形'; el.className = 'verdict ok'; }
+    else { el.textContent = '✗ 變形（非等比）'; el.className = 'verdict warn'; }
+  }
+
+  function render() {
+    const W = +wSlider.value, H = +hSlider.value;
+    wVal.textContent = W; hVal.textContent = H;
+    const sCur = applyShape(document.getElementById('shapeCur'), document.getElementById('stageCur'), cur, true, W, H);
+    const sFix = applyShape(document.getElementById('shapeFix'), document.getElementById('stageFix'), fix, false, W, H);
+    document.getElementById('pxCur').textContent = sCur.w + ' × ' + sCur.h;
+    document.getElementById('pxFix').textContent = sFix.w + ' × ' + sFix.h;
+    verdict(document.getElementById('vCur'), sCur);
+    verdict(document.getElementById('vFix'), sFix);
+  }
+
+  wSlider.addEventListener('input', render);
+  hSlider.addEventListener('input', render);
+  document.querySelectorAll('.presets button').forEach(b => {
+    b.addEventListener('click', () => {
+      wSlider.value = b.dataset.w; hSlider.value = b.dataset.h; render();
+    });
+  });
+  render();
+</script>
+</body>
+</html>
