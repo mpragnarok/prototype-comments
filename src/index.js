@@ -231,6 +231,7 @@ export async function initPrototypeComments(opts = {}) {
     const toggle = el('button', 'pc-comment-toggle');
     toggle.id = 'pc-comment-toggle';
     toggle.innerHTML = '💬 留言模式';
+    toggle.title = '留言模式（快捷鍵 C）';
     toggle.onclick = () => setCommentMode(!commentMode);
     bar.appendChild(toggle);
 
@@ -283,6 +284,10 @@ export async function initPrototypeComments(opts = {}) {
           <div class="pc-help-section">
             <div class="pc-help-title">📌 新增標註</div>
             <div class="pc-help-desc">點選「💬 留言模式」後，在畫面任意位置點一下放置標註，輸入留言後送出。</div>
+          </div>
+          <div class="pc-help-section">
+            <div class="pc-help-title">⌨️ 快捷鍵</div>
+            <div class="pc-help-desc">登入後按 <kbd>C</kbd> 可快速切換「留言模式」開／關。</div>
           </div>
           <div class="pc-help-section">
             <div class="pc-help-title">↕️ 移動標註</div>
@@ -1597,6 +1602,13 @@ export async function initPrototypeComments(opts = {}) {
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && (movingAnnotationId || isDragging)) cancelMovingAnnotation();
+    // C：快速切換留言模式（用 e.code 對抗注音/IME；打字中與含修飾鍵時不攔）。
+    const tag = (e.target && e.target.tagName) || '';
+    const typing = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable);
+    if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && e.code === 'KeyC' && currentUser) {
+      e.preventDefault();
+      setCommentMode(!commentMode);
+    }
   });
 
   return {
