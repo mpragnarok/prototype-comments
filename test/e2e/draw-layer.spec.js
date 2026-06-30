@@ -169,15 +169,78 @@ async function dragDraw(page, x1, y1, x2, y2) {
       const svg = document.getElementById('pc-draw');
       const peOf = () => getComputedStyle(svg).pointerEvents;
       const api = window.__drawTest.api;
-      api.setMode('comment'); const comment = peOf();
+      api.setMode('note'); const note = peOf();
       api.setMode('draw');    const draw = peOf();
       api.setMode('off');     const off = peOf();
-      return { comment, draw, off };
+      return { note, draw, off };
     });
     console.log('     pointer-events by mode:', JSON.stringify(r));
-    assert(r.comment === 'none', `comment 應 none，實際 ${r.comment}`);
+    assert(r.note === 'none', `note 應 none，實際 ${r.note}`);
     assert(r.draw === 'auto', `draw 應 auto，實際 ${r.draw}`);
     assert(r.off === 'none', `off 應 none，實際 ${r.off}`);
+  });
+
+  await test('💬 留言模式鈕：點擊切 comment（放行+高亮、工具列仍在）；再點回 draw；C 快捷鍵同效', async () => {
+    const sel = '.pc-draw-note';
+    await page.evaluate(() => window.__drawTest.api.setMode('draw'));
+    await page.click(sel); // 第一次點 → note
+    const on = await page.evaluate((s) => ({
+      mode: window.__drawTest.api.getMode(),
+      active: document.querySelector(s).classList.contains('active'),
+      pe: getComputedStyle(document.getElementById('pc-draw')).pointerEvents,
+      barVisible: getComputedStyle(document.getElementById('pc-draw-toolbar')).display !== 'none',
+    }), sel);
+    await page.click(sel); // 再點 → 回 draw
+    const off = await page.evaluate((s) => ({
+      mode: window.__drawTest.api.getMode(),
+      active: document.querySelector(s).classList.contains('active'),
+    }), sel);
+    await page.evaluate(() => document.body.focus());
+    await page.keyboard.press('c'); // C 快捷鍵（e.code === 'KeyC'）→ note
+    const viaKey = await page.evaluate(() => window.__drawTest.api.getMode());
+    console.log('     comment toggle:', JSON.stringify({ on, off, viaKey }));
+    assert(on.mode === 'note' && on.active, '點💬應切 note 並高亮');
+    assert(on.pe === 'none', 'note 模式 SVG 應放行 (pointer-events:none)');
+    assert(on.barVisible, 'note 模式工具列仍應可見（不收合）');
+    assert(off.mode === 'draw' && !off.active, '再點💬應回 draw 並取消高亮');
+    assert(viaKey === 'note', 'C 快捷鍵應切到 note 模式');
+  });
+
+  await test('留言 pin：程式化 addComment → state + 畫面 pin（座標 %）；deleteComment 移除', async () => {
+    const r = await page.evaluate(() => {
+      const api = window.__drawTest.api;
+      const c = api.addNote('這裡要改', 30, 40);
+      const pin = document.querySelector('.pc-note-pin');
+      const after = { count: api.getNotes().length, text: api.getNotes()[0].text,
+        left: pin && pin.style.left, top: pin && pin.style.top };
+      api.deleteNote(c.id);
+      return { after, deletedCount: api.getNotes().length, deletedPins: document.querySelectorAll('.pc-note-pin').length };
+    });
+    console.log('     comment pin:', JSON.stringify(r));
+    assert(r.after.count === 1 && r.after.text === '這裡要改', 'addNote 應進 state.notes');
+    assert(r.after.left === '30%' && r.after.top === '40%', 'pin 應落在 30%/40%');
+    assert(r.deletedCount === 0 && r.deletedPins === 0, 'deleteNote 應移除 state + pin');
+  });
+
+  await test('留言 pin：comment 模式點空白 → 輸入框 → 送出 → 落 pin（真實滑鼠＋鍵盤）', async () => {
+    await page.evaluate(() => window.__drawTest.api.setMode('note'));
+    const layer = await page.evaluate(() => {
+      const r = document.querySelector('.pc-note-layer').getBoundingClientRect();
+      return { x: Math.round(r.left + r.width * 0.5), y: Math.round(r.top + r.height * 0.4) };
+    });
+    await page.mouse.click(layer.x, layer.y);                 // 點空白 → 開輸入框
+    await page.waitForSelector('.pc-note-card textarea');
+    await page.fill('.pc-note-card textarea', '把這顆按鈕往左');
+    await page.click('.pc-note-card .pc-note-row button:not(.ghost):not(.danger)'); // 送出
+    const r = await page.evaluate(() => ({
+      count: window.__drawTest.api.getNotes().length,
+      text: (window.__drawTest.api.getNotes()[0] || {}).text,
+      pins: document.querySelectorAll('.pc-note-pin').length,
+      bubbleGone: !document.querySelector('.pc-note-card'),
+    }));
+    console.log('     place via mouse:', JSON.stringify(r));
+    assert(r.count === 1 && r.text === '把這顆按鈕往左', '點擊放置應建立註記');
+    assert(r.pins === 1 && r.bubbleGone, '送出後應留 1 個 pin 且輸入框關閉');
   });
 
   await test('工具列 ✕ → 回 off 模式（放行 app 點擊）', async () => {
@@ -189,6 +252,27 @@ async function dragDraw(page, x1, y1, x2, y2) {
     }));
     assert(r.mode === 'off', `✕ 應回 off，實際 ${r.mode}`);
     assert(r.pe === 'none', `off 後 pointer-events 應 none，實際 ${r.pe}`);
+  });
+
+  await test('✕ 收合工具列成右下 FAB；點 FAB 展開並回繪圖模式', async () => {
+    await page.evaluate(() => window.__drawTest.api.setMode('draw'));
+    await page.click('.pc-draw-tool[data-tool="off"]'); // ✕ → 收合
+    const collapsed = await page.evaluate(() => ({
+      barHidden: document.getElementById('pc-draw-toolbar').classList.contains('pc-draw-collapsed'),
+      barVisible: getComputedStyle(document.getElementById('pc-draw-toolbar')).display !== 'none',
+      fabShown: document.querySelector('.pc-draw-fab').classList.contains('show'),
+      mode: window.__drawTest.api.getMode(),
+    }));
+    await page.click('.pc-draw-fab'); // 點 FAB → 展開
+    const expanded = await page.evaluate(() => ({
+      barHidden: document.getElementById('pc-draw-toolbar').classList.contains('pc-draw-collapsed'),
+      fabShown: document.querySelector('.pc-draw-fab').classList.contains('show'),
+      mode: window.__drawTest.api.getMode(),
+    }));
+    console.log('     fab collapse/expand:', JSON.stringify({ collapsed, expanded }));
+    assert(collapsed.barHidden && !collapsed.barVisible, '按 ✕ 應收合工具列（display:none）');
+    assert(collapsed.fabShown && collapsed.mode === 'off', '收合後應顯示 FAB 且回 off');
+    assert(!expanded.barHidden && !expanded.fabShown && expanded.mode === 'draw', '點 FAB 應展開工具列、隱藏 FAB、回繪圖模式');
   });
 
   // ── P2：物件操作（select/move/resize/z-order/delete/undo-redo）+ rect/line + 顏色筆粗 ──
@@ -634,9 +718,9 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(/\(I\)/.test(r.eye), `eyedropper title 應含 (I)，實際 ${r.eye}`);
   });
 
-  await test('常駐數字快捷鍵徽章：工具列 1-8 連續、7 在 pen 筆刷、pointer-events:none', async () => {
+  await test('常駐數字快捷鍵徽章：工具列 1-8（字母仍可按）、7 在 pen 筆刷、pointer-events:none', async () => {
     const r = await page.evaluate(() => {
-      // 工具鈕（data-tool）的徽章
+      // 工具鈕（data-tool）的徽章（字母快捷鍵，對齊 TOOL_KEY）
       const want = { select: '1', rect: '2', diamond: '3', ellipse: '4', arrow: '5', line: '6', text: '8' };
       const out = {};
       let allPE = true, allVisible = true;
@@ -670,7 +754,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.out.pen === '7', `pen 筆刷徽章應為 7，實際 ${r.out.pen}`);
     assert(r.allVisible && r.allPE, `徽章應可見且 pointer-events:none（visible=${r.allVisible} pe=${r.allPE}）`);
     assert(!r.markerBadge && !r.hlBadge, 'marker/highlighter 不應有徽章');
-    assert(r.order.join(',') === '1,2,3,4,5,6,7,8', `工具列徽章應依序 1-8，實際 ${r.order}`);
+    assert(r.order.join(',') === '1,2,3,4,5,6,7,8,C', `工具列徽章應依序 1-8 + 留言模式 C，實際 ${r.order}`);
     assert(!r.pencilToolBtn, '不應有獨立 pencil 工具鈕（改由筆刷代表）');
     assert(!r.offBadge && !r.actBadge, 'off/動作 鈕不應有徽章');
   });
@@ -686,6 +770,34 @@ async function dragDraw(page, x1, y1, x2, y2) {
     console.log('     toolbar seq:', JSON.stringify(r.seq));
     const expected = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'brush:pen', 'brush:marker', 'brush:highlighter', 'text'];
     assert(r.seq.join(',') === expected.join(','), `工具列順序不符，實際 ${r.seq}`);
+  });
+
+  await test('? 說明鈕：開啟 modal 列出快捷鍵（含留言模式 C）+ 教學手冊連結，✕ 可關閉', async () => {
+    const before = await page.$('#pc-draw-help-modal');
+    assert(!before, 'modal 預設不應存在');
+    await page.click('.pc-draw-help-btn');
+    const r = await page.evaluate(() => {
+      const m = document.getElementById('pc-draw-help-modal');
+      if (!m) return { open: false };
+      const rows = [...m.querySelectorAll('.pc-draw-help-row')].map(el => el.textContent.replace(/\s+/g, ''));
+      const link = m.querySelector('.pc-draw-help-link');
+      return {
+        open: true,
+        helpBtnIsSvg: !!document.querySelector('.pc-draw-help-btn svg'),
+        hasCommentC: rows.some(t => t.includes('註記模式') && t.includes('C')),
+        hasSelectV: rows.some(t => t.includes('選取') && t.includes('V')),
+        hasLink: !!(link && link.href && link.getAttribute('target') === '_blank'),
+      };
+    });
+    console.log('     help modal:', JSON.stringify(r));
+    assert(r.open, '點 ? 應開啟說明 modal');
+    assert(r.helpBtnIsSvg, '? 鈕應為 inline svg（與工具列圖示一致）');
+    assert(r.hasCommentC, '說明應列出「註記模式」快捷鍵 C');
+    assert(r.hasSelectV, '說明應列出「選取 V」等工具字母快捷鍵');
+    assert(r.hasLink, '說明應有開新分頁的教學手冊連結');
+    await page.click('.pc-draw-help-x');
+    const after = await page.$('#pc-draw-help-modal');
+    assert(!after, '點 ✕ 應關閉 modal');
   });
 
   await test('快捷鍵 3 / d → diamond；7 / p → 自由筆(pencil) 且 brush=pen', async () => {
@@ -706,6 +818,45 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(three === 'diamond' && dKey === 'diamond', `3/d 應切 diamond，實際 ${three}/${dKey}`);
     assert(sevenTool === 'pencil' && pTool === 'pencil', `7/p 應切自由筆，實際 ${sevenTool}/${pTool}`);
     assert(penActive, '7 應啟用 pen 筆刷');
+  });
+
+  await test('off（放行）模式按工具鍵 → 自動進繪圖模式並選該工具', async () => {
+    await page.evaluate(() => window.__drawTest.api.setMode('off'));
+    const offActive = await page.evaluate(() => document.getElementById('pc-draw').classList.contains('pc-draw-active'));
+    await page.keyboard.press('2'); // 數字
+    const afterNum = await page.evaluate(() => ({ tool: window.__drawTest.api.getTool(), active: document.getElementById('pc-draw').classList.contains('pc-draw-active') }));
+    await page.evaluate(() => window.__drawTest.api.setMode('off'));
+    await page.keyboard.press('o'); // 字母
+    const afterLetter = await page.evaluate(() => ({ tool: window.__drawTest.api.getTool(), active: document.getElementById('pc-draw').classList.contains('pc-draw-active') }));
+    console.log('     off→shortcut:', JSON.stringify({ offActive, afterNum, afterLetter }));
+    assert(!offActive, 'setMode(off) 後應為非繪圖模式（svg 無 pc-draw-active）');
+    assert(afterNum.tool === 'rect' && afterNum.active, 'off 模式按 2 應自動進繪圖模式並選 rect');
+    assert(afterLetter.tool === 'ellipse' && afterLetter.active, 'off 模式按 o 應自動進繪圖模式並選 ellipse');
+  });
+
+  await test('全工具快捷鍵：數字 1-8 與字母 V/R/D/O/A/L/P/T 各自切到正確工具', async () => {
+    const PAIRS = [
+      { num: '1', letter: 'v', tool: 'select' },
+      { num: '2', letter: 'r', tool: 'rect' },
+      { num: '3', letter: 'd', tool: 'diamond' },
+      { num: '4', letter: 'o', tool: 'ellipse' },
+      { num: '5', letter: 'a', tool: 'arrow' },
+      { num: '6', letter: 'l', tool: 'line' },
+      { num: '7', letter: 'p', tool: 'pencil' },
+      { num: '8', letter: 't', tool: 'text' },
+    ];
+    const fails = [];
+    for (const { num, letter, tool } of PAIRS) {
+      for (const key of [num, letter]) {
+        const resetTo = tool === 'select' ? 'rect' : 'select'; // 先切到非目標工具，確認按鍵真的有切換
+        await page.evaluate(t => window.__drawTest.api.setTool(t), resetTo);
+        await page.keyboard.press(key);
+        const got = await page.evaluate(() => window.__drawTest.api.getTool());
+        if (got !== tool) fails.push(`按「${key}」應為 ${tool}，實際 ${got}`);
+      }
+    }
+    console.log('     全工具快捷鍵結果:', fails.length ? JSON.stringify(fails) : '全部通過');
+    assert(fails.length === 0, `數字/字母快捷鍵有失效：${fails.join('；')}`);
   });
 
   // ── Change 2/3：筆刷類型（pen/marker/highlighter）+ 頭尾漸細 ────────────────────
@@ -2101,7 +2252,8 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await dragDraw(page, 50, 50, 150, 130);
     const stored = await page.evaluate(k => localStorage.getItem(k), LOCAL_KEY);
     assert(stored !== null, 'localStorage 應有資料');
-    const docs = JSON.parse(stored);
+    const raw = JSON.parse(stored);
+    const docs = Array.isArray(raw) ? raw : (raw.objects || []); // 新格式 {objects,notes}；陣列為舊格式 backward compat
     assert(Array.isArray(docs) && docs.length === 1 && docs[0].tool === 'rect',
       `應序列化 1 筆 rect，實際 ${JSON.stringify(docs)}`);
   });
@@ -2121,12 +2273,37 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.domRects >= 1, `DOM 應渲染 rect，實際 ${r.domRects}`);
   });
 
+  await test('還原後新畫物件 id 不與還原物件碰撞（修「勾一個全選/新增註記自動群組」根因）', async () => {
+    // 真實場景：頁面重載後 _idSeq 歸零，但 localStorage 還原物件仍帶舊 id；
+    // 新畫物件若拿到相同 id → 兩列共用 sendUnchecked/selection。seed 一個高序號 id 確保跨任何 _idSeq 狀態都測得到。
+    const SEED_ID = 'd999999';
+    await page.evaluate(({ key, proj, seedId }) => {
+      localStorage.setItem(key, JSON.stringify({
+        objects: [{ id: seedId, tool: 'rect', geom: { x: 10, y: 10, w: 20, h: 20 }, style: {} }],
+        notes: [],
+      }));
+      try { if (window.__drawTest.api) window.__drawTest.api.destroy(); } catch (_) {}
+      window.__drawTest.api = window.__drawTest.init({ projectId: proj });
+    }, { key: LOCAL_KEY, proj: LOCAL_PROJ, seedId: SEED_ID });
+    await page.evaluate(() => window.__drawTest.api.setTool('rect'));
+    await dragDraw(page, 60, 60, 160, 140);
+    const ids = await page.evaluate(() => window.__drawTest.api.getObjects().map(o => o.id));
+    const newIds = ids.filter(id => id !== SEED_ID);
+    assert(ids.includes(SEED_ID), `應還原 seed 物件 ${SEED_ID}，實際 ${JSON.stringify(ids)}`);
+    assert(newIds.length === 1 && newIds[0] !== SEED_ID,
+      `新畫物件 id 不應與還原物件碰撞，實際 ${JSON.stringify(ids)}`);
+    assert(parseInt(newIds[0].slice(1), 10) > 999999,
+      `新物件序號應大於還原最大序號，實際 ${newIds[0]}`);
+    await page.evaluate(k => localStorage.removeItem(k), LOCAL_KEY);
+  });
+
   await test('image 物件不進 localStorage（vectors only）', async () => {
     await initLocalPersist();
     const PNG_TINY = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
     await page.evaluate(d => window.__drawTest.api.addImage(d, 1, 1, null), PNG_TINY);
     const stored = await page.evaluate(k => localStorage.getItem(k), LOCAL_KEY);
-    const docs = stored ? JSON.parse(stored) : [];
+    const raw = stored ? JSON.parse(stored) : [];
+    const docs = Array.isArray(raw) ? raw : (raw.objects || []); // 新格式 {objects,notes}；陣列為舊格式 backward compat
     assert(!docs.some(d => d.tool === 'image'),
       `image 物件不應進 localStorage，實際 ${JSON.stringify(docs)}`);
   });
@@ -2151,7 +2328,8 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await dragDraw(page, 50, 50, 150, 130);
     await page.evaluate(() => window.__drawTest.api.clear());
     const stored = await page.evaluate(k => localStorage.getItem(k), LOCAL_KEY);
-    const docs = stored ? JSON.parse(stored) : null;
+    const raw = stored ? JSON.parse(stored) : null;
+    const docs = Array.isArray(raw) ? raw : (raw && raw.objects) || null; // 新格式 {objects,notes}；陣列為舊格式 backward compat
     assert(Array.isArray(docs) && docs.length === 0, `clear 後 localStorage 應為空陣列，實際 ${JSON.stringify(docs)}`);
     // 清理
     await page.evaluate(k => localStorage.removeItem(k), LOCAL_KEY);
@@ -2245,6 +2423,28 @@ async function dragDraw(page, x1, y1, x2, y2) {
       window.__drawTest.api.clear();
       window.__drawTest.api.setFontSize(16);
     });
+  });
+
+  await test('text 選取框隨字級放大（用實際渲染框，不是固定估算）', async () => {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setFontSize(16); });
+    await page.evaluate(() => window.__drawTest.api.setTool('text'));
+    await page.mouse.click(300, 200);
+    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
+    await page.fill('.pc-draw-text-input', 'ABC');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(40);
+    const selBox = () => page.evaluate(() => {
+      const r = document.querySelector('.pc-draw-selection rect');
+      return r ? { w: +r.getAttribute('width'), h: +r.getAttribute('height') } : null;
+    });
+    const small = await selBox();
+    await page.evaluate(() => window.__drawTest.api.setFontSize(48)); // 放大選取中的 text
+    await page.waitForTimeout(40);
+    const big = await selBox();
+    console.log('     text sel box small/big:', JSON.stringify({ small, big }));
+    assert(small && big, '應有 text 選取框');
+    assert(big.h > small.h * 1.8 && big.w > small.w, `字級放大後選取框應隨之放大，small=${JSON.stringify(small)} big=${JSON.stringify(big)}`);
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setFontSize(16); });
   });
 
   // ── Item 3：快捷鍵 onKey DOM 觸發（補 resolveShortcut 之外的 wiring）──────────
@@ -2353,6 +2553,33 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await dragDraw(page, 220, 200, 340, 260);
     return page.evaluate(() => window.__drawTest.api.getObjects().map(o => o.id));
   }
+
+  await test('標注紀錄取消勾選 → 整組從畫布+截圖隱藏、仍留清單（group 連動）', async () => {
+    await resetGroup();
+    const ids = await draw2RectsForGroup();
+    await page.evaluate(ids => window.__drawTest.api.selectIds(ids), ids);
+    await page.keyboard.press('Control+g'); // 群組化
+    await page.waitForTimeout(30);
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (!d.classList.contains('open')) document.getElementById('pc-draw-rec-tab').click(); });
+    await page.waitForTimeout(30);
+    await page.click(`.pc-draw-rec-row[data-id="${ids[0]}"] .pc-draw-rec-check`); // 取消勾選其一
+    await page.waitForTimeout(50);
+    const r = await page.evaluate((ids) => ({
+      canvas0: !!document.querySelector(`#pc-draw [data-id="${ids[0]}"]`),
+      canvas1: !!document.querySelector(`#pc-draw [data-id="${ids[1]}"]`),
+      check0: document.querySelector(`.pc-draw-rec-row[data-id="${ids[0]}"] .pc-draw-rec-check`).checked,
+      check1: document.querySelector(`.pc-draw-rec-row[data-id="${ids[1]}"] .pc-draw-rec-check`).checked,
+      list0: !!document.querySelector(`.pc-draw-rec-row[data-id="${ids[0]}"]`),
+      objs: window.__drawTest.api.getObjects().length,
+    }), ids);
+    console.log('     group uncheck:', JSON.stringify(r));
+    assert(!r.canvas0 && !r.canvas1, '取消勾選後整組應從畫布消失（截圖同步排除）');
+    assert(!r.check0 && !r.check1, '同 group 的勾選框應連動一起取消');
+    assert(r.list0, '取消勾選仍保留在標注紀錄清單（可重新勾選）');
+    assert(r.objs === 2, '取消勾選只是隱藏，不刪除物件');
+    await page.click(`.pc-draw-rec-row[data-id="${ids[0]}"] .pc-draw-rec-check`); // 收尾：復原
+    await page.evaluate(() => { window.__drawTest.api.clear(); const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
+  });
 
   await test('Cmd+G：≥2 選取 → 群組化；點其中一個成員 → 兩個都被選取', async () => {
     await resetGroup();
