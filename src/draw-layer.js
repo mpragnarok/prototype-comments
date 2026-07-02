@@ -1548,6 +1548,7 @@ export function initDrawLayer(target, opts = {}) {
     };
     row.append(cancel, send); body.append(ta, row);
     ta.addEventListener('keydown', ev => {
+      if (ev.isComposing || ev.keyCode === 229) return; // 注音/IME 組字中的 Enter（含 Safari/舊 WebKit keyCode 229）→ 放行給輸入法選字，不觸發送出/存檔
       if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); submit(true); }      // ⌘/Ctrl+Enter → 送 AI
       else if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); submit(false); }              // Enter → 存標注紀錄
       else if (ev.key === 'Escape') { ev.preventDefault(); if (c.id) { const cur = body.closest('.pc-note-card'); if (cur) cur.remove(); openNoteCard(c); } else closeNoteCard(); }
@@ -2639,7 +2640,7 @@ export function initDrawLayer(target, opts = {}) {
       if (!text) return;
       runCommand({ type: 'create', obj: makeDrawObject({ tool: 'text', geom: { x: point.x, y: point.y }, text, style: opts.style }) });
     };
-    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('keydown', ev => { if (ev.isComposing || ev.keyCode === 229) return; if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
     input.addEventListener('blur', commit);
   }
 
@@ -2671,7 +2672,7 @@ export function initDrawLayer(target, opts = {}) {
       o.anchor = selector; // buildExport→selector、annotationRows→selector、隨元件移位重解析外框
       runCommand({ type: 'create', obj: o });
     };
-    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('keydown', ev => { if (ev.isComposing || ev.keyCode === 229) return; if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
     input.addEventListener('blur', commit);
   }
   // 指元件 hover：游標下若有可標注 app 元件 → 顯示虛線外框（重用 snapHighlight 渲染）。
@@ -2724,7 +2725,7 @@ export function initDrawLayer(target, opts = {}) {
       o.label = text;                              // 立即套用（預覽）
       pushHistory({ type: 'update', id: o.id, before, after: { label: text } });
     };
-    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('keydown', ev => { if (ev.isComposing || ev.keyCode === 229) return; if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
     input.addEventListener('blur', commit);
   }
   // 雙擊文字物件 → 編輯其內容（o.text）；清空則刪除該物件。
@@ -2757,7 +2758,7 @@ export function initDrawLayer(target, opts = {}) {
       pushHistory({ type: 'update', id: o.id, before, after: { text } });
       render();
     };
-    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('keydown', ev => { if (ev.isComposing || ev.keyCode === 229) return; if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
     input.addEventListener('blur', commit);
   }
 

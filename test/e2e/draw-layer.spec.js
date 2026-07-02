@@ -1970,6 +1970,43 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); window.__drawTest.api.clear(); });
   });
 
+  await test('註記卡：IME 組字中的 Enter 放行給輸入法（不誤存）；一般 Enter 才存', async () => {
+    await reset('select');
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('note'); });
+    // 在 note 模式點 #price-card → 開新 note 卡（含 textarea）
+    const box = await page.evaluate(() => { const r = document.getElementById('price-card').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    await page.mouse.move(box.x, box.y);
+    await page.mouse.click(box.x, box.y);
+    await page.waitForSelector('.pc-note-card textarea', { timeout: 2000 });
+    await page.fill('.pc-note-card textarea', 'ㄊㄞˊ'); // 組字中內容
+    const n0 = await page.evaluate(() => window.__drawTest.api.getNotes().length);
+    // ① 組字中 Enter（isComposing:true）→ 放行輸入法，不存檔、卡還開
+    const compose = await page.evaluate(() => {
+      const ta = document.querySelector('.pc-note-card textarea');
+      ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true }));
+      return { notes: window.__drawTest.api.getNotes().length, cardOpen: !!document.querySelector('.pc-note-card textarea') };
+    });
+    console.log('     ime compose Enter:', JSON.stringify(compose));
+    assert(compose.notes === n0, `組字中 Enter 不應存檔，實際 notes ${n0}→${compose.notes}`);
+    assert(compose.cardOpen, '組字中 Enter 後 note 卡應仍開著');
+    // ② keyCode 229（Safari/舊 WebKit compositionend 前 keydown 的老坑）→ 一樣不存
+    const kc229 = await page.evaluate(() => {
+      const ta = document.querySelector('.pc-note-card textarea');
+      ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, bubbles: true, cancelable: true }));
+      return { notes: window.__drawTest.api.getNotes().length, cardOpen: !!document.querySelector('.pc-note-card textarea') };
+    });
+    assert(kc229.notes === n0 && kc229.cardOpen, `keyCode 229 組字 Enter 也不應存檔，實際 ${JSON.stringify(kc229)}`);
+    // ③ 一般 Enter（非組字）→ 存檔
+    const done = await page.evaluate(() => {
+      const ta = document.querySelector('.pc-note-card textarea');
+      ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      return { notes: window.__drawTest.api.getNotes().length };
+    });
+    console.log('     normal Enter:', JSON.stringify(done));
+    assert(done.notes === n0 + 1, `一般 Enter 應存檔，實際 notes ${n0}→${done.notes}`);
+    await page.evaluate(() => { window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+  });
+
   await test('方案卡關閉鈕 + 佇列決定可單獨移除', async () => {
     await reset('select');
     await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.ingestReplies([{ n: 3, anchor: { x: 40, y: 50 }, text: '挑', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] }]); });
