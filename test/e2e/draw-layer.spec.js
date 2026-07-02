@@ -2007,6 +2007,35 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
   });
 
+  await test('note 模式：點既有註記＝聚焦編輯，不再誤建新註記', async () => {
+    await reset('select');
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('note'); });
+    const box = await page.evaluate(() => { const r = document.getElementById('price-card').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    // 建註記 A（滑鼠點 #price-card → 卡 → 填字 → Enter 存）
+    await page.mouse.click(box.x, box.y);
+    await page.waitForSelector('.pc-note-card textarea', { timeout: 2000 });
+    await page.fill('.pc-note-card textarea', '註記A');
+    await page.evaluate(() => document.querySelector('.pc-note-card textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+    await page.waitForFunction(() => window.__drawTest.api.getNotes().length === 1, { timeout: 2000 });
+    // 再點 #price-card（A 的錨點，mark 外框 pointer-events:none → 點會穿到底層元件）→ 應開 A 聚焦編輯、不建新
+    await page.mouse.click(box.x, box.y);
+    await page.waitForTimeout(100);
+    const afterA = await page.evaluate(() => ({ notes: window.__drawTest.api.getNotes().length, card: (document.querySelector('.pc-note-card') || {}).textContent || '' }));
+    console.log('     click existing note:', JSON.stringify(afterA));
+    assert(afterA.notes === 1, `點既有註記不應建新，實際 notes ${afterA.notes}`);
+    assert(/註記A/.test(afterA.card), `應開 A 的卡（內容含「註記A」），實際卡文字 ${JSON.stringify(afterA.card)}`);
+    // 點沒有註記的內容（#submit-btn）→ 能正常建第 2 筆
+    const box2 = await page.evaluate(() => { const r = document.getElementById('submit-btn').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    await page.mouse.click(box2.x, box2.y);
+    await page.waitForSelector('.pc-note-card textarea', { timeout: 2000 });
+    await page.fill('.pc-note-card textarea', '註記B');
+    await page.evaluate(() => document.querySelector('.pc-note-card textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+    await page.waitForFunction(() => window.__drawTest.api.getNotes().length === 2, { timeout: 2000 });
+    const n2 = await page.evaluate(() => window.__drawTest.api.getNotes().length);
+    assert(n2 === 2, `點沒有註記的內容應能建第 2 筆，實際 ${n2}`);
+    await page.evaluate(() => { window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+  });
+
   await test('方案卡關閉鈕 + 佇列決定可單獨移除', async () => {
     await reset('select');
     await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.ingestReplies([{ n: 3, anchor: { x: 40, y: 50 }, text: '挑', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] }]); });

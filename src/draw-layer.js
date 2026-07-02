@@ -1589,6 +1589,10 @@ export function initDrawLayer(target, opts = {}) {
     if (e.target.closest && e.target.closest('.pc-note-mark, .pc-note-card')) return; // 點在標記/卡 → 各自 handler 處理
     const tg = pickTarget(e.clientX, e.clientY);
     if (!tg) return;
+    // 點到「已有註記的目標」（同 sel / 同自繪 objId）→ 開該註記聚焦編輯，不再誤建新。
+    //（note mark 外框 pointer-events:none，點擊會穿到底層元件；沒有這個 guard 就會在既有註記上重複建新。）
+    const existing = state.notes.find(nt => (tg.sel && nt.sel === tg.sel) || (tg.objId != null && nt.objId === tg.objId));
+    if (existing) { openNoteCard(existing); return; }
     const rel = relWithin(tg);
     openNoteCard({ sel: tg.sel, objId: tg.objId, relX: rel.relX, relY: rel.relY, x: tg.pt.x, y: tg.pt.y, label: tg.label });
   });
