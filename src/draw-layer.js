@@ -1617,8 +1617,9 @@ export function initDrawLayer(target, opts = {}) {
   const drawerSendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
   if (drawerSendBtn) drawerSendBtn.onclick = () => handleDrawerSend();
   // 標注紀錄「送出時納入哪些」勾選集合：unchecked 內的不送（預設全送）。
-  const checkedObjects = () => state.objects.filter(o => !state.sendUnchecked[o.id]);
-  const checkedDecisions = () => state.decisions.filter(d => !state.sendUnchecked[d.id]);
+  // outbox：送出對象＝勾選且「尚未送過（或送後又改過）」；已送未改的不再重複送。
+  const checkedObjects = () => state.objects.filter(o => !state.sendUnchecked[o.id] && !isSent(o));
+  const checkedDecisions = () => state.decisions.filter(d => !state.sendUnchecked[d.id] && state.sentSigs[d.id] !== decisionSig(d));
   const onToggleSendChecked = (id, checked) => {
     // 有 groupId → 整組一起勾/取消；否則只動自己（decision 無 groupId 也走單一）。
     const o = state.objects.find(x => x.id === id);
@@ -1654,7 +1655,8 @@ export function initDrawLayer(target, opts = {}) {
       selector: n.sel || null, color: '#635a8f',
       sent: state.sentSigs[n.id] === noteSig(n), isNote: true,
     }));
-    const rows = annRows.concat(decRows).concat(noteRows);
+    // outbox：已送給 AI（且未再改）的項目不再留在清單（畫布上的 note/標注仍在，也不會被重複送）。
+    const rows = annRows.concat(decRows).concat(noteRows).filter(r => !r.sent);
     // 群組視覺提示：標記屬於 ≥2 成員群組的列（勾選會整組連動，讓使用者預期得到）。
     const groupCount = {};
     rows.forEach(r => { if (r.groupId) groupCount[r.groupId] = (groupCount[r.groupId] || 0) + 1; });
@@ -2456,7 +2458,7 @@ export function initDrawLayer(target, opts = {}) {
     const p = buildExport(checkedObjects(), { w: svg.clientWidth || host.clientWidth, h: svg.clientHeight || host.clientHeight });
     const decs = checkedDecisions();
     if (decs.length) p.decisions = decs.map(d => ({ replyId: d.replyId, optionId: d.optionId, optionLabel: d.optionLabel }));
-    const checkedNotes = state.notes.filter(n => !state.sendUnchecked[n.id]);
+    const checkedNotes = state.notes.filter(n => !state.sendUnchecked[n.id] && state.sentSigs[n.id] !== noteSig(n)); // outbox：已送未改的不重複送
     if (checkedNotes.length) p.notes = checkedNotes.map(n => ({
       id: n.id, text: n.text, label: n.label || '',
       selector: n.sel || null, objId: n.objId != null ? n.objId : null,
