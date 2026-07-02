@@ -1267,6 +1267,8 @@ export function initDrawLayer(target, opts = {}) {
     exportEndpoint: opts.exportEndpoint || null, // 「送給 AI」POST 目標（無則只回 payload）
     recordOpen: false, // P6 側邊標注紀錄抽屜開關（預設關 → 不打擾一般使用）
     sentSigs: {},      // {objId: 上次成功送出時的內容簽章} → 面板每列顯示「已送/未送」
+    sentConfirmN: 0,   // 上次成功送出的筆數。outbox 下已送項會離開清單，靠此讓 footer 維持「✅ 已送出（N 筆）」確認，不退回「送給 AI（0）」假失敗態
+
     sendUnchecked: {}, // {objId: true} → 該列「不納入送出」（預設全勾；新物件預設納入）
     replies: [],       // AI 貼回頁面的方案卡（{n, anchor, text, options, chosen?}）
     replyCursor: 0,    // reply-poll 游標
@@ -1546,6 +1548,7 @@ export function initDrawLayer(target, opts = {}) {
     };
     row.append(cancel, send); body.append(ta, row);
     ta.addEventListener('keydown', ev => {
+      if (ev.isComposing || ev.keyCode === 229) return; // 注音/IME 組字中的 Enter（含 Safari/舊 WebKit keyCode 229）→ 放行給輸入法選字，不觸發送出/存檔
       if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); submit(true); }      // ⌘/Ctrl+Enter → 送 AI
       else if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); submit(false); }              // Enter → 存標注紀錄
       else if (ev.key === 'Escape') { ev.preventDefault(); if (c.id) { const cur = body.closest('.pc-note-card'); if (cur) cur.remove(); openNoteCard(c); } else closeNoteCard(); }
@@ -1586,6 +1589,10 @@ export function initDrawLayer(target, opts = {}) {
     if (e.target.closest && e.target.closest('.pc-note-mark, .pc-note-card')) return; // 點在標記/卡 → 各自 handler 處理
     const tg = pickTarget(e.clientX, e.clientY);
     if (!tg) return;
+    // 點到「已有註記的目標」（同 sel / 同自繪 objId）→ 開該註記聚焦編輯，不再誤建新。
+    //（note mark 外框 pointer-events:none，點擊會穿到底層元件；沒有這個 guard 就會在既有註記上重複建新。）
+    const existing = state.notes.find(nt => (tg.sel && nt.sel === tg.sel) || (tg.objId != null && nt.objId === tg.objId));
+    if (existing) { openNoteCard(existing); return; }
     const rel = relWithin(tg);
     openNoteCard({ sel: tg.sel, objId: tg.objId, relX: rel.relX, relY: rel.relY, x: tg.pt.x, y: tg.pt.y, label: tg.label });
   });
@@ -1664,8 +1671,6 @@ export function initDrawLayer(target, opts = {}) {
     rows.forEach(r => { r.grouped = !!(r.groupId && groupCount[r.groupId] > 1); });
     const checkedRows = rows.filter(r => !state.sendUnchecked[r.id]); // 納入送出的列
     const checkedCount = checkedRows.length;
-    // 勾選的裡面有沒有「還沒送、或送出後又改過」的 → 有才需要送（決定按鈕亮/暗）
-    const hasUnsent = checkedRows.some(r => !r.sent);
     const count = recordDrawer.querySelector('.pc-draw-rec-count');
     if (count) count.textContent = String(rows.length);
     // 全選框：全勾→checked、部分→indeterminate、空清單→disabled
@@ -1675,18 +1680,22 @@ export function initDrawLayer(target, opts = {}) {
       allBox.indeterminate = checkedCount > 0 && checkedCount < rows.length;
       allBox.disabled = rows.length === 0;
     }
-    // footer 送出鈕：畫布清空時強制重設（否則 in-flight 中若 clear 仍殘留舊狀態）
+    // footer 送出鈕狀態機（outbox：已送項已離開清單，故 checkedCount>0 必為未送 → 可直接送）：
+    //   有可送項 → 「送給 AI（N）」可送；剛送完、沒有新可送項 → 持久「✅ 已送出（N 筆）」確認
+    //   （不退回「送給 AI（0）」假失敗態）；從沒送過也沒東西 → 「送給 AI（0）」。
     const sendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
     if (sendBtn) {
-      if (!rows.length) delete sendBtn.dataset.inflight; // clear → 強制重設
+      // 只有「真正清空」（清單空且沒有待確認的已送批次）才強制重設 in-flight；
+      // 送出後 outbox 清空清單時保留 in-flight → 「✅ 已送達／📥 已排佇列」即時回饋不被蓋掉。
+      if (!rows.length && !state.sentConfirmN) delete sendBtn.dataset.inflight;
       if (!sendBtn.dataset.inflight) {
         sendBtn.classList.remove('pc-draw-rec-queued');
-        if (checkedCount === 0) {            // 沒勾任何標注 → 不能送
-          sendBtn.textContent = '送給 AI（0）'; sendBtn.disabled = true;
-        } else if (!hasUnsent) {             // 勾選的都送過且沒再改 → 維持「已送出」disabled（明確看出送過了）
-          sendBtn.textContent = `✅ 已送出（${checkedCount} 筆）`; sendBtn.disabled = true;
-        } else {                             // 有新的/改過的 → 可送
+        if (checkedCount > 0) {
           sendBtn.textContent = `送給 AI（${checkedCount}）`; sendBtn.disabled = false;
+        } else if (state.sentConfirmN > 0) {
+          sendBtn.textContent = `✅ 已送出（${state.sentConfirmN} 筆）`; sendBtn.disabled = true;
+        } else {
+          sendBtn.textContent = '送給 AI（0）'; sendBtn.disabled = true;
         }
       }
     }
@@ -2607,6 +2616,7 @@ export function initDrawLayer(target, opts = {}) {
       checkedObjects().forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
       checkedDecisions().forEach(d => { state.sentSigs[d.id] = decisionSig(d); });
       state.notes.filter(n => !state.sendUnchecked[n.id]).forEach(n => { state.sentSigs[n.id] = noteSig(n); });
+      state.sentConfirmN = n; // outbox 清空清單後，footer 靠此維持「✅ 已送出（N 筆）」確認
       render(); // 立刻更新：畫布隱藏已送標注 + 各列「已送」標記（inflight 仍在 → 不蓋按鈕狀態文字）
       // 2 秒後恢復成可再送（同一批可重送；server 不去重、AI 端 cursor 會收到）。
       setTimeout(() => { delete sendBtn.dataset.inflight; renderRecordPanel(); }, 2000);
@@ -2634,7 +2644,7 @@ export function initDrawLayer(target, opts = {}) {
       if (!text) return;
       runCommand({ type: 'create', obj: makeDrawObject({ tool: 'text', geom: { x: point.x, y: point.y }, text, style: opts.style }) });
     };
-    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('keydown', ev => { if (ev.isComposing || ev.keyCode === 229) return; if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
     input.addEventListener('blur', commit);
   }
 
@@ -2666,7 +2676,7 @@ export function initDrawLayer(target, opts = {}) {
       o.anchor = selector; // buildExport→selector、annotationRows→selector、隨元件移位重解析外框
       runCommand({ type: 'create', obj: o });
     };
-    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('keydown', ev => { if (ev.isComposing || ev.keyCode === 229) return; if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
     input.addEventListener('blur', commit);
   }
   // 指元件 hover：游標下若有可標注 app 元件 → 顯示虛線外框（重用 snapHighlight 渲染）。
@@ -2719,7 +2729,7 @@ export function initDrawLayer(target, opts = {}) {
       o.label = text;                              // 立即套用（預覽）
       pushHistory({ type: 'update', id: o.id, before, after: { label: text } });
     };
-    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('keydown', ev => { if (ev.isComposing || ev.keyCode === 229) return; if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
     input.addEventListener('blur', commit);
   }
   // 雙擊文字物件 → 編輯其內容（o.text）；清空則刪除該物件。
@@ -2752,7 +2762,7 @@ export function initDrawLayer(target, opts = {}) {
       pushHistory({ type: 'update', id: o.id, before, after: { text } });
       render();
     };
-    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('keydown', ev => { if (ev.isComposing || ev.keyCode === 229) return; if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
     input.addEventListener('blur', commit);
   }
 
@@ -2951,7 +2961,7 @@ export function initDrawLayer(target, opts = {}) {
     deleteNote,
     getDecisions: () => state.decisions.slice(), // 方案卡選擇進的佇列
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
-    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; render(); persistLocalSave(); },
+    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sentConfirmN = 0; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; render(); persistLocalSave(); },
     destroy: () => {
       stopLive(); // Batch 4：拆掉 live reposition 監聽/rAF/ResizeObserver
       replyPolling = false; // 停掉 AI 方案卡輪詢
