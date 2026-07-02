@@ -284,13 +284,14 @@ async function dragDraw(page, x1, y1, x2, y2) {
   // 共用：清空畫布、回到指定工具。
   async function reset(tool = 'select') {
     await page.evaluate(t => {
-      window.__drawTest.api.clear();
-      window.__drawTest.api.setTool(t);
-      // 收尾：關閉上個測試可能留開的標注紀錄抽屜，避免其 footer 鈕攔截後續工具列點擊
+      const api = window.__drawTest.api;
+      api.clear();     // 觸發 render → renderRecordPanel，讓 drawer 的 .open class 忠實反映內部 state.recordOpen
+      api.setTool(t);
+      // 收尾：若標注紀錄抽屜留開，用公開 API toggleRecordPanel 真正把 recordOpen 設回 false。
+      // （note-UX 收斂後 tab 預設隱藏、靠 render 依 !recordOpen 才加 .show；若只直接改 DOM class 會與 state 脫鉤，
+      //   下一次 render 又依舊 recordOpen 覆寫回去，導致後續測試點不到 rec-tab / footer 鈕。）
       const d = document.getElementById('pc-draw-rec-drawer');
-      if (d && d.classList.contains('open')) d.classList.remove('open');
-      const tab = document.getElementById('pc-draw-rec-tab');
-      if (tab) tab.classList.add('show');
+      if (d && d.classList.contains('open')) api.toggleRecordPanel();
     }, tool);
   }
 
