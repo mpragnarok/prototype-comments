@@ -127,7 +127,7 @@ test('drawingToDoc: z-order 一併輸出（已戳 z 時）', () => {
 
 // ── 常數 sanity ──────────────────────────────────────────────────────────────
 test('模式/工具常數完整（含 P2 rect/line）', () => {
-  ['comment', 'draw', 'off'].forEach(m => assert(DRAW_MODES.includes(m), m));
+  ['note', 'draw', 'off'].forEach(m => assert(DRAW_MODES.includes(m), m));
   ['select', 'ellipse', 'arrow', 'pencil', 'text', 'rect', 'line'].forEach(t => assert(DRAW_TOOLS.includes(t), t));
 });
 
@@ -1188,11 +1188,8 @@ test('hydrateObjectsFromLocal: endAnchors round-trip', () => {
 });
 
 // ── 功能① 指元件 comment 工具（純函式）──────────────────────────────────────────
-// 註：tool id 'comment' 與 DRAW_MODES 的 'comment' mode 命名相同但分屬不同 namespace
-//（DRAW_TOOLS vs DRAW_MODES）；draw-layer 內無 mode==='comment' 分支，無 runtime 衝突。
-test('DRAW_TOOLS 含 comment（指元件工具已註冊）', () => {
-  assert(DRAW_TOOLS.includes('comment'), 'DRAW_TOOLS 應含 comment');
-});
+// 註：A-merge（note 系統取代 comment 工具）後 comment 已不在 DRAW_TOOLS，故移除「DRAW_TOOLS 含 comment」測試。
+// 但 comment 的 annotationRows/buildExport/commentViewGeom 純函式仍保留（既有 comment 標注資料的向後相容），測試續存。
 test('TOOL_SHORTCUTS：字母 c → comment（大小寫不敏感）', () => {
   eq(TOOL_SHORTCUTS.c, 'comment');
   eq(resolveShortcut('c'), 'comment');

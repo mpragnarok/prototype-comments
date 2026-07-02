@@ -85,6 +85,28 @@ const seedComment = (over = {}) => ({ type: 'positional', screenId: 's1', x: 50,
     assert(/💬/.test(label), `expected 💬 in annotation label, got "${label}"`);
   });
 
+  await test('鍵盤 C → 切換留言模式（已登入；💬 鈕文字不含 (C)，靠 tooltip 提示快捷鍵）', async () => {
+    // mock 的 onAuthStateChanged 在 mountAuthBar 前同步觸發 → 重發一次 user 讓 auth bar 真的 render 出 💬 鈕。
+    await page.evaluate(() => window.__fb && window.__fb.__setUser({ uid: 'u1', email: 'u1@e2e.local', displayName: 'E2E User' }));
+    await page.waitForTimeout(80);
+    const btnText = await page.evaluate(() => document.getElementById('pc-comment-toggle')?.textContent || '');
+    const btnTitle = await page.evaluate(() => document.getElementById('pc-comment-toggle')?.title || '');
+    const isActive = () => page.evaluate(() => document.getElementById('pc-comment-toggle')?.classList.contains('active') || false);
+    const before = await isActive();
+    await page.evaluate(() => document.body.focus());
+    await page.keyboard.press('c');
+    await page.waitForTimeout(60);
+    const afterOn = await isActive();
+    await page.keyboard.press('c');
+    await page.waitForTimeout(60);
+    const afterOff = await isActive();
+    console.log('     C toggle:', JSON.stringify({ btnText, btnTitle, before, afterOn, afterOff }));
+    assert(!/\(C\)/.test(btnText), `💬 留言模式按鈕文字不應再有 (C)，實際「${btnText}」`);
+    assert(/C/.test(btnTitle), `💬 留言模式按鈕 tooltip 應仍提示快捷鍵 C，實際「${btnTitle}」`);
+    assert(afterOn !== before, '按 C 應切換留言模式');
+    assert(afterOff === before, '再按 C 應切回原狀');
+  });
+
   await test('resolved annotation → 深灰底白字 #6b7280（A7 對比度修正 + #3 跑版重現）', async () => {
     await page.evaluate(() => {
       window.__fb.__seed({ type: 'positional', screenId: 's1', x: 30, y: 30, body: '已完成', authorUid: 'u1', authorName: '設計師 A', resolved: true, parentId: null });

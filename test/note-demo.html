@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<!--
+  note-demo.html — 展示 note 標記「設計 A：持續實線框 + 便利貼角標」。
+  載入 worktree 的 /src/draw-layer.js。免 Firebase。預先在元件上放 2 則 note，一開頁即可見框+角標。
+  用法：切到 note 模式（工具列 📝 / 按 C）→ hover 元件出現虛線 → 點元件下 note → 放下後留「持續實線框 + 左上便利貼角標」。
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>note 標記設計 A — 持續框 + 便利貼角標</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { font-family: system-ui, -apple-system, "PingFang TC", sans-serif; background: #eef0f2; }
+  #canvas { position: relative; width: 100vw; min-height: 100vh; padding: 48px 32px; box-sizing: border-box; }
+  .row { display: flex; gap: 24px; flex-wrap: wrap; max-width: 900px; margin: 0 auto; }
+  .card { background: #fff; border: 1px solid #e2e4e7; border-radius: 12px; padding: 20px 22px; width: 260px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.05); }
+  .card h3 { margin: 0 0 8px; font-size: 16px; }
+  .card p { margin: 0 0 14px; font-size: 13px; color: #666; line-height: 1.5; }
+  .card .price { font-size: 26px; font-weight: 700; color: #0FA0A0; }
+  .btn { display: inline-block; margin-top: 12px; background: #0FA0A0; color: #fff; border: none;
+    padding: 9px 18px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+  .hint { position: fixed; left: 12px; bottom: 12px; z-index: 9999; max-width: 380px;
+    background: rgba(26,26,26,.92); color: #fff; padding: 12px 14px; border-radius: 10px;
+    font-size: 13px; line-height: 1.55; pointer-events: none; }
+  .hint b { color: #4fd0d0; }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <div class="row">
+    <div class="card" id="card-basic">
+      <h3>基本方案</h3>
+      <p>適合個人使用者，含核心功能與基本支援。</p>
+      <div class="price">$9<span style="font-size:13px;color:#999">/月</span></div>
+      <button class="btn" id="btn-basic">選這個</button>
+    </div>
+    <div class="card" id="card-pro">
+      <h3>專業方案</h3>
+      <p>適合團隊，含進階分析、優先支援與更多整合。</p>
+      <div class="price">$29<span style="font-size:13px;color:#999">/月</span></div>
+      <button class="btn" id="btn-pro">選這個</button>
+    </div>
+  </div>
+</div>
+
+<div class="hint">
+  <b>note 設計 A</b>：兩則 note 已預放 → 看<b>持續 teal 實線框</b>圈住整塊範圍，
+  左上<b>便利貼角標（📝＋編號）</b>，明顯不同於畫的標注圓 pin。<br>
+  切 <b>📝 / 按 C</b> 進 note 模式，hover 元件 → 點它下你自己的 note。
+</div>
+
+<script type="module">
+  import { initDrawLayer } from '/src/draw-layer.js';
+  const api = initDrawLayer('#canvas', {});
+  api.setMode('note');
+  // 預放 2 則 note，錨到真實元件 → 一開頁即見「持續框 + 便利貼角標」
+  api.addNote('整張卡片改成可多選＋加「其他」欄位', { sel: '#card-basic', relX: 0.5, relY: 0.5, label: 'div · 基本方案' });
+  api.addNote('這顆按鈕想換文字成「立即開始」', { sel: '#btn-pro', relX: 0.5, relY: 0.5, label: 'button · 選這個' });
+  window.__demo = api;
+</script>
+</body>
+</html>

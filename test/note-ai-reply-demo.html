@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<!--
+  note-ai-reply-demo.html — 展示「AI 回覆方案卡」長怎樣。
+  情境:使用者對「基本方案」卡片下了 note「改成可多選＋加其他欄」→ AI 回 3 個含真實 UI mockup 的方案卡,
+  點「選這個方案」→ 標記已選 + 決定進標注紀錄佇列。載入 /src/draw-layer.js，免 Firebase。
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI 回覆方案卡 — demo</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { font-family: system-ui, -apple-system, "PingFang TC", sans-serif; background: #eef0f2; }
+  #canvas { position: relative; width: 100vw; min-height: 100vh; padding: 40px 32px; box-sizing: border-box; }
+  .row { display: flex; gap: 24px; flex-wrap: wrap; max-width: 900px; margin: 0 auto; }
+  .card { background: #fff; border: 1px solid #e2e4e7; border-radius: 12px; padding: 20px 22px; width: 240px; box-shadow: 0 2px 10px rgba(0,0,0,.05); }
+  .card h3 { margin: 0 0 8px; font-size: 16px; }
+  .card p { margin: 0 0 14px; font-size: 13px; color: #666; line-height: 1.5; }
+  .card .price { font-size: 26px; font-weight: 700; color: #0FA0A0; }
+  .btn { display: inline-block; margin-top: 12px; background: #0FA0A0; color: #fff; border: none; padding: 9px 18px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+  .hint { position: fixed; left: 12px; bottom: 12px; z-index: 9999; max-width: 400px; background: rgba(26,26,26,.92); color: #fff; padding: 12px 14px; border-radius: 10px; font-size: 13px; line-height: 1.55; pointer-events: none; }
+  .hint b { color: #4fd0d0; }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <div class="row">
+    <div class="card" id="card-basic">
+      <h3>基本方案</h3>
+      <p>適合個人使用者，含核心功能與基本支援。</p>
+      <div class="price">$9<span style="font-size:13px;color:#999">/月</span></div>
+      <button class="btn">選這個</button>
+    </div>
+    <div class="card" id="card-pro">
+      <h3>專業方案</h3>
+      <p>適合團隊，含進階分析、優先支援與更多整合。</p>
+      <div class="price">$29<span style="font-size:13px;color:#999">/月</span></div>
+      <button class="btn">選這個</button>
+    </div>
+  </div>
+</div>
+
+<div class="hint">
+  <b>AI 回覆方案卡</b>:你對「基本方案」卡下了 note →
+  AI 回一張 <b>💬 AI 方案</b> 卡貼在旁邊，列 3 個含<b>真實 UI mockup</b> 的做法。<br>
+  點某個方案的<b>「選這個方案」</b> → 卡片標「✓ 已選」，該決定進<b>標注紀錄</b>佇列(下次送出隨批帶回 AI)。
+</div>
+
+<script type="module">
+  import { initDrawLayer } from '/src/draw-layer.js';
+  const api = initDrawLayer('#canvas', {});
+  api.setMode('note');
+  // 使用者先前的 note（框+角標）
+  api.addNote('把這個方案改成可多選＋加「其他」欄位', { sel: '#card-basic', relX: 0.5, relY: 0.5, label: 'div · 基本方案' });
+
+  const mock = (inner) => `<div style="font:13px system-ui;color:#1e293b">${inner}</div>`;
+  // AI 回覆:一張方案卡，3 個含真實 UI mockup 的選項
+  api.ingestReplies([{
+    n: 1,
+    anchor: { x: 30, y: 6 },
+    text: '你標註「改成可多選＋加其他欄」。我想到 3 個做法，選一個我就照著改:',
+    options: [
+      { id: 'a', label: '方案 A · Checkbox 多選 + 其他欄', desc: '最直覺，選項少（≤5）時清楚',
+        html: mock('<label style="display:flex;gap:6px;align-items:center;margin:3px 0"><input type="checkbox" checked> 基本方案</label><label style="display:flex;gap:6px;align-items:center;margin:3px 0"><input type="checkbox"> 專業方案</label><label style="display:flex;gap:6px;align-items:center;margin:3px 0"><input type="checkbox"> 企業方案</label><div style="display:flex;gap:6px;align-items:center;margin:6px 0 0"><input type="checkbox"><input placeholder="其他…" style="flex:1;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px"></div>') },
+      { id: 'b', label: '方案 B · 多選膠囊（chips）', desc: '省空間，選項多也不會太長',
+        html: mock('<div style="display:flex;flex-wrap:wrap;gap:4px;padding:6px;border:1px solid #cbd5e1;border-radius:6px"><span style="background:#0FA0A0;color:#fff;padding:2px 8px;border-radius:999px;font-size:12px">基本 ✕</span><span style="background:#0FA0A0;color:#fff;padding:2px 8px;border-radius:999px;font-size:12px">專業 ✕</span><span style="color:#94a3b8;padding:2px 4px">＋ 新增/其他…</span></div>') },
+      { id: 'c', label: '方案 C · 維持單選 + 「其他」', desc: '改動最小，相容現有邏輯',
+        html: mock('<label style="display:flex;gap:6px;margin:3px 0"><input type="radio" name="p" checked> 基本方案</label><label style="display:flex;gap:6px;margin:3px 0"><input type="radio" name="p"> 專業方案</label><label style="display:flex;gap:6px;align-items:center;margin:3px 0"><input type="radio" name="p"> 其他 <input placeholder="自填" style="width:80px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:5px"></label>') },
+    ],
+  }]);
+  window.__demo = api;
+</script>
+</body>
+</html>
