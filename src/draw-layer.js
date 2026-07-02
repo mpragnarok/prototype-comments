@@ -83,17 +83,10 @@ export {
   drawingToDoc,
 } from './draw/model.js';
 
-// ── DOM helpers（draw 前綴避免 bundle 時與 index.js 同名 top-level 衝突）────────
-function drawSvgEl(tag, attrs = {}) {
-  const n = document.createElementNS(SVG_NS, tag);
-  Object.entries(attrs).forEach(([k, v]) => n.setAttribute(k, String(v)));
-  return n;
-}
-function drawHtmlEl(tag, cls) {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  return n;
-}
+// ── 幾何/選取/序列化 純函式（見 draw/dom.js）──────────────
+import {
+  drawSvgEl, drawHtmlEl,
+} from './draw/dom.js';
 
 const DRAW_STYLES = `
 /* width/height:100% 不可省：<svg> 是 replaced element，預設 intrinsic 300×150，
