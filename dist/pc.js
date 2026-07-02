@@ -996,6 +996,7 @@ const ICON_PATHS = {
   send: 'M2.01 21L23 12 2.01 3 2 10l15 2-15 2z', // send（送給 AI）
   help: 'M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z', // help_outline（使用說明）
   comment: 'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z', // chat_bubble_outline（留言模式）
+  note: 'M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z', // note（便利貼角標）
 };
 
 // 一個 Material 圖示 → inline SVG 字串（currentColor → 跟著 active/hover 文字色變化）。
@@ -1855,52 +1856,67 @@ const DRAW_STYLES = `
 .pc-note-layer.pc-note-active { pointer-events: auto; cursor: crosshair; }
 /* hover 高亮框（inspect 式虛線）：DOM 元件 teal、自繪物件 red */
 .pc-note-hl { position: absolute; pointer-events: none; box-sizing: border-box; border-radius: 6px; z-index: 1; }
-.pc-note-hl.is-dom { outline: 2px dashed #0FA0A0; outline-offset: 1px; background: rgba(15,160,160,.06); }
+.pc-note-hl.is-dom { outline: 2px dashed #635a8f; outline-offset: 1px; background: rgba(99,90,143,.06); }
 .pc-note-hl.is-obj { outline: 2px dashed #BA1A1A; outline-offset: 1px; background: rgba(186,26,26,.06); }
-.pc-note-hl-label { position: absolute; top: -20px; left: 0; background: #0FA0A0; color: #fff;
+.pc-note-hl-label { position: absolute; top: -20px; left: 0; background: #635a8f; color: #fff;
   font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 5px; white-space: nowrap; }
 .pc-note-hl.is-obj .pc-note-hl-label { background: #BA1A1A; }
-/* 元件上的留言 marker（編號；teal=DOM、red=自繪） */
-.pc-note-pin {
-  position: absolute; transform: translate(-50%, -100%); pointer-events: auto; cursor: pointer;
-  width: 24px; height: 24px; border-radius: 50% 50% 50% 3px; background: #0FA0A0; color: #fff;
-  display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; line-height: 1;
-  box-shadow: 0 2px 6px rgba(0,0,0,.3); border: 2px solid #fff; z-index: 2;
-}
-.pc-note-pin.is-obj { background: #BA1A1A; }
-.pc-note-pin:hover { filter: brightness(1.1); }
-.pc-note-card.is-focused { box-shadow: 0 8px 26px rgba(15,160,160,.4); border-color: #0FA0A0; }
-.pc-note-pin.is-dim { opacity: 0.35; transform: translate(-50%, -100%) scale(0.75); }
-/* 貼元件的對話卡（H：prompt 在上、AI 方案卡在下） */
+/* 元件上的留言標記：持續實線外框（貼齊元件、零間隙）+ 角落圓 badge（violet=DOM、red=自繪）。
+   badge 騎在框左上「角」外側（不落在框內緣）→ 不覆蓋元件內容；外框 pointer-events:none 讓底層仍可
+   被 hover/點選下一則 note，只有 badge 可點。系統色改用 violet（避免與 Jubo teal 品牌色打架）。 */
+.pc-note-mark { position: absolute; box-sizing: border-box; pointer-events: none; z-index: 2;
+  border: 2px solid #635a8f; border-radius: 6px; }
+.pc-note-mark.is-obj { border-color: #BA1A1A; }
+.pc-note-mark.is-point { border: none; width: 0; height: 0; } /* 無法解析範圍 → 只剩 badge */
+.pc-note-tab { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%);
+  pointer-events: auto; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  width: 21px; height: 21px; border-radius: 50%; background: #635a8f; color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 1; border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+.pc-note-mark.is-obj .pc-note-tab { background: #BA1A1A; }
+.pc-note-tab:hover { filter: brightness(1.1); }
+.pc-note-card.is-focused { box-shadow: 4px 4px 0 rgba(17,24,39,.9); border-color: #111827; }
+.pc-note-mark.is-dim { opacity: 0.4; }
+/* spotlight：聚焦某則 note 時，用超大 box-shadow 把四周罩暗、只留目標元件亮著 + 亮環（Driver.js/Shepherd 式）。
+   外框內側透明 → 底層元件透出來仍是亮的；四周 rgba 暗罩由 noteLayer(inset:0) 裁切。 */
+.pc-note-mark.is-spotlight { box-shadow: 0 0 0 3px #6b4fb5, 0 0 0 9999px rgba(15,23,42,.55); }
+.pc-note-mark.is-spotlight.is-obj { box-shadow: 0 0 0 3px #BA1A1A, 0 0 0 9999px rgba(15,23,42,.55); }
+/* 貼元件的對話卡：中性墨黑「手繪便利貼」皮（辨識度靠形/描邊/陰影，不靠色 → 疊任何頁面都不撞色）。
+   prompt 在上、AI 方案卡在下；左上小尾巴指向被標元件。 */
 .pc-note-card {
-  position: absolute; transform: translate(10px, 4px); pointer-events: auto; z-index: 3;
-  background: #fff; color: #1f2937; border: 1px solid #d1d5db; border-radius: 11px; width: 232px;
-  box-shadow: 0 8px 26px rgba(0,0,0,.16); font-size: 13px; line-height: 1.5; overflow: hidden;
+  position: absolute; transform: translate(10px, 8px); pointer-events: auto; z-index: 3;
+  background: #fffdf7; color: #1f2937; border: 2px solid #1f2937; border-radius: 13px 9px 15px 8px; width: 232px;
+  box-shadow: 3px 3px 0 rgba(31,41,55,.85); font-size: 13px; line-height: 1.5; overflow: visible;
+}
+.pc-note-card::after { /* 指向元件的小尾巴（左上 → 指向卡片上方的錨點）*/
+  content: ''; position: absolute; left: 18px; top: -11px; width: 0; height: 0;
+  border-width: 0 9px 11px 9px; border-style: solid; border-color: transparent transparent #1f2937 transparent;
 }
 .pc-note-card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px;
-  background: #f8fafc; border-bottom: 1px solid #eef0f2; padding: 7px 10px; font-size: 11.5px; font-weight: 700; color: #0d8f8f; }
+  background: transparent; border-bottom: 1px dashed #cbd5e1; padding: 8px 11px 6px; font-size: 11.5px; font-weight: 700; color: #1f2937; }
 .pc-note-card-head .pc-n-target { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-note-card-head button { border: none; background: transparent; color: #94a3b8; font-size: 13px; cursor: pointer; padding: 0 2px; line-height: 1; }
-.pc-note-card-body { padding: 9px 10px; }
+.pc-note-card-head button { border: none; background: transparent; color: #6b7280; font-size: 13px; cursor: pointer; padding: 0 2px; line-height: 1; }
+.pc-note-card-body { padding: 9px 11px 11px; }
 .pc-note-card textarea {
-  width: 100%; box-sizing: border-box; resize: vertical; min-height: 50px; border-radius: 7px;
-  border: 1px solid #d1d5db; background: #fff; color: #1f2937; padding: 6px 8px; font: inherit; font-size: 12.5px;
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 50px; border-radius: 8px 6px 9px 5px;
+  border: 1.5px solid #1f2937; background: #fff; color: #1f2937; padding: 6px 8px; font: inherit; font-size: 12.5px;
 }
-.pc-note-prompt-text { white-space: pre-wrap; word-break: break-word; background: #0FA0A0; color: #fff; border-radius: 8px; padding: 7px 9px; font-size: 12.5px; }
-.pc-note-prompt-lbl { font-size: 10px; font-weight: 700; opacity: .85; margin-bottom: 2px; }
+.pc-note-prompt-text { white-space: pre-wrap; word-break: break-word; background: #fff; color: #1f2937;
+  border: 1.5px solid #1f2937; border-radius: 8px 6px 9px 5px; padding: 7px 9px; font-size: 12.5px; }
+.pc-note-prompt-lbl { font-size: 10px; font-weight: 700; color: #6b7280; margin-bottom: 2px; }
 .pc-note-row { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
-.pc-note-row button { border: none; border-radius: 7px; padding: 5px 12px; font-size: 12px; cursor: pointer; color: #fff; background: #0FA0A0; }
-.pc-note-row button.ghost { background: #eef2f7; color: #374151; }
-.pc-note-row button.danger { background: #BA1A1A; }
+.pc-note-row button { border: 1.5px solid #1f2937; border-radius: 8px 6px 9px 5px; padding: 4px 12px; font-size: 12px; cursor: pointer; color: #fff; background: #111827; }
+.pc-note-row button.ghost { background: #fff; color: #1f2937; }
+.pc-note-row button.danger { background: #fff; color: #b91c1c; border-color: #b91c1c; }
 .pc-note-reply-slot { margin-top: 9px; }
-.pc-note-expand { margin-top: 8px; font-size: 11.5px; color: #0d8f8f; font-weight: 700; cursor: pointer; background: none; border: none; padding: 0; }
+.pc-note-expand { margin-top: 8px; font-size: 11.5px; color: #1f2937; font-weight: 700; cursor: pointer; background: none; border: none; padding: 0; text-decoration: underline; }
 /* 兩段式：放大成置中大面板（複雜圖文好讀） */
 .pc-note-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 2147483646; }
 .pc-note-panel { position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); z-index: 2147483647;
   background: #fff; color: #1f2937; border-radius: 14px; width: min(560px, 92vw); max-height: 84vh; overflow: hidden;
   display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0,0,0,.4); }
 .pc-note-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px;
-  border-bottom: 1px solid #eef0f2; font-weight: 700; color: #0d8f8f; }
+  border-bottom: 1px solid #eef0f2; font-weight: 700; color: #4d4670; }
 .pc-note-panel-head button { border: none; background: transparent; font-size: 18px; color: #94a3b8; cursor: pointer; }
 .pc-note-panel-body { padding: 16px; overflow-y: auto; }
 .pc-draw-selection rect[data-handle] { cursor: nwse-resize; }
@@ -1920,7 +1936,7 @@ const DRAW_STYLES = `
 /* 只有「目前工具」該highlight。滑鼠點過/快捷鍵切換後殘留的瀏覽器 focus 外框會讓上一個工具看起來也被選 →
    滑鼠 focus 不顯外框（鍵盤 Tab 導覽的 :focus-visible 仍保留，維持無障礙）。 */
 .pc-draw-tool:focus:not(:focus-visible) { outline: none; }
-.pc-draw-tool.active { background: #0FA0A0; color: #fff; }
+.pc-draw-tool.active { background: #635a8f; color: #fff; }
 .pc-draw-tool svg { display: block; }
 /* 常駐數字快捷鍵徽章（Excalidraw 風格，右下角、不擋點擊、不位移圖示） */
 .pc-draw-kbd {
@@ -1956,7 +1972,7 @@ const DRAW_STYLES = `
 }
 .pc-draw-help-desc { font-size: 12px; color: #c5c9ce; line-height: 1.6; }
 .pc-draw-help-link {
-  display: inline-block; margin-top: 12px; color: #0FA0A0; font-size: 13px; text-decoration: none;
+  display: inline-block; margin-top: 12px; color: #635a8f; font-size: 13px; text-decoration: none;
 }
 .pc-draw-help-link:hover { text-decoration: underline; }
 /* 收合 FAB（off 模式時取代整條工具列的右下小圓鈕） */
@@ -1968,7 +1984,7 @@ const DRAW_STYLES = `
   display: none; align-items: center; justify-content: center;
 }
 .pc-draw-fab.show { display: flex; }
-.pc-draw-fab:hover { background: #0FA0A0; color: #fff; }
+.pc-draw-fab:hover { background: #635a8f; color: #fff; }
 .pc-draw-fab svg { width: 22px; height: 22px; }
 .pc-draw-sep { width: 1px; height: 22px; background: #3a3a3a; margin: 0 2px; }
 /* 顏色/線粗收進 popover，避免 pill 過長溢出 */
@@ -1985,7 +2001,7 @@ const DRAW_STYLES = `
   width: 22px; height: 22px; border-radius: 50%; padding: 0; cursor: pointer;
   border: 2px solid transparent;
 }
-.pc-draw-swatch.active { border-color: #fff; box-shadow: 0 0 0 1px #0FA0A0; }
+.pc-draw-swatch.active { border-color: #fff; box-shadow: 0 0 0 1px #635a8f; }
 /* 第 9 顆：彩虹圓 + 「+」，明確邀請「挑自己的顏色」 */
 .pc-draw-custom-swatch {
   position: relative; display: flex; align-items: center; justify-content: center;
@@ -2005,7 +2021,7 @@ const DRAW_STYLES = `
   background: transparent; display: flex; align-items: center; justify-content: center;
 }
 .pc-draw-width:hover { background: #333; }
-.pc-draw-width.active { background: #0FA0A0; }
+.pc-draw-width.active { background: #635a8f; }
 .pc-draw-disabled { opacity: .35; cursor: not-allowed; }
 .pc-draw-eyedropper { color: #e5e7eb; }
 /* 右鍵 context menu */
@@ -2020,7 +2036,7 @@ const DRAW_STYLES = `
   padding: 6px 8px; border: none; border-radius: 6px; cursor: pointer;
   background: transparent; color: #e5e7eb; font-size: 13px; text-align: left;
 }
-.pc-draw-context-item:hover { background: #0FA0A0; color: #fff; }
+.pc-draw-context-item:hover { background: #635a8f; color: #fff; }
 .pc-draw-context-item svg { flex: none; }
 .pc-draw-text-input {
   position: absolute; z-index: 230; width: auto !important; min-width: 80px; max-width: 60vw;
@@ -2033,12 +2049,12 @@ const DRAW_STYLES = `
    預設 drawer 關閉（off by default）→ comment-only/一般使用不被打擾，靠 tab 才打開。 */
 .pc-draw-rec-tab {
   position: fixed; top: 62%; right: 0; transform: translateY(-50%); z-index: 2147483603;
-  display: none; border: none; cursor: pointer; background: #0FA0A0; color: #fff;
+  display: none; border: none; cursor: pointer; background: #635a8f; color: #fff;
   padding: 14px 7px; border-radius: 10px 0 0 10px; box-shadow: -2px 0 12px rgba(0,0,0,.2);
   writing-mode: vertical-rl; font: 700 12px/1 system-ui, -apple-system, sans-serif; letter-spacing: 2px;
   transition: background .15s;
 }
-.pc-draw-rec-tab:hover { background: #0d8f8f; }
+.pc-draw-rec-tab:hover { background: #4d4670; }
 .pc-draw-rec-tab.show { display: block; }
 .pc-draw-rec-drawer {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 2147483602;
@@ -2049,8 +2065,8 @@ const DRAW_STYLES = `
 }
 .pc-draw-rec-drawer.open { transform: translateX(0); }
 .pc-draw-rec-hd { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid #eef2f6; }
-.pc-draw-rec-hd-title { color: #0FA0A0; font-weight: 700; font-size: 13px; }
-.pc-draw-rec-count { background: rgba(15,160,160,.12); color: #0d8f8f; border-radius: 9px;
+.pc-draw-rec-hd-title { color: #635a8f; font-weight: 700; font-size: 13px; }
+.pc-draw-rec-count { background: rgba(99,90,143,.12); color: #4d4670; border-radius: 9px;
   font-size: 10px; padding: 1px 7px; line-height: 16px; }
 .pc-draw-rec-close { margin-left: auto; border: none; background: none; cursor: pointer;
   color: #94a3b8; font-size: 18px; line-height: 1; padding: 2px 4px; }
@@ -2062,26 +2078,26 @@ const DRAW_STYLES = `
   margin-bottom: 8px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04);
 }
 .pc-draw-rec-row:last-child { margin-bottom: 0; }
-.pc-draw-rec-row:hover { border-color: #0FA0A0; }
-.pc-draw-rec-row.selected { border-color: #0FA0A0; background: rgba(15,160,160,.08); box-shadow: 0 0 0 1px #0FA0A0; }
+.pc-draw-rec-row:hover { border-color: #635a8f; }
+.pc-draw-rec-row.selected { border-color: #635a8f; background: rgba(99,90,143,.08); box-shadow: 0 0 0 1px #635a8f; }
 .pc-draw-rec-icon { flex: none; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; color: #475569; }
 .pc-draw-rec-icon svg { display: block; }
 .pc-draw-rec-swatch { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); }
 .pc-draw-rec-group { flex: none; font-size: 11px; line-height: 1; opacity: .75; }
-.pc-draw-rec-row.is-grouped { border-left: 2px solid #0FA0A0; }
+.pc-draw-rec-row.is-grouped { border-left: 2px solid #635a8f; }
 .pc-draw-rec-body { min-width: 0; flex: 1; }
 .pc-draw-rec-status { flex: none; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 999px; white-space: nowrap; }
 .pc-draw-rec-status.is-sent { color: #0d7a4f; background: rgba(22,163,74,.12); }
 .pc-draw-rec-status.is-unsent { color: #9a6a00; background: rgba(183,121,31,.14); }
-.pc-draw-rec-check { flex: none; width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: #0FA0A0; }
+.pc-draw-rec-check { flex: none; width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: #635a8f; }
 .pc-draw-rec-all-wrap { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #475569; cursor: pointer; user-select: none; }
-.pc-draw-rec-all { width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: #0FA0A0; }
+.pc-draw-rec-all { width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: #635a8f; }
 /* AI 方案卡層：錨定在標注旁。容器不吃指標，卡片本身吃。 */
 .pc-draw-reply-layer { position: absolute; inset: 0; pointer-events: none; z-index: 2147483640; }
 .pc-draw-reply-card { position: absolute; pointer-events: auto; max-width: 300px; transform: translate(12px, 12px);
-  background: #fff; border: 1.5px solid #0FA0A0; border-radius: 10px; padding: 10px 12px;
-  box-shadow: 0 6px 24px rgba(15,160,160,.22); font: 13px/1.5 system-ui, -apple-system, sans-serif; color: #1e293b; }
-.pc-draw-reply-head { font-size: 11px; font-weight: 700; color: #0d8f8f; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; }
+  background: #fff; border: 1.5px solid #635a8f; border-radius: 10px; padding: 10px 12px;
+  box-shadow: 0 6px 24px rgba(99,90,143,.22); font: 13px/1.5 system-ui, -apple-system, sans-serif; color: #1e293b; }
+.pc-draw-reply-head { font-size: 11px; font-weight: 700; color: #4d4670; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; }
 .pc-draw-reply-close { border: none; background: transparent; color: #94a3b8; font-size: 13px; line-height: 1; cursor: pointer; padding: 0 2px; }
 .pc-draw-reply-close:hover { color: #475569; }
 .pc-draw-rec-remove { flex: none; border: none; background: transparent; color: #b0bcc8; font-size: 12px; line-height: 1; cursor: pointer; padding: 2px 4px; }
@@ -2089,12 +2105,12 @@ const DRAW_STYLES = `
 .pc-draw-reply-text { margin-bottom: 8px; white-space: pre-wrap; }
 .pc-draw-reply-opts { display: flex; flex-wrap: wrap; gap: 6px; }
 .pc-draw-reply-opts.is-rich { flex-direction: column; flex-wrap: nowrap; gap: 8px; }
-.pc-draw-reply-opt { padding: 6px 10px; border: 1px solid #0FA0A0; border-radius: 7px; background: rgba(15,160,160,.08);
-  color: #0d7a7a; font-size: 12px; font-weight: 600; cursor: pointer; }
-.pc-draw-reply-opt:hover { background: #0FA0A0; color: #fff; }
+.pc-draw-reply-opt { padding: 6px 10px; border: 1px solid #635a8f; border-radius: 7px; background: rgba(99,90,143,.08);
+  color: #4d4670; font-size: 12px; font-weight: 600; cursor: pointer; }
+.pc-draw-reply-opt:hover { background: #635a8f; color: #fff; }
 .pc-draw-reply-opts.is-rich .pc-draw-reply-opt { background: #f8fafc; color: #1e293b; }
-.pc-draw-reply-opts.is-rich .pc-draw-reply-opt:hover { background: #eef7f7; border-color: #0d8f8f; color: #1e293b; }
-.pc-draw-reply-opt-label { font-weight: 700; color: #0d7a7a; font-size: 13px; }
+.pc-draw-reply-opts.is-rich .pc-draw-reply-opt:hover { background: #eef7f7; border-color: #4d4670; color: #1e293b; }
+.pc-draw-reply-opt-label { font-weight: 700; color: #4d4670; font-size: 13px; }
 .pc-draw-reply-opt-desc { font-weight: 400; color: #475569; font-size: 12px; margin-top: 2px; }
 .pc-draw-reply-preview { margin: 6px 0 0; padding: 6px 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px;
   font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #334155; white-space: pre; overflow-x: auto; }
@@ -2102,22 +2118,25 @@ const DRAW_STYLES = `
 .pc-draw-reply-mock { margin: 6px 0; padding: 8px; background: #fff; border: 1px dashed #cbd5e1; border-radius: 6px; pointer-events: none; }
 .pc-draw-reply-mock .field, .pc-draw-reply-mock fieldset { margin: 0 !important; }
 .pc-draw-reply-choose { margin-top: 8px; width: 100%; padding: 6px 10px; border: none; border-radius: 7px;
-  background: #0FA0A0; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
-.pc-draw-reply-choose:hover { background: #0d8f8f; }
+  background: #635a8f; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
+.pc-draw-reply-choose:hover { background: #4d4670; }
 .pc-draw-reply-chosen { color: #0d7a4f; font-weight: 700; font-size: 12px; }
+.pc-draw-reply-rechoose { margin-top: 6px; padding: 3px 10px; border: 1px solid #cbd5e1; border-radius: 6px;
+  background: #fff; color: #475569; font-size: 12px; cursor: pointer; }
+.pc-draw-reply-rechoose:hover { border-color: #635a8f; color: #4d4670; background: #f4fbfb; }
 .pc-draw-rec-text { color: #1e293b; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-draw-rec-sel { margin-top: 2px; color: #0d8f8f; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+.pc-draw-rec-sel { margin-top: 2px; color: #4d4670; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-draw-rec-empty { color: #94a3b8; font-size: 12px; text-align: center; padding: 28px 12px; line-height: 1.6; }
 /* ── 抽屜 footer：「送給 AI（N）」主要送出按鈕（teal 主色）── */
 .pc-draw-rec-footer { padding: 10px 14px; border-top: 1px solid #eef2f6; background: #fff; }
 .pc-draw-rec-send-btn {
   width: 100%; padding: 8px; border: none; border-radius: 7px; cursor: pointer;
-  background: #0FA0A0; color: #fff; font: 600 13px/1.4 system-ui, -apple-system, sans-serif;
+  background: #635a8f; color: #fff; font: 600 13px/1.4 system-ui, -apple-system, sans-serif;
   transition: background .12s, opacity .12s;
 }
 .pc-draw-rec-send-btn:disabled { opacity: .5; cursor: not-allowed; }
-.pc-draw-rec-send-btn:not(:disabled):hover { background: #0d8f8f; }
+.pc-draw-rec-send-btn:not(:disabled):hover { background: #4d4670; }
 /* AI 未連線、已排佇列：用琥珀色與「已送達」的綠/teal 區隔，讓使用者一眼看出差異。 */
 .pc-draw-rec-send-btn.pc-draw-rec-queued { background: #B7791F; }
 .pc-draw-rec-send-btn.pc-draw-rec-queued:disabled { opacity: .85; }
@@ -2211,11 +2230,16 @@ function initDrawLayer(target, opts = {}) {
 
   // 解析留言錨點 → pin 點（svg % 座標）。有 sel/objId 解得到 → 跟著元件；否則 fallback x/y。
   function resolveNotePct(c) {
+    const r = resolveNoteBox(c);
+    if (r) return { x: r.x + (c.relX != null ? c.relX : 0.5) * r.w, y: r.y + (c.relY != null ? c.relY : 0.5) * r.h };
+    return { x: c.x != null ? c.x : 50, y: c.y != null ? c.y : 50 };
+  }
+  // 解析留言錨定元件的「整塊範圍」（寬-% bbox）。供持續外框用；fallback（僅 x/y）時回 null。
+  function resolveNoteBox(c) {
     let r = null;
     if (c.sel) r = getRectPct(c.sel);
     else if (c.objId != null) { const t = findById(state.objects, c.objId); if (t) r = geomBBox(t, resolveO); }
-    if (r && r.w != null) return { x: r.x + (c.relX != null ? c.relX : 0.5) * r.w, y: r.y + (c.relY != null ? c.relY : 0.5) * r.h };
-    return { x: c.x != null ? c.x : 50, y: c.y != null ? c.y : 50 };
+    return r && r.w != null ? r : null;
   }
   // 放/改一則留言。anchor＝{sel,objId,relX,relY,x,y,label}；id 有值 → 只更新文字。
   function noteToDoc(c) {
@@ -2237,6 +2261,7 @@ function initDrawLayer(target, opts = {}) {
     if (existing) { existing.text = t; c = existing; }
     else { c = Object.assign({ id: nextDrawId(), kind: 'note', text: t }, anchor || {}); state.notes.push(c); }
     renderNotes();
+    renderRecordPanel(); // 加/改 note 後同步標注紀錄面板（新列 + 全選框 checked/indeterminate 狀態）
     if (drawStore) { try { existing ? drawStore.save({ id: c.id, kind: 'note', text: t }) : drawStore.save(noteToDoc(c)); } catch (_) { } }
     persistLocalSave();
     return c;
@@ -2253,28 +2278,47 @@ function initDrawLayer(target, opts = {}) {
   // 留言錨定的 DOM selector 集合 → live reposition 監聽用。
   function noteSelectors() { const s = new Set(); state.notes.forEach(c => { if (c.sel) s.add(c.sel); }); return s; }
 
-  // ── 渲染留言 pin（只動 .pc-note-pin；開著的卡跟著元件重新定位）──
+  // ── 渲染留言標記（只動 .pc-note-mark；開著的卡跟著元件重新定位）──
+  // 取消勾選（不送 AI）的 note 直接不畫（與「畫的標注」一致：uncheck → 從畫布消失）。
+  // 編號只對「已勾選」連續給 1..n，與送出的 p.notes 陣列順序一致 → 截圖角標可對照 JSON。
   function renderNotes() {
-    [...noteLayer.querySelectorAll('.pc-note-pin')].forEach(n => n.remove());
-    state.notes.forEach((c, i) => noteLayer.appendChild(notePin(c, i + 1)));
+    [...noteLayer.querySelectorAll('.pc-note-mark')].forEach(n => n.remove());
+    let n = 0;
+    state.notes.forEach((c) => {
+      if (state.sendUnchecked[c.id]) return;
+      noteLayer.appendChild(notePin(c, ++n));
+    });
     repositionNoteCard();
   }
+  // 一則 note → 持續實線外框（貼齊元件範圍、零間隙）+ 左上角落圓 badge（編號）。
+  // badge 騎在框「角」外側（不落在框內緣）→ 不覆蓋元件內容；外框 pointer-events:none，
+  // 只有 badge 可點開卡。圓形小（21px）放不下 icon，只留數字 → 靠外框本身區分「這是 note」。
   function notePin(c, n) {
-    const pin = drawHtmlEl('button', 'pc-note-pin' + (c.objId != null ? ' is-obj' : ''));
-    pin.dataset.noteId = c.id;
-    const xy = noteXY(resolveNotePct(c));
-    pin.style.left = xy.x + 'px'; pin.style.top = xy.y + 'px';
-    pin.textContent = String(n);
-    pin.title = c.text;
-    pin.onclick = (e) => { e.stopPropagation(); openNoteCard(c); };
-    return pin;
+    const mark = drawHtmlEl('div', 'pc-note-mark' + (c.objId != null ? ' is-obj' : ''));
+    mark.dataset.noteId = c.id;
+    const box = resolveNoteBox(c);
+    if (box) {
+      const b = pctToPxBox(box);
+      mark.style.left = b.x + 'px'; mark.style.top = b.y + 'px';
+      mark.style.width = b.w + 'px'; mark.style.height = b.h + 'px';
+    } else {
+      const xy = noteXY(resolveNotePct(c)); // 無法解析範圍 → 退化成點，只掛 badge
+      mark.classList.add('is-point');
+      mark.style.left = xy.x + 'px'; mark.style.top = xy.y + 'px';
+    }
+    const tab = drawHtmlEl('button', 'pc-note-tab');
+    tab.textContent = String(n);
+    tab.title = c.text;
+    tab.onclick = (e) => { e.stopPropagation(); openNoteCard(c); };
+    mark.appendChild(tab);
+    return mark;
   }
 
   // ── hover 框元件（inspect 式虛線）。先測自繪物件命中 → 否則底層 DOM 元件 ──
   function clearHover() { if (hoverBox) { hoverBox.remove(); hoverBox = null; } }
   function onNoteHover(e) {
     if (state.mode !== 'note') { clearHover(); return; }
-    if (e.target.closest && e.target.closest('.pc-note-card, .pc-note-pin')) { clearHover(); return; }
+    if (e.target.closest && e.target.closest('.pc-note-card, .pc-note-mark')) { clearHover(); return; }
     const tg = pickTarget(e.clientX, e.clientY);
     if (!tg) { clearHover(); return; }
     if (!hoverBox) {
@@ -2345,8 +2389,11 @@ function initDrawLayer(target, opts = {}) {
   function closeNoteCard() { closeAllNoteCards(); }
   function setFocusNote(id) {
     focusNoteId = id;
-    noteLayer.querySelectorAll('.pc-note-pin').forEach(pin => {
-      pin.classList.toggle('is-dim', pin.dataset.noteId !== String(id) && id != null);
+    noteLayer.querySelectorAll('.pc-note-mark').forEach(mark => {
+      const isTarget = mark.dataset.noteId === String(id) && id != null;
+      // spotlight：聚焦那則罩暗四周 + 亮環（業界導覽庫做法，讓被註記元件絕對看得到、也「指向」它）；其餘變暗。
+      mark.classList.toggle('is-spotlight', isTarget);
+      mark.classList.toggle('is-dim', !isTarget && id != null);
     });
     noteLayer.querySelectorAll('.pc-note-card').forEach(card => {
       card.classList.toggle('is-focused', card.dataset.noteId === String(id));
@@ -2366,6 +2413,7 @@ function initDrawLayer(target, opts = {}) {
     const noteId = isNew ? 'new' : arg.id;
     const existingCard = noteLayer.querySelector(`.pc-note-card[data-note-id="${noteId}"]`);
     if (existingCard) { setFocusNote(noteId); return; }
+    closeAllNoteCards(); // 單一對話框：開新的前先關掉其他開著的（含未送出的新註記草稿 → 直接丟棄）
     clearHover();
     if (isNew) pendingAnchor = arg;
     const card = drawHtmlEl('div', 'pc-note-card');
@@ -2402,34 +2450,37 @@ function initDrawLayer(target, opts = {}) {
   function renderCardInput(body, c, initial) {
     body.innerHTML = '';
     const ta = document.createElement('textarea');
-    ta.value = initial; ta.placeholder = '對這個元件說…（⌘Enter 送出）';
+    ta.value = initial; ta.placeholder = '對這個元件說…（Enter 存紀錄 · ⌘Enter 送 AI）';
     const row = drawHtmlEl('div', 'pc-note-row');
-    const send = drawHtmlEl('button'); send.textContent = c.id ? '更新' : '送出';
+    const send = drawHtmlEl('button'); send.textContent = c.id ? '更新' : '存紀錄'; // 存進標注紀錄佇列（非直接送 AI）
     const cancel = drawHtmlEl('button', 'ghost'); cancel.textContent = '取消';
     const isEdit = !!c.id;
-    const submit = () => {
+    // 存 note；alsoSend=true → 存完直接送 AI（隨批送出目前已勾選那批，含這則）。
+    const submit = (alsoSend) => {
       const saved = saveNote(ta.value, isEdit ? null : pendingAnchor, c.id || null);
-      if (saved) {
-        const currentCard = body.closest('.pc-note-card'); if (currentCard) currentCard.remove();
-        // 編輯既有註記 → 送出後重開 VIEW 卡看更新結果；新增註記 → 送出即關閉（pin 已放好，要看再點 pin）。
-        if (isEdit) openNoteCard(saved); else closeNoteCard();
-      }
+      if (!saved) return;
+      const currentCard = body.closest('.pc-note-card'); if (currentCard) currentCard.remove();
+      // 編輯 → 存完重開 VIEW 卡看結果；新增 → 存完關閉（marker 已放好，要看再點）。
+      if (isEdit) openNoteCard(saved); else closeNoteCard();
+      if (alsoSend) sendToAgent();
     };
-    send.onclick = submit;
+    send.onclick = () => submit(false);
     cancel.onclick = () => {
       if (c.id) { const currentCard = body.closest('.pc-note-card'); if (currentCard) currentCard.remove(); openNoteCard(c); }
       else closeNoteCard();
     };
     row.append(cancel, send); body.append(ta, row);
     ta.addEventListener('keydown', ev => {
-      if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') { ev.preventDefault(); submit(); }
+      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); submit(true); }      // ⌘/Ctrl+Enter → 送 AI
+      else if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); submit(false); }              // Enter → 存標注紀錄
       else if (ev.key === 'Escape') { ev.preventDefault(); if (c.id) { const cur = body.closest('.pc-note-card'); if (cur) cur.remove(); openNoteCard(c); } else closeNoteCard(); }
+      // Shift+Enter → 換行（不攔截，textarea 預設行為）
     });
     ta.focus();
   }
   // 內嵌 AI 方案卡：重用 replyCardEl，拔掉絕對定位 → 塞進對話卡/面板。
   function replyCardInline(rep) {
-    const el = replyCardEl(rep, (r, o) => submitChoice(r, o), () => { });
+    const el = replyCardEl(rep, (r, o) => submitChoice(r, o), () => { }, rechoose);
     el.style.position = 'static'; el.style.transform = 'none'; el.style.maxWidth = '100%';
     el.style.boxShadow = 'none'; el.style.border = '1px solid #e2e8f0';
     return el;
@@ -2457,7 +2508,7 @@ function initDrawLayer(target, opts = {}) {
   noteLayer.addEventListener('pointerleave', clearHover);
   noteLayer.addEventListener('click', (e) => {
     if (state.mode !== 'note') return;
-    if (e.target.closest && e.target.closest('.pc-note-pin, .pc-note-card')) return; // 點在 pin/卡 → 各自 handler 處理
+    if (e.target.closest && e.target.closest('.pc-note-mark, .pc-note-card')) return; // 點在標記/卡 → 各自 handler 處理
     const tg = pickTarget(e.clientX, e.clientY);
     if (!tg) return;
     const rel = relWithin(tg);
@@ -2505,9 +2556,10 @@ function initDrawLayer(target, opts = {}) {
   const removeNote = (id) => { deleteNote(id); renderRecordPanel(); };
   const drawerAllBox = recordDrawer.querySelector('.pc-draw-rec-all');
   if (drawerAllBox) drawerAllBox.onchange = () => {
-    if (drawerAllBox.checked) state.sendUnchecked = {};
-    else state.objects.forEach(o => { state.sendUnchecked[o.id] = true; });
-    renderRecordPanel();
+    state.sendUnchecked = {};
+    // 取消全選：objects + decisions + notes 全部設未勾選（舊版只含 objects → notes/decisions 漏掉）。
+    if (!drawerAllBox.checked) [...state.objects, ...state.decisions, ...state.notes].forEach(x => { state.sendUnchecked[x.id] = true; });
+    render(); // 用 render（非只 renderRecordPanel）→ 未勾選的 note/物件即時從畫布消失，畫面與截圖一致
   };
   document.body.appendChild(recordDrawer);
   document.body.appendChild(recordTab);
@@ -2525,7 +2577,7 @@ function initDrawLayer(target, opts = {}) {
     const noteRows = state.notes.map((n) => ({
       id: n.id, tool: 'comment', icon: 'comment',
       text: '【註記】' + (n.label ? n.label + ' → ' : '') + n.text,
-      selector: n.sel || null, color: '#0FA0A0',
+      selector: n.sel || null, color: '#635a8f',
       sent: state.sentSigs[n.id] === noteSig(n), isNote: true,
     }));
     const rows = annRows.concat(decRows).concat(noteRows);
@@ -2706,7 +2758,7 @@ function initDrawLayer(target, opts = {}) {
     const b = toPxBox(r, rect);
     svg.appendChild(drawSvgEl('rect', {
       class: 'pc-draw-snap-hl', x: b.x, y: b.y, width: b.w, height: b.h, fill: 'none',
-      stroke: '#0FA0A0', 'stroke-width': 2, 'stroke-dasharray': '5 4', 'pointer-events': 'none',
+      stroke: '#635a8f', 'stroke-width': 2, 'stroke-dasharray': '5 4', 'pointer-events': 'none',
     }));
   }
 
@@ -2799,7 +2851,7 @@ function initDrawLayer(target, opts = {}) {
     replyLayer.innerHTML = '';
     const rect = coordRect();
     state.replies.forEach(r => {
-      const card = replyCardEl(r, submitChoice, closeReply);
+      const card = replyCardEl(r, submitChoice, closeReply, rechoose);
       const a = r.anchor || {};
       const x = a.x != null ? a.x : 50, y = a.y != null ? a.y : 50;
       card.style.left = pctToPx(x, rect.width) + 'px';
@@ -2825,6 +2877,12 @@ function initDrawLayer(target, opts = {}) {
     state.decisions = state.decisions.filter(d => d.id !== id);
     state.decisions.push({ id, replyId: reply.n, optionId: option.id, optionLabel: option.label, text: '決定：' + (option.label || option.id) });
     render(); // 更新方案卡(已選) + 標注紀錄(新佇列項) + 送出鈕計數/狀態
+  }
+  // 取消已選 → 方案卡回到選項列、把該決定移出佇列（可重新挑一個）。
+  function rechoose(reply) {
+    reply.chosen = null;
+    state.decisions = state.decisions.filter(d => d.id !== ('dec-' + reply.n));
+    render();
   }
   // reply-poll 迴圈：long-poll 收 AI 方案卡（僅 opts.replyPoll 開啟時跑；同源 http 才有 endpoint）。
   let replyPolling = false;
@@ -2861,7 +2919,7 @@ function initDrawLayer(target, opts = {}) {
     const g = drawSvgEl('g', { class: 'pc-draw-selection' });
     objs.forEach(o => {
       const box = selPxBox(o, rect);
-      g.appendChild(drawSvgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, fill: 'none', stroke: '#0FA0A0', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
+      g.appendChild(drawSvgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, fill: 'none', stroke: '#635a8f', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
     });
     if (objs.length === 1) { // handle 只在單選時出現
       const o = objs[0];
@@ -2871,14 +2929,14 @@ function initDrawLayer(target, opts = {}) {
         ['from', 'to'].forEach(which => {
           const cx = pctToPx(ends[which].x, rect.width);
           const cy = pctToPx(ends[which].y, rect.height);
-          g.appendChild(drawSvgEl('circle', { cx, cy, r: 4, fill: '#fff', stroke: '#0FA0A0', 'stroke-width': 1, 'data-endpoint': which }));
+          g.appendChild(drawSvgEl('circle', { cx, cy, r: 4, fill: '#fff', stroke: '#635a8f', 'stroke-width': 1, 'data-endpoint': which }));
         });
       } else {
         // 其餘工具：4 角縮放 handle（text 用實際渲染框 → handle 隨字級貼合）
         const box = selPxBox(o, rect);
         ['nw', 'ne', 'se', 'sw'].forEach(name => {
           const c = boxCorner(box, name);
-          g.appendChild(drawSvgEl('rect', { x: c.x - 4, y: c.y - 4, width: 8, height: 8, fill: '#fff', stroke: '#0FA0A0', 'stroke-width': 1, 'data-handle': name }));
+          g.appendChild(drawSvgEl('rect', { x: c.x - 4, y: c.y - 4, width: 8, height: 8, fill: '#fff', stroke: '#635a8f', 'stroke-width': 1, 'data-handle': name }));
         });
       }
     }
@@ -2887,7 +2945,7 @@ function initDrawLayer(target, opts = {}) {
   function renderMarquee(rect) {
     if (!state.marquee) return;
     const box = toPxBox(state.marquee, rect);
-    svg.appendChild(drawSvgEl('rect', { class: 'pc-draw-marquee', x: box.x, y: box.y, width: box.w, height: box.h, fill: 'rgba(15,160,160,.08)', stroke: '#0FA0A0', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
+    svg.appendChild(drawSvgEl('rect', { class: 'pc-draw-marquee', x: box.x, y: box.y, width: box.w, height: box.h, fill: 'rgba(99,90,143,.08)', stroke: '#635a8f', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
   }
 
   // ── command 執行（apply＋push）/ undo / redo ─────────────────────────────────
@@ -3365,8 +3423,13 @@ function initDrawLayer(target, opts = {}) {
     if (el.classList.contains('pc-draw-toolbar') || el.classList.contains('pc-draw-reply-layer')
       || el.classList.contains('pc-draw-rec-tab') || el.classList.contains('pc-draw-text-input')
       || el.id === 'pc-draw-rec-drawer' || el.id === 'pc-draw-context') return true;
+    // 對話卡（開著的 note 輸入/彈窗）與 hover 高亮框都是 UI chrome → 不入鏡（保留框+角標本身）。
+    if (el.classList.contains('pc-note-card') || el.classList.contains('pc-note-hl')) return true;
     const id = el.getAttribute && el.getAttribute('data-id');
-    return !!(id && state.sendUnchecked[id]); // 未勾選送出的標注不入鏡
+    if (id && state.sendUnchecked[id]) return true; // 未勾選送出的標注不入鏡
+    // note 標記用 data-note-id（非 data-id）；未勾選 → 整個 .pc-note-mark（框+角標）排除，與送出 JSON 一致。
+    const nid = el.getAttribute && el.getAttribute('data-note-id');
+    return !!(nid && state.sendUnchecked[nid]);
   }
   // 整頁截圖（底層畫面 + 標注合成）。html2canvas 不可用/失敗 → 退回只截 SVG 標注層（透明底）。async。
   async function capturePng() {
@@ -3797,6 +3860,7 @@ function initDrawLayer(target, opts = {}) {
     addImage, // (dataURL, naturalW, naturalH, atPoint?) → 新 image 物件（paste/drop 與測試共用）
     buildExport: exportPayload,            // 結構化 JSON（selector + text + geom）
     capturePng,                            // async → PNG dataURL
+    isExcludedFromCapture: el => isCaptureExcluded(el), // 測試用：某元素是否被排除出送出截圖
     sendToAgent,                           // async (opts?) → {json, png, sent}；回 payload
     setExportEndpoint: url => { state.exportEndpoint = url; },
     getAnnotationRows: () => annotationRows(state.objects, state.sentSigs), // P6 面板 row 資料（純函式包裝）
@@ -4260,7 +4324,7 @@ function recordRowEl(row, selected, onClick, checked, onToggle, onRemove) {
 
 // AI 方案卡（錨定貼在標注旁）：標題 + 文字 + 可點選項按鈕；已選則顯示「✓ 已選」。
 // onChoose(reply, option) 在點選項時呼叫。純函式（位置由呼叫端設 style）。
-function replyCardEl(reply, onChoose, onClose) {
+function replyCardEl(reply, onChoose, onClose, onRechoose) {
   const card = drawHtmlEl('div', 'pc-draw-reply-card');
   card.dataset.n = reply.n;
   const head = drawHtmlEl('div', 'pc-draw-reply-head'); head.textContent = '💬 AI 方案';
@@ -4277,6 +4341,10 @@ function replyCardEl(reply, onChoose, onClose) {
     const c = drawHtmlEl('div', 'pc-draw-reply-chosen');
     c.textContent = '✓ 已選：' + (reply.chosen.label || reply.chosen.id);
     card.appendChild(c);
+    const re = drawHtmlEl('button', 'pc-draw-reply-rechoose'); // 取消已選 → 回選項列重挑
+    re.textContent = '改選'; re.title = '取消這個選擇，重新挑一個方案';
+    re.onclick = () => onRechoose && onRechoose(reply);
+    card.appendChild(re);
   } else if (opts.length) {
     const row = drawHtmlEl('div', 'pc-draw-reply-opts' + (rich ? ' is-rich' : ''));
     opts.forEach(o => {

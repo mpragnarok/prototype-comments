@@ -206,20 +206,23 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(viaKey === 'note', 'C 快捷鍵應切到 note 模式');
   });
 
-  await test('留言 pin：程式化 addComment → state + 畫面 pin（座標 %）；deleteComment 移除', async () => {
+  await test('留言 pin：程式化 addNote → state + 畫面標記（無錨→點位 px，單一參考軸）；deleteNote 移除', async () => {
     const r = await page.evaluate(() => {
       const api = window.__drawTest.api;
+      const w = document.querySelector('.pc-note-layer').clientWidth; // 單一參考軸：x/y 皆以層寬換算 px
       const c = api.addNote('這裡要改', 30, 40);
-      const pin = document.querySelector('.pc-note-pin');
+      const pin = document.querySelector('.pc-note-mark');
       const after = { count: api.getNotes().length, text: api.getNotes()[0].text,
-        left: pin && pin.style.left, top: pin && pin.style.top };
+        left: pin && pin.style.left, top: pin && pin.style.top,
+        expLeft: (w * 0.30) + 'px', expTop: (w * 0.40) + 'px', isPoint: pin && pin.classList.contains('is-point') };
       api.deleteNote(c.id);
-      return { after, deletedCount: api.getNotes().length, deletedPins: document.querySelectorAll('.pc-note-pin').length };
+      return { after, deletedCount: api.getNotes().length, deletedPins: document.querySelectorAll('.pc-note-mark').length };
     });
-    console.log('     comment pin:', JSON.stringify(r));
+    console.log('     note mark:', JSON.stringify(r));
     assert(r.after.count === 1 && r.after.text === '這裡要改', 'addNote 應進 state.notes');
-    assert(r.after.left === '30%' && r.after.top === '40%', 'pin 應落在 30%/40%');
-    assert(r.deletedCount === 0 && r.deletedPins === 0, 'deleteNote 應移除 state + pin');
+    assert(r.after.isPoint, '無錨點 note 應退化成點標記（is-point）');
+    assert(r.after.left === r.after.expLeft && r.after.top === r.after.expTop, '點標記應落在 30%/40%（層寬換算 px）');
+    assert(r.deletedCount === 0 && r.deletedPins === 0, 'deleteNote 應移除 state + 標記');
   });
 
   await test('留言 pin：comment 模式點空白 → 輸入框 → 送出 → 落 pin（真實滑鼠＋鍵盤）', async () => {
@@ -235,7 +238,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
     const r = await page.evaluate(() => ({
       count: window.__drawTest.api.getNotes().length,
       text: (window.__drawTest.api.getNotes()[0] || {}).text,
-      pins: document.querySelectorAll('.pc-note-pin').length,
+      pins: document.querySelectorAll('.pc-note-mark').length,
       bubbleGone: !document.querySelector('.pc-note-card'),
     }));
     console.log('     place via mouse:', JSON.stringify(r));
@@ -798,7 +801,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
       return { seq };
     });
     console.log('     toolbar seq:', JSON.stringify(r.seq));
-    const expected = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'brush:pen', 'brush:marker', 'brush:highlighter', 'text', 'comment'];
+    const expected = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'brush:pen', 'brush:marker', 'brush:highlighter', 'text'];
     assert(r.seq.join(',') === expected.join(','), `工具列順序不符，實際 ${r.seq}`);
   });
 
@@ -1459,6 +1462,45 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(png.prefix.startsWith('data:image/png'), `應為 data:image/png dataURL，實際 ${png.prefix}`);
   });
 
+  await test('送出截圖排除：未勾選 note 從畫布消失（不入鏡）、開著的對話卡不入鏡；已勾選 note 框+角標保留', async () => {
+    const r = await page.evaluate(() => {
+      const api = window.__drawTest.api;
+      api.clear();
+      api.setMode('note');
+      const keep = api.addNote('保留這則送 AI', { sel: '#price-card', relX: 0.5, relY: 0.5, label: 'div · 價格卡' });
+      const drop = api.addNote('這則不送', { sel: '#submit-btn', relX: 0.5, relY: 0.5, label: 'button' });
+      api.toggleRecordPanel(); // 開面板 → note rows 渲染
+      // 真實 UI 流程：取消勾選 drop 那列（onchange → sendUnchecked）
+      const cb = document.querySelector(`#pc-draw-rec-drawer .pc-draw-rec-row[data-id="${drop.id}"] .pc-draw-rec-check`);
+      const hasCb = !!cb;
+      if (cb) { cb.checked = false; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+      // 模擬使用者正對 keep 開著對話卡輸入
+      const keepMark = document.querySelector(`.pc-note-mark[data-note-id="${keep.id}"]`);
+      keepMark.querySelector('.pc-note-tab').click();
+      const dropMark = document.querySelector(`.pc-note-mark[data-note-id="${drop.id}"]`);
+      const card = document.querySelector('.pc-note-card');
+      return {
+        hasCb, hasCard: !!card,
+        keepMarkRendered: !!keepMark, dropMarkRendered: !!dropMark, // 取消勾選 → drop 標記整個不畫
+        keepTab: keepMark && keepMark.querySelector('.pc-note-tab').textContent, // 已勾選連續編號 1
+        keepExcluded: api.isExcludedFromCapture(keepMark),
+        cardExcluded: card ? api.isExcludedFromCapture(card) : null,
+      };
+    });
+    console.log('     capture exclude:', JSON.stringify(r));
+    assert(r.hasCb, '面板應有 drop note 的勾選框（note 有進標注紀錄）');
+    assert(r.dropMarkRendered === false, '未勾選 note 的框+角標應從畫布消失（不畫→自然不入鏡）');
+    assert(r.keepMarkRendered === true && r.keepExcluded === false, '已勾選 note 的框+角標應保留在畫布與截圖（Q2）');
+    assert(r.keepTab === '1', '已勾選 note 連續編號從 1 起（與送出 notes 陣列對齊）');
+    assert(r.hasCard && r.cardExcluded === true, '開著的對話卡（小視窗）不應入鏡');
+    await page.evaluate(() => { // 收尾：關面板（recordOpen 若留 true，之後 render 會重開抽屜蓋住 rec-tab）+ 移除對話卡 + 還原 draw 模式 + 清狀態
+      window.__drawTest.api.toggleRecordPanel(); // 我開過一次 → 這次關回
+      document.querySelectorAll('.pc-note-card').forEach(n => n.remove());
+      window.__drawTest.api.setMode('draw');
+      window.__drawTest.api.clear();
+    });
+  });
+
   // ── P6：側邊標注紀錄面板（右緣 tab + 抽屜）────────────────────────────────────────
   console.log('\ndraw-layer e2e — P6 側邊標注紀錄面板:');
 
@@ -1728,6 +1770,76 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
   });
 
+  await test('全選 toggle 含 note：取消全選 → note 從畫布消失；再全選 → note 回來', async () => {
+    await reset('ellipse');
+    await page.evaluate(() => {
+      const api = window.__drawTest.api;
+      api.setMode('note');
+      api.addNote('第一則', { sel: '#price-card', relX: 0.5, relY: 0.5, label: 'div' });
+      api.addNote('第二則', { sel: '#submit-btn', relX: 0.5, relY: 0.5, label: 'button' });
+    });
+    const before = await page.evaluate(() => document.querySelectorAll('.pc-note-mark').length);
+    assert(before === 2, `預設兩則 note 都畫出，實際 ${before}`);
+    // 取消全選（點全選框到全不選）→ note 應從畫布消失（舊 bug：只清 objects，notes 漏掉）
+    await page.evaluate(() => { const a = document.querySelector('.pc-draw-rec-all'); if (a.checked || a.indeterminate) a.click(); if (document.querySelector('.pc-draw-rec-all').checked) document.querySelector('.pc-draw-rec-all').click(); });
+    const afterDeselect = await page.evaluate(() => document.querySelectorAll('.pc-note-mark').length);
+    console.log('     note all-deselect marks:', afterDeselect);
+    assert(afterDeselect === 0, `取消全選後 note 應從畫布消失，實際 ${afterDeselect}`);
+    // 再全選 → note 回到畫布
+    await page.evaluate(() => { const a = document.querySelector('.pc-draw-rec-all'); if (!a.checked) a.click(); });
+    const afterSelect = await page.evaluate(() => document.querySelectorAll('.pc-note-mark').length);
+    assert(afterSelect === 2, `再全選後 note 應全部回到畫布，實際 ${afterSelect}`);
+    await page.evaluate(() => { window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+  });
+
+  await test('單一對話框：開 note A 卡後開 note B → 舊卡自動關、只剩 B（角標/標注紀錄列共用 openNoteCard）', async () => {
+    const r = await page.evaluate(() => {
+      const api = window.__drawTest.api;
+      api.clear();
+      api.setMode('note');
+      const a = api.addNote('第一則', { sel: '#price-card', relX: 0.5, relY: 0.5, label: 'A' });
+      const b = api.addNote('第二則', { sel: '#submit-btn', relX: 0.5, relY: 0.5, label: 'B' });
+      document.querySelector(`.pc-note-mark[data-note-id="${a.id}"] .pc-note-tab`).click(); // 開 A
+      const afterA = document.querySelectorAll('.pc-note-card').length;
+      document.querySelector(`.pc-note-mark[data-note-id="${b.id}"] .pc-note-tab`).click(); // 開 B → 應關 A
+      const cards = document.querySelectorAll('.pc-note-card');
+      return { afterA, count: cards.length, onlyB: cards.length === 1 && cards[0].dataset.noteId === b.id };
+    });
+    console.log('     single-dialog:', JSON.stringify(r));
+    assert(r.afterA === 1, `開 A 後應有 1 張對話卡，實際 ${r.afterA}`);
+    assert(r.count === 1 && r.onlyB, `開 B 後應只剩 B 一張卡（舊卡自動關），實際 ${JSON.stringify(r)}`);
+    await page.evaluate(() => { document.querySelectorAll('.pc-note-card').forEach(n => n.remove()); window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+  });
+
+  await test('spotlight：開某則 note 卡 → 該 mark 取得 is-spotlight（大範圍暗罩聚光）', async () => {
+    const r = await page.evaluate(() => {
+      const api = window.__drawTest.api;
+      api.clear(); api.setMode('note');
+      const a = api.addNote('聚光這則', { sel: '#price-card', relX: 0.5, relY: 0.5, label: 'A' });
+      document.querySelector(`.pc-note-mark[data-note-id="${a.id}"] .pc-note-tab`).click(); // 開卡 → setFocusNote → spotlight
+      const mark = document.querySelector(`.pc-note-mark[data-note-id="${a.id}"]`);
+      return { spot: mark.classList.contains('is-spotlight'), shadow: getComputedStyle(mark).boxShadow };
+    });
+    console.log('     spotlight:', JSON.stringify({ spot: r.spot, hasBackdrop: /9999px/.test(r.shadow) }));
+    assert(r.spot, '開卡的 note mark 應有 is-spotlight');
+    assert(/9999px/.test(r.shadow), 'is-spotlight 應套用大範圍暗罩 box-shadow（9999px spread）');
+    await page.evaluate(() => { document.querySelectorAll('.pc-note-card').forEach(n => n.remove()); window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+  });
+
+  await test('註記輸入鍵盤：Enter → 存進標注紀錄佇列、關閉輸入卡（非直接送 AI）', async () => {
+    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('note'); });
+    const layer = await page.evaluate(() => { const r = document.querySelector('.pc-note-layer').getBoundingClientRect(); return { x: Math.round(r.left + r.width * 0.5), y: Math.round(r.top + r.height * 0.4) }; });
+    await page.mouse.click(layer.x, layer.y);
+    await page.waitForSelector('.pc-note-card textarea');
+    await page.fill('.pc-note-card textarea', 'Enter 存紀錄測試');
+    await page.press('.pc-note-card textarea', 'Enter'); // Enter → submit(false) 存進佇列
+    const r = await page.evaluate(() => ({ notes: window.__drawTest.api.getNotes().length, text: (window.__drawTest.api.getNotes()[0] || {}).text, cardGone: !document.querySelector('.pc-note-card') }));
+    console.log('     enter-save:', JSON.stringify(r));
+    assert(r.notes === 1 && r.text === 'Enter 存紀錄測試', 'Enter 應把 note 存進佇列');
+    assert(r.cardGone, 'Enter 存完新卡應關閉');
+    await page.evaluate(() => { window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+  });
+
   await test('AI 方案卡：點選項 → 卡片標已選 + 決定進佇列(不立即送)', async () => {
     await reset('select');
     await page.evaluate(() => {
@@ -1748,6 +1860,41 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(decs.length === 1 && decs[0].optionId === 'multi', `選擇應進佇列(決定)，實際 ${JSON.stringify(decs)}`);
     const chosen = await page.evaluate(() => { const c = document.querySelector('.pc-draw-reply-chosen'); return c && c.textContent; });
     assert(chosen && /已選/.test(chosen), `點後卡片應顯示「已選」，實際 ${chosen}`);
+    await page.evaluate(() => window.__drawTest.api.clear());
+  });
+
+  await test('AI 方案卡：改選 → 取消已選、回選項列、改挑另一個(決定被取代)', async () => {
+    await reset('select');
+    await page.evaluate(() => {
+      window.__drawTest.api.clear();
+      window.__drawTest.api.ingestReplies([{ n: 1, anchor: { x: 40, y: 50 }, text: '建議改多選', options: [{ id: 'multi', label: '多選+其他' }, { id: 'select', label: '下拉' }] }]);
+    });
+    await page.click('.pc-draw-reply-opt'); // 先選第一個(multi)
+    await page.waitForFunction(() => window.__drawTest.api.getDecisions().length > 0, { timeout: 3000 });
+    const afterChoose = await page.evaluate(() => ({
+      dec: window.__drawTest.api.getDecisions()[0].optionId,
+      hasRe: !!document.querySelector('.pc-draw-reply-rechoose'),
+      opts: document.querySelectorAll('.pc-draw-reply-opt').length,
+    }));
+    assert(afterChoose.dec === 'multi', `先選 multi，實際 ${afterChoose.dec}`);
+    assert(afterChoose.hasRe, '已選狀態應出現「改選」鈕');
+    assert(afterChoose.opts === 0, '已選狀態選項列應收合');
+    // 改選 → 決定移出佇列、選項列回來
+    await page.click('.pc-draw-reply-rechoose');
+    await page.waitForFunction(() => window.__drawTest.api.getDecisions().length === 0, { timeout: 3000 });
+    const afterRe = await page.evaluate(() => ({
+      dec: window.__drawTest.api.getDecisions().length,
+      opts: document.querySelectorAll('.pc-draw-reply-opt').length,
+      chosen: !!document.querySelector('.pc-draw-reply-chosen'),
+    }));
+    console.log('     after rechoose:', JSON.stringify(afterRe));
+    assert(afterRe.dec === 0, '改選後決定應移出佇列');
+    assert(afterRe.opts === 2 && !afterRe.chosen, '改選後應回到 2 個選項、無已選標記');
+    // 改挑第二個(select) → 新決定取代
+    await page.evaluate(() => { document.querySelectorAll('.pc-draw-reply-opt')[1].click(); });
+    await page.waitForFunction(() => window.__drawTest.api.getDecisions().length > 0, { timeout: 3000 });
+    const afterSecond = await page.evaluate(() => window.__drawTest.api.getDecisions());
+    assert(afterSecond.length === 1 && afterSecond[0].optionId === 'select', `改選後應為 select 且只有 1 筆決定，實際 ${JSON.stringify(afterSecond)}`);
     await page.evaluate(() => window.__drawTest.api.clear());
   });
 
@@ -2855,65 +3002,8 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(tool === 'ellipse', `IME 開著時 e.code=KeyO 應切到 ellipse，實際 ${tool}`);
   });
 
-  // ── 功能① 指元件 comment 工具 ────────────────────────────────────────────────
-  await test('指元件：工具列出現 comment 按鈕', async () => {
-    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); });
-    const has = await page.evaluate(() => !!document.querySelector('#pc-draw-toolbar [data-tool="comment"]'));
-    assert(has, '工具列應有 data-tool=comment 按鈕');
-  });
-  await test('指元件：點底層元件 → 開輸入框 → 打字 Enter → 建出帶 anchor 的 comment', async () => {
-    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); window.__drawTest.api.setTool('comment'); });
-    await page.mouse.click(160, 120); // #price-card 中心（80,60 + 160x120/2）
-    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
-    await page.fill('.pc-draw-text-input', '改成可多選＋加其他欄'); // fill：原子聚焦+設值（避免 keyboard race）
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(60);
-    const o = await page.evaluate(() => { const os = window.__drawTest.api.getObjects(); return os[os.length - 1]; });
-    assert(o && o.tool === 'comment', `應建出 comment 物件，實際 ${o && o.tool}`);
-    assert(o.anchor === '#price-card', `anchor 應為 #price-card，實際 ${o.anchor}`);
-    assert(o.text === '改成可多選＋加其他欄', `text 應為 prompt，實際 ${o.text}`);
-  });
-  await test('指元件：點空白處（抓不到具體元件）→ 不建立留言', async () => {
-    // toolbar 自身會被 elSnapSelector 排除 → 點在 toolbar 上拿不到 app 元件 selector
-    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); window.__drawTest.api.setTool('comment'); });
-    const before = await page.evaluate(() => window.__drawTest.api.getObjects().length);
-    await page.evaluate(() => {
-      const bar = document.getElementById('pc-draw-toolbar');
-      const r = bar.getBoundingClientRect();
-      document.getElementById('pc-draw').dispatchEvent(new PointerEvent('pointerdown',
-        { bubbles: true, clientX: r.left + 5, clientY: r.top + 5 }));
-    });
-    await page.waitForTimeout(40);
-    const after = await page.evaluate(() => window.__drawTest.api.getObjects().length);
-    const hasInput = await page.evaluate(() => !!document.querySelector('.pc-draw-text-input'));
-    assert(after === before, `空白點擊不應建立留言（before ${before} after ${after}）`);
-    assert(!hasInput, '空白點擊不應開輸入框');
-  });
-  await test('指元件：hover 底層元件 → snapHighlight 虛線外框出現', async () => {
-    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); window.__drawTest.api.setTool('comment'); });
-    await page.mouse.move(90, 100);
-    await page.mouse.move(160, 120); // 移到 #price-card 上
-    await page.waitForTimeout(40);
-    const hl = await page.evaluate(() => document.querySelectorAll('#pc-draw .pc-draw-snap-hl').length);
-    assert(hl >= 1, `hover 元件應出現 snapHighlight 外框，實際 ${hl}`);
-  });
-  await test('指元件：render → 虛線外框 + 💬 角標徽章', async () => {
-    await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('draw'); window.__drawTest.api.setTool('comment'); });
-    await page.mouse.click(160, 120);
-    await page.waitForSelector('.pc-draw-text-input', { timeout: 2000 });
-    await page.fill('.pc-draw-text-input', '留言內容'); // fill：原子聚焦+設值（避免 keyboard race）
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(60);
-    const r = await page.evaluate(() => {
-      const g = document.querySelector('#pc-draw .pc-draw-comment');
-      const rect = g && g.querySelector('rect');
-      const badge = g && g.textContent;
-      return { hasG: !!g, dashed: rect && rect.getAttribute('stroke-dasharray'), badge };
-    });
-    assert(r.hasG, '應渲染 .pc-draw-comment 群組');
-    assert(r.dashed, '外框應為虛線（stroke-dasharray）');
-    assert(r.badge && r.badge.includes('💬'), `應有 💬 角標，實際 ${JSON.stringify(r.badge)}`);
-  });
+  // 註：舊「指元件 comment 工具」e2e 已隨 A-merge（note 系統取代 comment 工具）移除；
+  // note 覆蓋見上方「指💬應切 note」「留言 pin：程式化 addNote」「留言 pin：點空白落 pin」。
 
   await browser.close();
   server.close();
