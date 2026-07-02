@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<!--
+  note-mode-harness.html — 重現 note 模式點擊/hover crash（CDN note-UX 新版）。
+  真實情境：live-markup 的 /api/draw store 與 decide.js 的「決策按鈕」共用同一 collection，
+  所以 store 裡會有 tool:'choice'（無 geom、非 kind:'note'）的 doc。note-UX 收斂後 note 模式的
+  pickTarget 會對 state.objects 每顆呼叫 geomBBox → 對這種無 geom 的 doc 讀 g.x → TypeError。
+
+  兩種 boot：
+    A. native：initDrawLayer('#canvas', { mode:'off' })（無 persist）
+    B. live-markup：initDrawLayer(document.body, { mode:'off', projectId, persist:{fb,db,projectId} })
+       —— 可選擇先 seed 一顆 choice doc 進 store，重現線上事故。
+  頁面帶一段 <p> 供 hover/click 下註記。
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>note-mode crash repro</title>
+<style>
+  html, body { margin: 0; }
+  #canvas { position: relative; width: 600px; height: 400px; background: #f3f4f6; }
+  #para { position: absolute; left: 60px; top: 120px; width: 300px; font: 16px system-ui; }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <p id="para">這是一段可被標注的說明文字，hover 後點擊應開啟 note 卡。</p>
+</div>
+
+<script type="module">
+  import { initDrawLayer } from '/src/draw-layer.js';
+  import { createMockFirebase } from '/test/mock-firebase.js';
+
+  window.__noteCrash = {
+    // A. native boot（#canvas、無 persist）
+    initNative: (overrides = {}) => {
+      window.__api = initDrawLayer('#canvas', { mode: 'off', ...overrides });
+      return { ok: true };
+    },
+    // B. live-markup boot（document.body、persist:{fb,db,projectId}）。
+    //    seedChoice=true → 先注入一顆 decide.js 式 choice doc（無 geom、非 note）進 store。
+    initLiveMarkup: ({ seedChoice = false, mode = 'off' } = {}) => {
+      const projectId = 'crash-repro';
+      const fb = createMockFirebase({ user: { uid: 'local', displayName: '我' } });
+      window.__fb = fb;
+      if (seedChoice) fb.__seed({ id: 'choice-1', tool: 'choice', text: '⭐ 選這個方案', updatedAt: Date.now() });
+      window.__api = initDrawLayer(document.body, { mode, projectId, persist: { fb, db: fb.getFirestore(), projectId } });
+      return { ok: true };
+    },
+    getObjects: () => (window.__api ? window.__api.getObjects() : null),
+    ready: true,
+  };
+</script>
+</body>
+</html>

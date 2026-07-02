@@ -399,6 +399,7 @@ function pointDir(pts, i) {
 // resolve(o)（選用）：回傳 arrow/line 解析後端點 {from,to}（el/obj anchor）。不傳則用 geom。
 export function geomBBox(o, resolve) {
   const g = o.geom;
+  if (!g) return { x: 0, y: 0, w: 0, h: 0 }; // 防呆：非繪圖 doc（無 geom）→ 空框，不參與命中/標籤定位（避免讀 g.x crash）
   if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond' || o.tool === 'image') return { x: g.x, y: g.y, w: g.w, h: g.h };
   if (o.tool === 'arrow' || o.tool === 'line') { const e = resolve ? resolve(o) : g; return rectFromPoints(e.from, e.to); }
   if (o.tool === 'pencil') {
@@ -2077,7 +2078,9 @@ export function initDrawLayer(target, opts = {}) {
           sel: doc.sel || null, objId: doc.objId != null ? doc.objId : null,
           relX: doc.relX, relY: doc.relY, x: doc.x, y: doc.y, label: doc.label || '' });
         changed = true;
-      } else {
+      } else if (doc.geom) {
+        // 只吸收真正的向量繪圖 doc。live-markup 的 /api/draw 與 decide.js 決策按鈕共用同一 collection，
+        // 會混入無 geom 的 doc（如 tool:'choice'）；這些非繪圖 doc 一律略過，否則會被 pickTarget/geomBBox 讀 g.x 而 crash。
         if (doc.tool === 'image' || localObjIds.has(doc.id)) return;
         state.objects.push(rehydrateDrawing(doc));
         changed = true;
