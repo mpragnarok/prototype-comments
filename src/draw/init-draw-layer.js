@@ -96,6 +96,7 @@ export function initDrawLayer(target, opts = {}) {
     editingId: null,   // 正在以輸入框編輯的文字物件 id（render 時隱藏原件，避免重疊兩個框）
     collapsed: false,  // 工具列是否收合成右下 FAB（按 ✕ 收合；點 FAB / 按工具快捷鍵展開）
     notes: [],      // 註記 pin（{id, kind:'note', text, x, y}；x/y 為 % 座標，同繪圖座標系）
+    selectedNoteIds: [], // note 多選集合（off/繪圖模式 Shift+點 mark 加/減選 → Delete 批次刪，可 undo）
   };
   const history = makeUndoStack();
   // ── P7 團隊持久（選用）：把 opts.persist 解析成 drawings store（ready store 或 {fb,db,projectId}）。
@@ -172,6 +173,61 @@ export function initDrawLayer(target, opts = {}) {
     if (drawStore) { try { drawStore.remove(id); } catch (_) { } }
     persistLocalSave();
   }
+  // 可 undo 的（批次）刪除 note：留存原索引 → 走與物件 deleteMany 同構的 undo 命令。
+  // 快捷鍵刪除（單則聚焦卡）與多選批次刪除共用此路徑，行為/undo 一致。
+  function deleteNotesById(ids) {
+    const idset = new Set(ids);
+    const items = state.notes
+      .map((note, index) => ({ note, index }))
+      .filter(it => idset.has(it.note.id)); // 依現有順序 → index 由小到大
+    if (!items.length) return;
+    closeCardsForNotes(idset);
+    runNoteCommand({ type: 'deleteNotes', items });
+  }
+  // 刪除前收尾：關掉被刪 note 開著的卡、清掉 focus / 多選集合中的對應 id。
+  function closeCardsForNotes(idset) {
+    if (focusNoteId != null && idset.has(focusNoteId)) focusNoteId = null;
+    state.selectedNoteIds = state.selectedNoteIds.filter(id => !idset.has(id));
+    noteLayer.querySelectorAll('.pc-note-card').forEach(card => {
+      if (idset.has(card.dataset.noteId)) card.remove();
+    });
+  }
+  // 快捷鍵 E/Enter：把目前聚焦（view）的 note 卡切成編輯輸入（等同卡上「編輯」鈕）。
+  function editFocusedNote() {
+    const c = state.notes.find(n => n.id === focusNoteId);
+    const card = noteLayer.querySelector(`.pc-note-card[data-note-id="${focusNoteId}"]`);
+    const body = card && card.querySelector('.pc-note-card-body');
+    if (c && body) renderCardInput(body, c, c.text || '');
+  }
+  // note 刪除命令：apply/invert 皆純資料，掛進與物件共用的 history stack（Cmd/Ctrl+Z 一起管）。
+  function runNoteCommand(cmd) {
+    state.notes = applyNoteCommand(state.notes, cmd);
+    history.push(cmd);
+    cmd.items.forEach(it => syncRemoveNote(it.note.id));
+    render();
+    persistLocalSave();
+  }
+  function applyNoteCommand(notes, cmd) {
+    if (cmd.type !== 'deleteNotes') return notes;
+    const ids = new Set(cmd.items.map(it => it.note.id));
+    return notes.filter(n => !ids.has(n.id));
+  }
+  function invertNoteCommand(notes, cmd) {
+    if (cmd.type !== 'deleteNotes') return notes;
+    const next = notes.slice();
+    cmd.items.slice().sort((a, b) => a.index - b.index) // 由小到大插回 → 原索引正確
+      .forEach(it => next.splice(Math.min(it.index, next.length), 0, it.note));
+    return next;
+  }
+  // note 團隊持久：與物件 syncCommand 同語意（drawStore 為 null → 純本地 no-op）。
+  function syncSaveNote(note) {
+    if (!drawStore) return;
+    try { drawStore.save(noteToDoc(note)); } catch (_) { /* 持久化失敗不影響本地 */ }
+  }
+  function syncRemoveNote(id) {
+    if (!drawStore) return;
+    try { drawStore.remove(id); } catch (_) { /* 持久化失敗不影響本地 */ }
+  }
   // 留言錨定的 DOM selector 集合 → live reposition 監聽用。
   function noteSelectors() { const s = new Set(); state.notes.forEach(c => { if (c.sel) s.add(c.sel); }); return s; }
 
@@ -209,6 +265,10 @@ export function initDrawLayer(target, opts = {}) {
     tab.onclick = (e) => { e.stopPropagation(); openNoteCard(c); };
     mark.appendChild(tab);
     return mark;
+  }
+  // 批次刪除目前選取的 note mark（可 undo）。選取互動（Shift+點）於後續 commit 接上。
+  function deleteSelectedNotes() {
+    if (state.selectedNoteIds.length) deleteNotesById(state.selectedNoteIds.slice());
   }
 
   // ── hover 框元件（inspect 式虛線）。先測自繪物件命中 → 否則底層 DOM 元件 ──
@@ -933,6 +993,7 @@ export function initDrawLayer(target, opts = {}) {
   function doUndo() {
     const cmd = history.undo();
     if (!cmd) return;
+    if (cmd.type === 'deleteNotes') { undoNoteCommand(cmd, 'undo'); return; }
     state.objects = invertCommand(state.objects, cmd);
     ensureSelectionValid();
     render();
@@ -941,8 +1002,21 @@ export function initDrawLayer(target, opts = {}) {
   function doRedo() {
     const cmd = history.redo();
     if (!cmd) return;
+    if (cmd.type === 'deleteNotes') { undoNoteCommand(cmd, 'redo'); return; }
     state.objects = applyCommand(state.objects, cmd);
     ensureSelectionValid();
+    render();
+    persistLocalSave();
+  }
+  // note 命令的 undo/redo：undo→插回並重新寫回 store；redo→再刪一次。
+  function undoNoteCommand(cmd, dir) {
+    if (dir === 'undo') {
+      state.notes = invertNoteCommand(state.notes, cmd);
+      cmd.items.forEach(it => syncSaveNote(it.note));
+    } else {
+      state.notes = applyNoteCommand(state.notes, cmd);
+      cmd.items.forEach(it => syncRemoveNote(it.note.id));
+    }
     render();
     persistLocalSave();
   }
@@ -1633,9 +1707,32 @@ export function initDrawLayer(target, opts = {}) {
   }
 
   // ── 鍵盤：Delete/Backspace 刪除、Cmd/Ctrl+Z undo、Shift+Cmd/Ctrl+Z redo ────────
+  // 註記卡/選取的鍵盤操作（焦點不在輸入框才進得來；卡片可經標注紀錄列在任何模式開啟）。
+  // 回傳 true＝已處理，呼叫端 return。修飾鍵組合（undo/redo 等）一律放行給下游。
+  function handleNoteKeys(e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return false;
+    const card = noteLayer.querySelector('.pc-note-card');
+    const focused = card && card.dataset.noteId === String(focusNoteId) && state.notes.some(n => n.id === focusNoteId);
+    if (focused) return noteCardKey(e);
+    if (state.selectedNoteIds.length) return selectedNotesKey(e);
+    return false;
+  }
+  // 聚焦的 note view 卡：Delete/Backspace 刪該註記（可 undo）；Enter 或 E 進入編輯。
+  function noteCardKey(e) {
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteNotesById([focusNoteId]); return true; }
+    if (e.key === 'Enter' || e.code === 'KeyE') { e.preventDefault(); editFocusedNote(); return true; }
+    return false;
+  }
+  // 有選取的 note mark：Delete/Backspace 批次刪（可 undo）；Escape 清除選取。
+  function selectedNotesKey(e) {
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelectedNotes(); return true; }
+    if (e.key === 'Escape') { state.selectedNoteIds = []; renderNotes(); return true; }
+    return false;
+  }
   function onKey(e) {
     const tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return; // 打字中一律不攔
+    if (handleNoteKeys(e)) return; // 註記卡快捷鍵 / note 多選批次刪（優先於工具鍵，任何模式）
     const meta = e.metaKey || e.ctrlKey;
     // 工具切換快捷鍵：即使在 off（放行）模式也生效 → 自動進繪圖模式（Excalidraw 風格，按 2 直接畫）。
     // 排除 Cmd/Ctrl/Alt 以免撞 undo/redo/瀏覽器；e.code 讓注音/IME 開著也能切工具。
@@ -1651,14 +1748,15 @@ export function initDrawLayer(target, opts = {}) {
         return;
       }
     }
-    // 以下操作只在繪圖模式有意義（Esc 關選單、undo/redo、群組、刪除）。
-    if (state.mode !== 'draw') return;
-    if (e.key === 'Escape') { closeContextMenu(); return; } // 關右鍵選單
+    // undo/redo 不限繪圖模式：note 刪除發生在 note/off 模式，Cmd/Ctrl+Z 在這些模式也要能還原。
     if (meta && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
       if (e.shiftKey) doRedo(); else doUndo();
       return;
     }
+    // 以下操作只在繪圖模式有意義（Esc 關選單、群組、刪除物件）。
+    if (state.mode !== 'draw') return;
+    if (e.key === 'Escape') { closeContextMenu(); return; } // 關右鍵選單
     if (meta && e.key.toLowerCase() === 'g') {
       e.preventDefault();
       if (e.shiftKey) doUngroupSelected(); else doGroupSelected();
@@ -1781,7 +1879,7 @@ export function initDrawLayer(target, opts = {}) {
     deleteNote,
     getDecisions: () => state.decisions.slice(), // 方案卡選擇進的佇列
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
-    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sentConfirmN = 0; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; render(); persistLocalSave(); },
+    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.selectedNoteIds = []; state.sentSigs = {}; state.sentConfirmN = 0; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; render(); persistLocalSave(); },
     destroy: () => {
       stopLive(); // Batch 4：拆掉 live reposition 監聽/rAF/ResizeObserver
       replyPolling = false; // 停掉 AI 方案卡輪詢

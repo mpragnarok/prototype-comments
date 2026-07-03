@@ -1839,6 +1839,51 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { document.querySelectorAll('.pc-note-card').forEach(n => n.remove()); window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
   });
 
+  await test('註記卡快捷鍵：view 卡聚焦按 Delete → 刪除該註記、關卡；Ctrl+Z 還原', async () => {
+    await page.evaluate(() => {
+      const api = window.__drawTest.api;
+      api.clear(); api.setMode('note');
+      api.addNote('刪我', { sel: '#price-card', relX: 0.5, relY: 0.5, label: 'div' });
+    });
+    const id = await page.evaluate(() => window.__drawTest.api.getNotes()[0].id);
+    await page.click(`.pc-note-mark[data-note-id="${id}"] .pc-note-tab`); // 開 view 卡（聚焦；焦點不在輸入框）
+    await page.waitForSelector('.pc-note-card');
+    await page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await page.keyboard.press('Delete');
+    const r = await page.evaluate(() => ({ notes: window.__drawTest.api.getNotes().length, card: !!document.querySelector('.pc-note-card') }));
+    console.log('     note-card Delete:', JSON.stringify(r));
+    assert(r.notes === 0, `Delete 應刪除聚焦的註記，實際剩 ${r.notes}`);
+    assert(!r.card, 'Delete 後對話卡應關閉');
+    await page.keyboard.press('Control+z');
+    const back = await page.evaluate(() => window.__drawTest.api.getNotes().length);
+    console.log('     note-card Delete undo:', back);
+    assert(back === 1, `Ctrl+Z 應還原被刪的註記，實際 ${back}`);
+    await page.evaluate(() => { document.querySelectorAll('.pc-note-card').forEach(n => n.remove()); window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+  });
+
+  await test('註記卡快捷鍵：view 卡聚焦按 E → 進入編輯（textarea 帶原文）；打字中不觸發', async () => {
+    await page.evaluate(() => {
+      const api = window.__drawTest.api;
+      api.clear(); api.setMode('note');
+      api.addNote('原始文字', { sel: '#price-card', relX: 0.5, relY: 0.5, label: 'div' });
+    });
+    const id = await page.evaluate(() => window.__drawTest.api.getNotes()[0].id);
+    await page.click(`.pc-note-mark[data-note-id="${id}"] .pc-note-tab`);
+    await page.waitForSelector('.pc-note-card');
+    await page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await page.keyboard.press('e');
+    await page.waitForSelector('.pc-note-card textarea', { timeout: 2000 });
+    const r = await page.evaluate(() => ({ ta: !!document.querySelector('.pc-note-card textarea'), val: (document.querySelector('.pc-note-card textarea') || {}).value }));
+    console.log('     note-card E→edit:', JSON.stringify(r));
+    assert(r.ta && r.val === '原始文字', `按 E 應進入編輯並帶原文，實際 ${JSON.stringify(r)}`);
+    // 打字中（focus 在 textarea）按 e → 應只輸入字元、不再觸發任何快捷鍵，卡片仍在編輯態
+    await page.click('.pc-note-card textarea');
+    await page.keyboard.press('e');
+    const typing = await page.evaluate(() => ({ ta: !!document.querySelector('.pc-note-card textarea'), notes: window.__drawTest.api.getNotes().length }));
+    assert(typing.ta && typing.notes === 1, `打字中按 e 不應觸發刪除/切換，實際 ${JSON.stringify(typing)}`);
+    await page.evaluate(() => { document.querySelectorAll('.pc-note-card').forEach(n => n.remove()); window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+  });
+
   await test('註記輸入鍵盤：Enter → 存進標注紀錄佇列、關閉輸入卡（非直接送 AI）', async () => {
     await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('note'); });
     const layer = await page.evaluate(() => { const r = document.querySelector('.pc-note-layer').getBoundingClientRect(); return { x: Math.round(r.left + r.width * 0.5), y: Math.round(r.top + r.height * 0.4) }; });
