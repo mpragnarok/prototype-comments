@@ -2,8 +2,8 @@
  * draw-layer — Figma/Excalidraw 風格的視覺標注繪圖層（plan §4.1–§4.3）。
  *
  * 在既有 `#pc-overlay` 之上加一個 `#pc-draw` SVG 層，提供：
- *   - 模式狀態機 mode ∈ { comment, draw, off }；draw 時 SVG `pointer-events:auto`
- *     吃事件擋掉 app 點擊，comment/off 則 `pointer-events:none` 放行（不跟 app 打架）。
+ *   - 模式狀態機 mode ∈ { note, draw, off }；draw 時 SVG `pointer-events:auto`
+ *     吃事件擋掉 app 點擊，note/off 則 `pointer-events:none` 放行（不跟 app 打架）。
  *   - 浮動工具列：select / ellipse / arrow / pencil / text / rect / line
  *     ＋ 顏色筆粗 picker ＋ z-order / 刪除 / undo-redo。
  *   - 七種工具繪製、選取/移動/縮放、z-order、刪除、undo-redo。

@@ -83,12 +83,11 @@ export const TOOL_SHORTCUTS = {
   6: 'line', l: 'line',
   7: 'pencil', p: 'pencil',
   8: 'text', t: 'text',
-  c: 'comment', // 指元件留言（無數字鍵；數字 1–8 已滿、9 留給未實作 image）
   i: 'eyedropper',
 };
 // 工具的中文標籤與主要字母提示（tooltip / aria）。
-export const TOOL_LABELS_ZH = { select: '選取', ellipse: '橢圓', arrow: '箭頭', pencil: '自由筆', text: '文字', rect: '矩形', diamond: '菱形', line: '直線', comment: '指元件' };
-export const TOOL_KEY = { select: 'V', rect: 'R', diamond: 'D', ellipse: 'O', arrow: 'A', line: 'L', pencil: 'P', text: 'T', comment: 'C' };
+export const TOOL_LABELS_ZH = { select: '選取', ellipse: '橢圓', arrow: '箭頭', pencil: '自由筆', text: '文字', rect: '矩形', diamond: '菱形', line: '直線' };
+export const TOOL_KEY = { select: 'V', rect: 'R', diamond: 'D', ellipse: 'O', arrow: 'A', line: 'L', pencil: 'P', text: 'T' };
 
 // key（單鍵）→ 工具名 / 'eyedropper' / null。大小寫不敏感。純函式。
 export function resolveShortcut(key) {

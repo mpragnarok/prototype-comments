@@ -714,7 +714,7 @@ export function initDrawLayer(target, opts = {}) {
     state.tool = tool;
     state.collapsed = false; // 選工具（含快捷鍵）→ 確保工具列展開
     if (tool !== 'select') state.selectedIds = []; // 切到繪圖工具 → 取消選取（避免新物件被回頭改色）
-    if (tool !== 'comment') snapHighlight = null;   // 離開指元件 → 清掉殘留的 hover 外框
+    snapHighlight = null;                            // 切工具 → 清掉殘留的 hover 外框
     setMode('draw'); // 任何工具（含 select）都進 draw → SVG 吃事件
     render();
   }
@@ -1334,7 +1334,6 @@ export function initDrawLayer(target, opts = {}) {
     state.selectedIds = [];
     const rect = coordRect();
     if (state.tool === 'text') { startTextInput(e.clientX, e.clientY, rect); return; }
-    if (state.tool === 'comment') { startCommentInput(e.clientX, e.clientY, rect); return; }
     const p0 = clientToPct(e.clientX, e.clientY, rect);
     let start = p0, fromAnchor;
     if (isEndpointTool(state.tool)) { // 起點也可吸附（畫線時 from 黏元件/形狀）
@@ -1585,52 +1584,6 @@ export function initDrawLayer(target, opts = {}) {
     input.addEventListener('blur', commit);
   }
 
-  // ── 指元件 comment：點底層元件 → 收 prompt → 建一筆帶 anchor 的留言 ────────────────
-  // 抓游標下 app 元件 selector；抓不到具體元件（body/overlay/toolbar）→ 不開輸入框、不建留言
-  //（強制每筆 comment 都有錨點，AI 才知道指誰）。建出的物件沿用既有佇列/送出/已送全鏈。
-  function startCommentInput(clientX, clientY, rect) {
-    const selector = elSnapSelector(elementUnderPoint(clientX, clientY));
-    if (!selector) return;
-    const input = drawHtmlEl('input', 'pc-draw-text-input');
-    input.type = 'text';
-    input.style.left = (clientX - rect.left) + 'px';
-    input.style.top = (clientY - rect.top) + 'px';
-    host.appendChild(input);
-    setTimeout(() => input.focus(), 0);
-    const point = clientToPct(clientX, clientY, rect);
-    let done = false;
-    const commit = () => {
-      if (done) return;            // Enter 與 blur 都會觸發 → 防重複
-      done = true;
-      const text = input.value.trim();
-      input.remove();
-      snapHighlight = null; // [fix7] 空輸入也要清 hover 高亮、重繪（移到 early-return 前）
-      if (!text) { render(); return; }
-      // geom 存建立時的元件 rect（fallback 落點）；render 時再用 anchor 重解析以跟著元件移位。
-      const g = getRectPct(selector);
-      const geom = g ? g : { ...point, w: 0, h: 0 }; // [fix3] selector 此刻沒回 rect → 至少給 {x,y,w:0,h:0}
-      const o = makeDrawObject({ tool: 'comment', geom, text, style: opts.style });
-      o.anchor = selector; // buildExport→selector、annotationRows→selector、隨元件移位重解析外框
-      runCommand({ type: 'create', obj: o });
-    };
-    input.addEventListener('keydown', ev => { if (ev.isComposing || ev.keyCode === 229) return; if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
-    input.addEventListener('blur', commit);
-  }
-  // 指元件 hover：游標下若有可標注 app 元件 → 顯示虛線外框（重用 snapHighlight 渲染）。
-  let _cHoverRaf = null;
-  function onCommentHover(e) {
-    if (state.mode !== 'draw' || state.tool !== 'comment' || drag) return;
-    if (host.querySelector('.pc-draw-text-input')) return; // [fix8a] 輸入框開著時不更新 hover
-    if (_cHoverRaf) return;                               // [fix8b] rAF throttle（pointermove 連觸過頻）
-    const cx = e.clientX, cy = e.clientY;
-    _cHoverRaf = (typeof requestAnimationFrame === 'function' ? requestAnimationFrame : f => setTimeout(f, 16))(() => {
-      _cHoverRaf = null;
-      const sel = elSnapSelector(elementUnderPoint(cx, cy));
-      const prevSel = snapHighlight && snapHighlight.selector;
-      if (sel !== prevSel) { snapHighlight = sel ? { selector: sel } : null; render(); }
-    });
-  }
-
   // ── 雙擊：在物件上加/編輯綁定標籤（Excalidraw bound text）────────────────────────
   function onDblClick(e) {
     if (state.mode !== 'draw' || state.tool !== 'select') return;
@@ -1847,8 +1800,6 @@ export function initDrawLayer(target, opts = {}) {
   function onDocPointer(e) { if (!contextMenu.contains(e.target)) closeContextMenu(); }
 
   svg.addEventListener('pointerdown', onDown);
-  svg.addEventListener('pointermove', onCommentHover);                       // 指元件 hover 外框
-  svg.addEventListener('pointerleave', () => { if (snapHighlight && state.tool === 'comment') { snapHighlight = null; render(); } });
   svg.addEventListener('dblclick', onDblClick);
   svg.addEventListener('contextmenu', onContextMenu);
   svg.addEventListener('dragover', onDragOver);

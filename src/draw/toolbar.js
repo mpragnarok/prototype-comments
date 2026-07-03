@@ -63,12 +63,14 @@ export const DRAW_HELP_URL = 'https://github.com/mpragnarok/prototype-comments#r
 export function openDrawHelp(opts = {}) {
   if (document.getElementById('pc-draw-help-modal')) return;
   const url = opts.helpUrl || DRAW_HELP_URL;
-  const toolRows = [...TOOLBAR_TOOL_ORDER, 'eyedropper', 'comment']
+  const toolRows = [...TOOLBAR_TOOL_ORDER, 'eyedropper']
     .map(t => {
-      const name = t === 'eyedropper' ? '取色（吸管）' : t === 'comment' ? '註記模式' : (TOOL_LABELS_ZH[t] || t);
-      const key = t === 'eyedropper' ? 'I' : t === 'comment' ? 'C' : shortcutBadge(t);
+      const name = t === 'eyedropper' ? '取色（吸管）' : (TOOL_LABELS_ZH[t] || t);
+      const key = t === 'eyedropper' ? 'I' : shortcutBadge(t);
       return `<div class="pc-draw-help-row"><span>${name}</span><kbd>${key}</kbd></div>`;
-    }).join('');
+    })
+    .concat('<div class="pc-draw-help-row"><span>註記模式</span><kbd>C</kbd></div>') // 註記模式（pin 留言）：C 切換
+    .join('');
   const modal = drawHtmlEl('div', 'pc-draw-help-modal');
   modal.id = 'pc-draw-help-modal';
   modal.innerHTML = `

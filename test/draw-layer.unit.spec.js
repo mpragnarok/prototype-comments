@@ -1187,18 +1187,10 @@ test('hydrateObjectsFromLocal: endAnchors round-trip', () => {
   eq(back[0].endAnchors.to.relX, 0.25, '應還原 endAnchors');
 });
 
-// ── 功能① 指元件 comment 工具（純函式）──────────────────────────────────────────
-// 註：A-merge（note 系統取代 comment 工具）後 comment 已不在 DRAW_TOOLS，故移除「DRAW_TOOLS 含 comment」測試。
+// ── 功能① 指元件 comment 工具（入口已移除，僅存向後相容純函式）──────────────────────
+// 註：A-merge（note 系統取代 comment 工具）後 comment 已不在 DRAW_TOOLS；#35 進一步移除其不可達
+// 入口（C 快捷鍵→comment、startCommentInput、hover 事件），故 TOOL_SHORTCUTS.c 相關測試一併移除。
 // 但 comment 的 annotationRows/buildExport/commentViewGeom 純函式仍保留（既有 comment 標注資料的向後相容），測試續存。
-test('TOOL_SHORTCUTS：字母 c → comment（大小寫不敏感）', () => {
-  eq(TOOL_SHORTCUTS.c, 'comment');
-  eq(resolveShortcut('c'), 'comment');
-  eq(resolveShortcut('C'), 'comment');
-});
-test('TOOL_SHORTCUTS：comment 不占用任何數字鍵（無數字徽章）', () => {
-  const digit = Object.keys(TOOL_SHORTCUTS).find(k => /^[0-9]$/.test(k) && TOOL_SHORTCUTS[k] === 'comment');
-  eq(digit, undefined, 'comment 應只有字母鍵');
-});
 test('annotationRows：comment 無文字 → 友善預設「指元件」、icon=comment、selector 取 anchor', () => {
   const rows = annotationRows([{ id: 'c1', tool: 'comment', anchor: '#meal', style: { color: '#0FA0A0' } }]);
   eq(rows[0].text, '指元件', '無文字 → 友善預設');
