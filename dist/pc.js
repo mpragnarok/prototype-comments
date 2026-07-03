@@ -926,28 +926,8 @@ function createNoteModule({
 }
 
 /**
- * draw-layer — Figma/Excalidraw 風格的視覺標注繪圖層（plan §4.1–§4.3）。
- *
- * 在既有 `#pc-overlay` 之上加一個 `#pc-draw` SVG 層，提供：
- *   - 模式狀態機 mode ∈ { comment, draw, off }；draw 時 SVG `pointer-events:auto`
- *     吃事件擋掉 app 點擊，comment/off 則 `pointer-events:none` 放行（不跟 app 打架）。
- *   - 浮動工具列：select / ellipse / arrow / pencil / text / rect / line
- *     ＋ 顏色筆粗 picker ＋ z-order / 刪除 / undo-redo。
- *   - 七種工具繪製、選取/移動/縮放、z-order、刪除、undo-redo。
- *
- * 座標一律存 viewport-% （沿用 pc.js 既有 % 慣例 → RWD 友善）；render 時才換算成 px。
- * 幾何換算、bbox、平移/縮放重映射、z-order 重排、undo command apply/invert 全抽成純函式
- *（下方 export），可單測。
- *
- * Usage:
- *   import { initDrawLayer } from '.../src/draw-layer.js';
- *   const draw = initDrawLayer('#root');   // 或傳 element；預設 document.body
- *   draw.setMode('draw'); draw.setTool('select');
- *
- * P2 之後（不在本階段）：貼圖、selector 擷取(anchor)、PNG/JSON 匯出。
- *
- * P7 團隊持久（選用）：傳 opts.persist（{fb,db,projectId} 或 ready store）→ 把向量物件
- * 同步到 Firestore `drawings` 子集合；不傳則 0 Firebase（dev 模式行為完全不變）。
+ * draw/constants — 繪圖層共用常數與純資料衍生的小工具（圖示 / 筆刷 / 快捷鍵 / 環境判斷）。
+ * 皆無 DOM／closure 依賴，可單獨載入與單測。由 draw-layer.js 聚合後對外 re-export。
  */
 
 // ── 常數 ────────────────────────────────────────────────────────────────────
@@ -1075,7 +1055,12 @@ function shouldEnableDraw(mode, hostname) {
   return isLocalEnv(hostname); // 'auto' 或 undefined
 }
 
-// ── 純函式（單元測試對象，無 DOM 依賴）──────────────────────────────────────
+/**
+ * draw/geometry — 座標換算、幾何 bbox/平移/縮放重映射、自由筆平滑、端點吸附、
+ * 群組運算、marquee 與命中測試（hit-test）。皆為無 DOM／無 closure 的純函式，
+ * 沿用 viewport-% 座標慣例，可單測。由 draw-layer.js 聚合後對外 re-export。
+ */
+
 // px → viewport-%（沿用 index.js overlay click 的 toFixed(2) 慣例）。
 function pxToPct(px, total) {
   if (!total) return 0;
@@ -1134,109 +1119,6 @@ function imageGeom(natW, natH, canvasW, canvasH, atPoint, maxFrac = 0.6) {
   y = Math.max(0, Math.min(y, fullH - hPct));      // 夾進可視畫布（高）
   return { x: r2(x), y: r2(y), w: r2(wPct), h: r2(hPct) };
 }
-
-// ── P4 結構化匯出（selector 擷取 + 精簡 JSON）────────────────────────────────────
-const ANCHOR_DATA_ATTRS = ['data-testid', 'data-test', 'data-cy', 'data-id'];
-function cssEscape(s) {
-  if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(s);
-  return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&'); // node fallback（無 CSS API）
-}
-function nthOfType(el) {
-  const parent = el.parentElement || el.parentNode;
-  if (!parent || !parent.children) return null;
-  const same = [...parent.children].filter(c => c.tagName === el.tagName);
-  if (same.length <= 1) return null;
-  return same.indexOf(el) + 1;
-}
-// DOM 元素 → 穩定 CSS selector（id 優先 → data-* → nth-of-type 路徑）。可被 querySelector round-trip。
-function cssSelectorFor(el) {
-  if (!el || !el.tagName) return null;
-  if (el.id) return '#' + cssEscape(el.id);
-  for (const attr of ANCHOR_DATA_ATTRS) {
-    const v = el.getAttribute && el.getAttribute(attr);
-    if (v) return `[${attr}="${cssEscape(v)}"]`;
-  }
-  const parts = [];
-  let cur = el;
-  while (cur && cur.tagName) {
-    const tag = cur.tagName.toLowerCase();
-    if (tag === 'html' || tag === 'body') break;
-    if (cur.id) { parts.unshift('#' + cssEscape(cur.id)); break; }
-    const v = cur.getAttribute && ANCHOR_DATA_ATTRS.map(a => [a, cur.getAttribute(a)]).find(([, x]) => x);
-    if (v) { parts.unshift(`[${v[0]}="${cssEscape(v[1])}"]`); break; }
-    const n = nthOfType(cur);
-    parts.unshift(n ? `${tag}:nth-of-type(${n})` : tag);
-    cur = cur.parentElement || cur.parentNode;
-  }
-  return parts.length ? parts.join(' > ') : null;
-}
-
-// DrawObject[] → 精簡結構化匯出（省 token；只含有意義欄位）。純函式。
-function buildExport(objects, viewport = {}) {
-  return {
-    viewport: { w: viewport.w || 0, h: viewport.h || 0 },
-    annotations: (objects || []).map(o => {
-      const a = { id: o.id, tool: o.tool };
-      if (o.anchor != null) a.selector = o.anchor;
-      const text = (o.label != null && o.label !== '') ? o.label : (o.text != null ? o.text : null);
-      if (text != null) a.text = text;
-      if (o.style && o.style.color) a.color = o.style.color;
-      if (o.imageRef != null) a.image = true; // 標記有圖（dataURL 不塞進精簡 JSON）
-      a.geom = o.geom;
-      return a;
-    }),
-  };
-}
-
-// ── P6 側邊標注紀錄面板：row 資料（純函式，可單測）─────────────────────────────────
-// 每個工具的友善預設標籤（物件無 label/text 時，面板顯示這個 → 比 'ellipse' 易讀）。
-const ANNOTATION_TOOL_LABELS = {
-  ellipse: '圈選', arrow: '箭頭', line: '直線', rect: '矩形', diamond: '菱形',
-  pencil: '手繪', text: '文字', image: '參考圖', comment: '指元件',
-};
-// 指元件 comment 的畫布外框幾何：每幀用 anchor selector 重解析底層元件 rect（隨元件移位/捲動跟著貼）；
-// 無 anchor 或解析失敗（元件消失）→ 退回建立時存的 o.geom。純函式（getRect 注入，可單測）。
-function commentViewGeom(o, getRect) {
-  if (o && o.anchor) {
-    const r = getRect(o.anchor);
-    if (r) return r;
-  }
-  return o ? o.geom : undefined;
-}
-// DrawObject[] → 側邊「標注紀錄」面板的 row 資料。純函式：
-//   text：label（綁定標籤）優先 → text（文字工具）→ 工具友善預設（圈選/箭頭…）。
-//   selector：取 anchor（elementFromPoint 擷取的元件），無則 null。
-//   color：取 style.color。icon：對映合法的工具圖示名（無對應者退回 'rect'）。
-// 標注內容簽章：捕捉「送出時會帶的使用者可見內容」。改幾何/文字/顏色/錨點 → 簽章變 → 視為未送。
-function annotationSig(o) {
-  return JSON.stringify({ tool: o.tool, geom: o.geom, text: o.text, label: o.label, anchor: o.anchor, style: o.style });
-}
-// 決定（在 AI 方案卡上選的選項）進佇列的簽章：改選不同選項 → 簽章變 → 回未送。
-function decisionSig(d) {
-  return JSON.stringify({ replyId: d.replyId, optionId: d.optionId, optionLabel: d.optionLabel });
-}
-function noteSig(n) {
-  return JSON.stringify({ text: n.text, sel: n.sel, objId: n.objId });
-}
-// sentSigs＝{objId: 上次成功送出時的簽章}；row.sent＝目前簽章與已送簽章相符（送出後沒再改）。
-function annotationRows(objects, sentSigs) {
-  return (objects || []).map(o => {
-    const text = (o.label != null && o.label !== '') ? o.label
-      : (o.text != null && o.text !== '') ? o.text
-      : (ANNOTATION_TOOL_LABELS[o.tool] || o.tool);
-    return {
-      id: o.id,
-      tool: o.tool,
-      icon: ICON_PATHS[o.tool] ? o.tool : 'rect', // 面板圖示用（image 無專屬圖示 → 退回方框）
-      text,
-      selector: o.anchor != null ? o.anchor : null,
-      color: (o.style && o.style.color) || null,
-      sent: !!(sentSigs && sentSigs[o.id] === annotationSig(o)),
-      groupId: o.groupId || null,
-    };
-  });
-}
-
 // 一次拖曳（起點 a、終點 b）→ 某工具的幾何（box 類 / 端點類）。pencil 另走累點邏輯。
 function geomFromDrag(tool, a, b) {
   if (tool === 'ellipse' || tool === 'rect' || tool === 'diamond') return rectFromPoints(a, b);
@@ -1337,6 +1219,7 @@ function pointDir(pts, i) {
 // resolve(o)（選用）：回傳 arrow/line 解析後端點 {from,to}（el/obj anchor）。不傳則用 geom。
 function geomBBox(o, resolve) {
   const g = o.geom;
+  if (!g) return { x: 0, y: 0, w: 0, h: 0 }; // 防呆：非繪圖 doc（無 geom）→ 空框，不參與命中/標籤定位（避免讀 g.x crash）
   if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond' || o.tool === 'image') return { x: g.x, y: g.y, w: g.w, h: g.h };
   if (o.tool === 'arrow' || o.tool === 'line') { const e = resolve ? resolve(o) : g; return rectFromPoints(e.from, e.to); }
   if (o.tool === 'pencil') {
@@ -1642,6 +1525,120 @@ function objHitDist(o, p, tol, ends) {
 // 點是否命中物件（boolean 包裝，向後相容）。
 function pointHitsObject(o, p, tol, ends) { return objHitDist(o, p, tol, ends) !== Infinity; }
 
+/**
+ * draw/selectors — P4 結構化匯出：CSS selector 擷取、精簡 JSON export、
+ * 標注簽章（sig）與側邊面板 row 資料。純函式（唯一 DOM 依賴為讀取 element 屬性/位置，
+ * 無 closure 狀態）。由 draw-layer.js 聚合後對外 re-export。
+ */
+
+// ── P4 結構化匯出（selector 擷取 + 精簡 JSON）────────────────────────────────────
+const ANCHOR_DATA_ATTRS = ['data-testid', 'data-test', 'data-cy', 'data-id'];
+function cssEscape(s) {
+  if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(s);
+  return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&'); // node fallback（無 CSS API）
+}
+function nthOfType(el) {
+  const parent = el.parentElement || el.parentNode;
+  if (!parent || !parent.children) return null;
+  const same = [...parent.children].filter(c => c.tagName === el.tagName);
+  if (same.length <= 1) return null;
+  return same.indexOf(el) + 1;
+}
+// DOM 元素 → 穩定 CSS selector（id 優先 → data-* → nth-of-type 路徑）。可被 querySelector round-trip。
+function cssSelectorFor(el) {
+  if (!el || !el.tagName) return null;
+  if (el.id) return '#' + cssEscape(el.id);
+  for (const attr of ANCHOR_DATA_ATTRS) {
+    const v = el.getAttribute && el.getAttribute(attr);
+    if (v) return `[${attr}="${cssEscape(v)}"]`;
+  }
+  const parts = [];
+  let cur = el;
+  while (cur && cur.tagName) {
+    const tag = cur.tagName.toLowerCase();
+    if (tag === 'html' || tag === 'body') break;
+    if (cur.id) { parts.unshift('#' + cssEscape(cur.id)); break; }
+    const v = cur.getAttribute && ANCHOR_DATA_ATTRS.map(a => [a, cur.getAttribute(a)]).find(([, x]) => x);
+    if (v) { parts.unshift(`[${v[0]}="${cssEscape(v[1])}"]`); break; }
+    const n = nthOfType(cur);
+    parts.unshift(n ? `${tag}:nth-of-type(${n})` : tag);
+    cur = cur.parentElement || cur.parentNode;
+  }
+  return parts.length ? parts.join(' > ') : null;
+}
+
+// DrawObject[] → 精簡結構化匯出（省 token；只含有意義欄位）。純函式。
+function buildExport(objects, viewport = {}) {
+  return {
+    viewport: { w: viewport.w || 0, h: viewport.h || 0 },
+    annotations: (objects || []).map(o => {
+      const a = { id: o.id, tool: o.tool };
+      if (o.anchor != null) a.selector = o.anchor;
+      const text = (o.label != null && o.label !== '') ? o.label : (o.text != null ? o.text : null);
+      if (text != null) a.text = text;
+      if (o.style && o.style.color) a.color = o.style.color;
+      if (o.imageRef != null) a.image = true; // 標記有圖（dataURL 不塞進精簡 JSON）
+      a.geom = o.geom;
+      return a;
+    }),
+  };
+}
+
+// ── P6 側邊標注紀錄面板：row 資料（純函式，可單測）─────────────────────────────────
+// 每個工具的友善預設標籤（物件無 label/text 時，面板顯示這個 → 比 'ellipse' 易讀）。
+const ANNOTATION_TOOL_LABELS = {
+  ellipse: '圈選', arrow: '箭頭', line: '直線', rect: '矩形', diamond: '菱形',
+  pencil: '手繪', text: '文字', image: '參考圖', comment: '指元件',
+};
+// 指元件 comment 的畫布外框幾何：每幀用 anchor selector 重解析底層元件 rect（隨元件移位/捲動跟著貼）；
+// 無 anchor 或解析失敗（元件消失）→ 退回建立時存的 o.geom。純函式（getRect 注入，可單測）。
+function commentViewGeom(o, getRect) {
+  if (o && o.anchor) {
+    const r = getRect(o.anchor);
+    if (r) return r;
+  }
+  return o ? o.geom : undefined;
+}
+// DrawObject[] → 側邊「標注紀錄」面板的 row 資料。純函式：
+//   text：label（綁定標籤）優先 → text（文字工具）→ 工具友善預設（圈選/箭頭…）。
+//   selector：取 anchor（elementFromPoint 擷取的元件），無則 null。
+//   color：取 style.color。icon：對映合法的工具圖示名（無對應者退回 'rect'）。
+// 標注內容簽章：捕捉「送出時會帶的使用者可見內容」。改幾何/文字/顏色/錨點 → 簽章變 → 視為未送。
+function annotationSig(o) {
+  return JSON.stringify({ tool: o.tool, geom: o.geom, text: o.text, label: o.label, anchor: o.anchor, style: o.style });
+}
+// 決定（在 AI 方案卡上選的選項）進佇列的簽章：改選不同選項 → 簽章變 → 回未送。
+function decisionSig(d) {
+  return JSON.stringify({ replyId: d.replyId, optionId: d.optionId, optionLabel: d.optionLabel });
+}
+function noteSig(n) {
+  return JSON.stringify({ text: n.text, sel: n.sel, objId: n.objId });
+}
+// sentSigs＝{objId: 上次成功送出時的簽章}；row.sent＝目前簽章與已送簽章相符（送出後沒再改）。
+function annotationRows(objects, sentSigs) {
+  return (objects || []).map(o => {
+    const text = (o.label != null && o.label !== '') ? o.label
+      : (o.text != null && o.text !== '') ? o.text
+      : (ANNOTATION_TOOL_LABELS[o.tool] || o.tool);
+    return {
+      id: o.id,
+      tool: o.tool,
+      icon: ICON_PATHS[o.tool] ? o.tool : 'rect', // 面板圖示用（image 無專屬圖示 → 退回方框）
+      text,
+      selector: o.anchor != null ? o.anchor : null,
+      color: (o.style && o.style.color) || null,
+      sent: !!(sentSigs && sentSigs[o.id] === annotationSig(o)),
+      groupId: o.groupId || null,
+    };
+  });
+}
+
+/**
+ * draw/model — 繪圖物件的資料模型與純資料運算：z-order 重排、樣式套用、
+ * command apply/invert 與 undo/redo 堆疊、物件 id 產生、序列化／反序列化（含 Firestore drawingToDoc）。
+ * 無 DOM／無 closure 依賴，可單測。由 draw-layer.js 聚合後對外 re-export。
+ */
+
 // z-order：把 id 在 id 陣列中往前/後/頂/底重排（陣列尾＝最上層）。回傳新陣列。
 function reorderIds(ids, id, op) {
   const i = ids.indexOf(id);
@@ -1845,6 +1842,11 @@ function drawingToDoc(obj) {
   return doc; // 注意：不含 imageRef / dataURL（PNG 永不進 Firestore）
 }
 
+/**
+ * draw/dom — 建立 SVG／HTML 元素的小工具（draw 前綴避免 bundle 時與 index.js 同名 top-level 衝突）。
+ * 由 render / toolbar / record-panel 與 draw-layer.js 共用。
+ */
+
 // ── DOM helpers（draw 前綴避免 bundle 時與 index.js 同名 top-level 衝突）────────
 function drawSvgEl(tag, attrs = {}) {
   const n = document.createElementNS(SVG_NS, tag);
@@ -1856,6 +1858,11 @@ function drawHtmlEl(tag, cls) {
   if (cls) n.className = cls;
   return n;
 }
+
+/**
+ * draw/styles — 繪圖層的 CSS（DRAW_STYLES 常數）與注入函式 injectDrawStyles。
+ * 一次性以 <style id="pc-draw-styles"> 注入 document.head；與 src/styles.js（留言層樣式）分屬不同層。
+ */
 
 const DRAW_STYLES = `
 /* ── 語意色 token（design system）：draw 引擎 chrome 用色集中於此，逐處以 var() 取用。
@@ -2203,6 +2210,693 @@ function injectDrawStyles() {
   document.head.appendChild(s);
 }
 
+/**
+ * draw/render — 把繪圖物件渲染成 SVG（renderObject / 標籤 / 箭頭 marker），
+ * 以及繪製過程的幾何小工具（toPxBox / initialGeom / updateGeom / isDrawn / findById）。
+ * 由 draw-layer.js 的 render loop 呼叫；不持有 closure 狀態（一律吃參數）。
+ */
+
+// 把 % box 換成 px box（選取框 / marquee 繪製）。
+function toPxBox(b, rect) {
+  return { x: pctToPx(b.x, rect.width), y: pctToPx(b.y, rect.height), w: pctToPx(b.w, rect.width), h: pctToPx(b.h, rect.height) };
+}
+
+function findById(objects, id) { return objects.find(o => o.id === id); }
+
+// ── 幾何（依工具，% 座標）──────────────────────────────────────────────────
+function initialGeom(tool, p) {
+  if (tool === 'ellipse' || tool === 'rect' || tool === 'diamond') return { x: p.x, y: p.y, w: 0, h: 0 };
+  if (tool === 'arrow' || tool === 'line') return { from: { ...p }, to: { ...p } };
+  if (tool === 'pencil') return { points: [[p.x, p.y]] };
+  return { x: p.x, y: p.y };
+}
+function updateGeom(drag, p) {
+  if (drag.tool === 'pencil') { drag.points.push([p.x, p.y]); return { points: drag.points.slice() }; }
+  return geomFromDrag(drag.tool, drag.start, p);
+}
+// 判斷物件是否「真的畫了」（避免單點 click 留下空物件）。
+function isDrawn(o) {
+  if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond' || o.tool === 'image') return o.geom.w > 0.2 || o.geom.h > 0.2;
+  if (o.tool === 'arrow' || o.tool === 'line') { const g = o.geom; return Math.abs(g.to.x - g.from.x) > 0.2 || Math.abs(g.to.y - g.from.y) > 0.2; }
+  if (o.tool === 'pencil') return (o.geom.points || []).length > 1;
+  return true; // text 由 input commit 控制
+}
+
+// ── render 一個 DrawObject → SVG 節點（% → px）──────────────────────────────
+function renderObject(o, rect, svg) {
+  const s = o.style || DEFAULT_DRAW_STYLE;
+  const stroke = { stroke: s.color, 'stroke-width': s.strokeWidth, fill: s.fill || 'none' };
+  if (o.tool === 'comment') {
+    // 指元件：被標注元件的虛線外框 + 左上角 💬+序號 角標。geom 已由 viewObject 重解析成元件 rect。
+    const g = o.geom || { x: 0, y: 0, w: 0, h: 0 };
+    const x = pctToPx(g.x, rect.width), y = pctToPx(g.y, rect.height);
+    const w = pctToPx(g.w || 0, rect.width), h = pctToPx(g.h || 0, rect.height);
+    const grp = drawSvgEl('g', { class: 'pc-draw-comment' });
+    grp.appendChild(drawSvgEl('rect', {
+      x, y, width: w, height: h, fill: 'none',
+      stroke: s.color, 'stroke-width': s.strokeWidth, 'stroke-dasharray': '5 4', rx: 4,
+    }));
+    const badgeY = y >= 10 ? y - 5 : y + 13; // [fix4] 元件貼頂時 badge 畫在框內，防 y<0 裁切
+    const badge = drawSvgEl('text', { x: x + 3, y: badgeY, fill: s.color, 'font-size': 13, 'font-weight': 700 });
+    badge.textContent = '💬' + (o.seq || '');
+    grp.appendChild(badge);
+    return grp;
+  }
+  if (o.tool === 'ellipse') {
+    const g = o.geom;
+    return drawSvgEl('ellipse', {
+      cx: pctToPx(g.x + g.w / 2, rect.width), cy: pctToPx(g.y + g.h / 2, rect.height),
+      rx: pctToPx(g.w / 2, rect.width), ry: pctToPx(g.h / 2, rect.height), ...stroke,
+    });
+  }
+  if (o.tool === 'rect') {
+    const g = o.geom;
+    return drawSvgEl('rect', {
+      x: pctToPx(g.x, rect.width), y: pctToPx(g.y, rect.height),
+      width: pctToPx(g.w, rect.width), height: pctToPx(g.h, rect.height), ...stroke,
+    });
+  }
+  if (o.tool === 'image') {
+    const g = o.geom;
+    const img = drawSvgEl('image', {
+      x: pctToPx(g.x, rect.width), y: pctToPx(g.y, rect.height),
+      width: pctToPx(g.w, rect.width), height: pctToPx(g.h, rect.height),
+      preserveAspectRatio: 'xMidYMid meet',
+    });
+    img.setAttribute('href', o.imageRef || '');
+    img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', o.imageRef || ''); // 舊瀏覽器相容
+    return img;
+  }
+  if (o.tool === 'diamond') {
+    const g = o.geom;
+    const box = { x: pctToPx(g.x, rect.width), y: pctToPx(g.y, rect.height), w: pctToPx(g.w, rect.width), h: pctToPx(g.h, rect.height) };
+    const pts = diamondPoints(box).map(([x, y]) => `${x},${y}`).join(' ');
+    return drawSvgEl('polygon', { points: pts, ...stroke });
+  }
+  if (o.tool === 'arrow' || o.tool === 'line') {
+    const g = o.geom;
+    const attrs = {
+      x1: pctToPx(g.from.x, rect.width), y1: pctToPx(g.from.y, rect.height),
+      x2: pctToPx(g.to.x, rect.width), y2: pctToPx(g.to.y, rect.height),
+      stroke: s.color, 'stroke-width': s.strokeWidth, fill: 'none',
+    };
+    const h = arrowHeads(o); // 端點箭頭：none/end/start/both（marker 用 auto-start-reverse 自動翻向）
+    if (h.start || h.end) {
+      const mid = ensureArrowMarker(svg, s.color);
+      if (h.end) attrs['marker-end'] = `url(#${mid})`;
+      if (h.start) attrs['marker-start'] = `url(#${mid})`;
+    }
+    return drawSvgEl('line', attrs);
+  }
+  if (o.tool === 'pencil') {
+    const ptsPx = (o.geom.points || []).map(([x, y]) => [pctToPx(x, rect.width), pctToPx(y, rect.height)]);
+    const brush = o.style.brushType || 'pen';
+    const cfg = brushStyle(brush);
+    const base = (s.strokeWidth || 2) * cfg.widthMul;
+    if (!cfg.fill) { // highlighter：等寬描邊、半透明、flat cap、multiply
+      return drawSvgEl('path', {
+        d: freehandPath(ptsPx), stroke: s.color, 'stroke-width': base, fill: 'none',
+        'stroke-linecap': 'butt', 'stroke-linejoin': 'round', opacity: cfg.opacity,
+        style: 'mix-blend-mode:' + cfg.blend, 'data-brush': brush,
+      });
+    }
+    // pen / marker：頭尾漸細的填充外框（fill=色、無 stroke）
+    return drawSvgEl('path', {
+      d: taperedOutline(ptsPx, base, { taperFrac: cfg.taperFrac, minScale: cfg.minScale }),
+      fill: s.color, stroke: 'none', opacity: cfg.opacity, 'stroke-linejoin': 'round', 'data-brush': brush,
+    });
+  }
+  const t = drawSvgEl('text', { x: pctToPx(o.geom.x, rect.width), y: pctToPx(o.geom.y, rect.height), fill: s.color, 'font-size': s.fontSize || DEFAULT_DRAW_STYLE.fontSize, 'font-family': 'system-ui, sans-serif' });
+  t.textContent = o.text || '';
+  return t;
+}
+
+const LABEL_FONT_SIZE = 14;
+const LABEL_BG_PAD = 5; // 白底每邊外擴 px
+// 綁定標籤 → <g>（含 <text>；line/arrow 另加白底 <rect> 把線蓋掉）。無 label 回 null。
+// 白底先用估算尺寸（fallback），append 後由 sizeLabelBg() 量實際 text bbox 收緊到完全覆蓋。
+function renderLabel(o, rect) {
+  if (o.label == null || o.label === '') return null;
+  const a = labelAnchor(o);
+  const x = pctToPx(a.x, rect.width), y = pctToPx(a.y, rect.height);
+  const isLine = o.tool === 'arrow' || o.tool === 'line';
+  const labelFs = (o.style && o.style.fontSize) || LABEL_FONT_SIZE; // 跟隨物件字體大小
+  const g = drawSvgEl('g', { class: 'pc-draw-label', 'data-label-for': o.id, 'pointer-events': 'none' });
+  if (isLine) { // 白底蓋住線；rect 在前(底層)、text 在後(上層)
+    const w = o.label.length * labelFs + LABEL_BG_PAD * 2; // 估寬偏大（CJK ~1em/字）→ fallback 也蓋住
+    const h = labelFs + LABEL_BG_PAD * 2;
+    g.appendChild(drawSvgEl('rect', { x: x - w / 2, y: y - h / 2, width: w, height: h, fill: DRAW_UI_COLORS.labelBg, rx: 3 }));
+  }
+  const t = drawSvgEl('text', {
+    x, y, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
+    fill: DRAW_UI_COLORS.labelInk, 'font-size': labelFs, 'font-family': 'system-ui, sans-serif',
+  });
+  t.textContent = o.label;
+  g.appendChild(t);
+  return g;
+}
+
+// 量實際 text bbox，把白底 rect 收到「text bbox + padding」完全覆蓋（需 text 已在 DOM）。
+function sizeLabelBg(g) {
+  const bg = g.querySelector('rect');
+  const text = g.querySelector('text');
+  if (!bg || !text) return; // shape 標籤無 bg → 略過
+  let bb;
+  try { bb = text.getBBox(); } catch (_) { bb = null; }
+  if (!bb || !bb.width) return; // 量不到 → 保留估算 fallback
+  bg.setAttribute('x', bb.x - LABEL_BG_PAD);
+  bg.setAttribute('y', bb.y - LABEL_BG_PAD);
+  bg.setAttribute('width', bb.width + LABEL_BG_PAD * 2);
+  bg.setAttribute('height', bb.height + LABEL_BG_PAD * 2);
+}
+
+// <defs> 容器（marker 依顏色按需建立，見 ensureArrowMarker）。render 保留首子節點＝此 defs。
+function buildArrowhead(svg) {
+  svg.appendChild(drawSvgEl('defs'));
+}
+
+// 顏色 → 穩定的 marker id（只保留英數，確保是合法 id；保留 "arrowhead" 關鍵字）。
+function arrowMarkerId(color) {
+  return 'pc-draw-arrowhead-' + String(color).replace(/[^a-z0-9]/gi, '');
+}
+
+// 確保該顏色的箭頭 marker 存在於 <defs>（path fill＝該色 → 箭頭跟著 stroke 變色）。回傳 id。
+function ensureArrowMarker(svg, color) {
+  const id = arrowMarkerId(color);
+  let defs = svg.querySelector('defs');
+  if (!defs) { defs = drawSvgEl('defs'); svg.insertBefore(defs, svg.firstChild); }
+  if (!defs.querySelector('#' + id)) {
+    const marker = drawSvgEl('marker', { id, viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' });
+    marker.appendChild(drawSvgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill: color }));
+    defs.appendChild(marker);
+  }
+  return id;
+}
+
+/**
+ * draw/toolbar — 浮動工具列與所有 popover 選單 DOM（工具鈕/筆刷/顏色/線粗/字級/箭頭端點/
+ * 右鍵選單）、工具列狀態同步（syncToolbar / setMenuEnabled）與使用說明。皆吃 state/actions 參數，
+ * 不持有 closure 狀態。由 draw-layer.js 建構工具列時呼叫。
+ */
+
+// ── 工具列 UI（Material 圖示 + 顏色/線粗 popover）────────────────────────────
+// 工具列上的工具排序（Excalidraw 數字順序）；pencil 槽位用 3 個筆刷取代（無獨立鉛筆鈕）。
+const TOOLBAR_TOOL_ORDER = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'pencil', 'text'];
+function buildToolbar(state, actions, opts = {}) {
+  const bar = drawHtmlEl('div', 'pc-draw-toolbar');
+  bar.id = 'pc-draw-toolbar';
+  // 1 select · 2 rect · 3 diamond · 4 ellipse · 5 arrow · 6 line · 7 [pen marker highlighter] · 8 text
+  TOOLBAR_TOOL_ORDER.forEach(tool => {
+    if (tool === 'pencil') DRAW_BRUSHES.forEach(t => bar.appendChild(brushButton(t, actions))); // 7：筆刷群＝自由筆
+    else bar.appendChild(toolButton(tool, actions));
+  });
+  appendSep(bar);
+  bar.appendChild(noteButton(actions)); // 註記模式切換（畫圖層放行 → 底下 pc.js 釘選留言接手）
+  appendSep(bar);
+  bar.appendChild(colorMenu(actions));
+  bar.appendChild(widthMenu(actions));
+  bar.appendChild(fontSizeMenu(actions));
+  bar.appendChild(headsMenu(actions));
+  appendSep(bar);
+  bar.appendChild(actButton('delete', actions)); // 刪除（z-order 已移到右鍵選單）
+  appendSep(bar);
+  ['undo', 'redo'].forEach(a => bar.appendChild(actButton(a, actions)));
+  appendSep(bar);
+  const send = drawHtmlEl('button', 'pc-draw-tool pc-draw-send');
+  send.dataset.action = 'send';
+  send.title = '標注紀錄／送給 AI';
+  send.setAttribute('aria-label', '標注紀錄／送給 AI');
+  send.innerHTML = icon('send');
+  send.onclick = () => actions.openRecord();
+  bar.appendChild(send);
+  appendSep(bar);
+  const help = drawHtmlEl('button', 'pc-draw-tool pc-draw-help-btn');
+  help.dataset.action = 'help';
+  help.title = '快捷鍵與使用說明';
+  help.setAttribute('aria-label', '快捷鍵與使用說明');
+  help.innerHTML = icon('help');
+  help.onclick = () => openDrawHelp(opts);
+  bar.appendChild(help);
+  appendSep(bar);
+  const off = drawHtmlEl('button', 'pc-draw-tool');
+  off.dataset.tool = 'off';
+  off.title = '收合工具列（放行 app 點擊）';
+  off.setAttribute('aria-label', '收合工具列');
+  off.innerHTML = icon('close');
+  off.onclick = () => actions.collapse();
+  bar.appendChild(off);
+  return bar;
+}
+function appendSep(bar) { bar.appendChild(drawHtmlEl('div', 'pc-draw-sep')); }
+
+// 預設教學手冊（可由 initDrawLayer 的 opts.helpUrl 覆寫）。
+const DRAW_HELP_URL = 'https://github.com/mpragnarok/prototype-comments#readme';
+// 工具列「?」說明 modal：列出每個工具的字母快捷鍵 + 其他操作 + 標注紀錄用法 + 手冊連結。
+function openDrawHelp(opts = {}) {
+  if (document.getElementById('pc-draw-help-modal')) return;
+  const url = opts.helpUrl || DRAW_HELP_URL;
+  const toolRows = [...TOOLBAR_TOOL_ORDER, 'eyedropper', 'comment']
+    .map(t => {
+      const name = t === 'eyedropper' ? '取色（吸管）' : t === 'comment' ? '註記模式' : (TOOL_LABELS_ZH[t] || t);
+      const key = t === 'eyedropper' ? 'I' : t === 'comment' ? 'C' : shortcutBadge(t);
+      return `<div class="pc-draw-help-row"><span>${name}</span><kbd>${key}</kbd></div>`;
+    }).join('');
+  const modal = drawHtmlEl('div', 'pc-draw-help-modal');
+  modal.id = 'pc-draw-help-modal';
+  modal.innerHTML = `
+    <div class="pc-draw-help-box">
+      <div class="pc-draw-help-hd">
+        <span>標注工具使用說明</span>
+        <button class="pc-draw-help-x" aria-label="關閉">✕</button>
+      </div>
+      <div class="pc-draw-help-body">
+        <div class="pc-draw-help-sec-t">⌨️ 工具快捷鍵</div>
+        <div class="pc-draw-help-grid">${toolRows}</div>
+        <div class="pc-draw-help-sec-t">🛠 其他操作</div>
+        <div class="pc-draw-help-row"><span>復原／重做</span><kbd>⌘Z / ⇧⌘Z</kbd></div>
+        <div class="pc-draw-help-row"><span>群組／解散</span><kbd>⌘G / ⇧⌘G</kbd></div>
+        <div class="pc-draw-help-row"><span>刪除選取</span><kbd>Delete</kbd></div>
+        <div class="pc-draw-help-sec-t">📋 標注紀錄</div>
+        <div class="pc-draw-help-desc">點工具列的 ➤ 圖示開啟「標注紀錄」抽屜，勾選要送出的標注，按「送給 AI」一次送出給 AI 處理。</div>
+        <a class="pc-draw-help-link" href="${url}" target="_blank" rel="noopener">📖 開啟完整教學手冊 →</a>
+      </div>
+    </div>`;
+  const close = () => modal.remove();
+  modal.querySelector('.pc-draw-help-x').onclick = close;
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+  document.body.appendChild(modal);
+}
+// 工具的數字快捷鍵（取自 TOOL_SHORTCUTS 單一真相）。
+function toolNumberKey(tool) {
+  return Object.keys(TOOL_SHORTCUTS).find(k => /^[0-9]$/.test(k) && TOOL_SHORTCUTS[k] === tool) || '';
+}
+// 徽章文字＝數字 + 字母（兩種按鍵都有效，一起顯示提示，例：「2 R」）。
+function shortcutBadge(tool) {
+  return [toolNumberKey(tool), TOOL_KEY[tool]].filter(Boolean).join(' ');
+}
+function toolButton(tool, actions) {
+  const b = drawHtmlEl('button', 'pc-draw-tool');
+  b.dataset.tool = tool;
+  const key = TOOL_KEY[tool];
+  const label = (TOOL_LABELS_ZH[tool] || tool) + (key ? ` (${key})` : '');
+  b.title = label;                       // tooltip 含字母快捷鍵，供探索
+  b.setAttribute('aria-label', label);
+  const badge = toolNumberKey(tool);
+  b.innerHTML = icon(tool) + (badge ? `<span class="pc-draw-kbd" aria-hidden="true">${badge}</span>` : ''); // 常駐數字快捷鍵徽章（字母仍可按，列在 ? 說明）
+  b.onclick = () => actions.setTool(tool);
+  return b;
+}
+// 留言模式切換鈕：非繪圖工具，故用 data-mode（不被 setTool 的 data-tool 邏輯清掉）。
+// 點擊在 draw ⇌ comment 間切；comment 時畫圖層放行，讓底下 pc.js 釘選留言系統接手（同 lavish）。
+function noteButton(actions) {
+  const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-note');
+  b.dataset.mode = 'note';
+  b.title = '註記模式 (C)';
+  b.setAttribute('aria-label', '註記模式');
+  b.innerHTML = icon('comment') + '<span class="pc-draw-kbd" aria-hidden="true">C</span>';
+  b.onclick = () => actions.toggleNote();
+  return b;
+}
+function actButton(action, actions) {
+  const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-act');
+  b.dataset.action = action;
+  b.title = action;
+  b.setAttribute('aria-label', action);
+  b.innerHTML = icon(action);
+  b.onclick = () => actions.act(action);
+  return b;
+}
+function brushButton(type, actions) {
+  const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-brush');
+  b.dataset.brush = type;
+  b.title = BRUSH_LABELS[type] + (type === 'pen' ? ' (P)' : ''); // pen 是自由筆主鍵
+  b.setAttribute('aria-label', BRUSH_LABELS[type]);
+  const badge = type === 'pen' ? toolNumberKey('pencil') : ''; // 徽章「7」只放在 pen（自由筆代表）
+  b.innerHTML = icon(BRUSH_ICON[type]) + (badge ? `<span class="pc-draw-kbd" aria-hidden="true">${badge}</span>` : '');
+  b.onclick = () => actions.setBrush(type);
+  return b;
+}
+
+// 右鍵 context menu：z-order + 刪除，作用於目前選取集合。
+const CTX_SYM = { group: '⧉', ungroup: '⊟' }; // 群組/解散沒有 icon → 用符號
+function buildContextMenu(actions) {
+  const menu = drawHtmlEl('div', 'pc-draw-context');
+  menu.id = 'pc-draw-context';
+  [['front', '置頂'], ['forward', '上移一層'], ['backward', '下移一層'], ['back', '置底'],
+    ['group', '群組'], ['ungroup', '解散群組'], ['delete', '刪除']]
+    .forEach(([action, label]) => {
+      const item = drawHtmlEl('button', 'pc-draw-context-item');
+      item.dataset.action = action;
+      item.setAttribute('aria-label', label);
+      const head = CTX_SYM[action] ? `<span style="display:inline-block;width:18px;text-align:center;font-size:15px">${CTX_SYM[action]}</span>` : icon(action, 18);
+      item.innerHTML = head + `<span>${label}</span>`;
+      item.onclick = () => { actions.act(action); actions.closeContext(); };
+      menu.appendChild(item);
+    });
+  return menu;
+}
+
+// 顏色 popover：8 預設色 swatch ＋ <input type=color> 自訂任意 hex。
+function colorMenu(actions) {
+  const wrap = drawHtmlEl('div', 'pc-draw-menu');
+  const trigger = drawHtmlEl('button', 'pc-draw-tool pc-draw-trigger');
+  trigger.dataset.action = 'color-menu';
+  trigger.title = '顏色';
+  trigger.setAttribute('aria-label', '顏色');
+  trigger.appendChild(drawHtmlEl('span', 'pc-draw-cur-color'));
+  trigger.onclick = () => togglePopover(wrap);
+  const pop = drawHtmlEl('div', 'pc-draw-popover');
+  pop.dataset.menu = 'color';
+  DRAW_COLORS.forEach(c => pop.appendChild(swatchButton(c, actions)));
+  pop.appendChild(customSwatch(actions)); // 第 9 顆：自訂調色盤
+  pop.appendChild(eyedropperButton(actions)); // 吸管取樣
+  wrap.appendChild(trigger);
+  wrap.appendChild(pop);
+  return wrap;
+}
+// 吸管：取樣畫面上任意顏色（瀏覽器 EyeDropper API）。不支援時隱藏，不報錯。
+function eyedropperButton(actions) {
+  const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-eyedropper');
+  b.dataset.action = 'eyedropper';
+  b.title = '取樣顏色 (I)'; // tooltip 含快捷鍵；aria-label 維持純名稱（測試/讀屏穩定）
+  b.setAttribute('aria-label', '取樣顏色');
+  b.innerHTML = icon('colorize');
+  b.onclick = () => actions.eyedropper();
+  if (!eyedropperSupported()) { b.disabled = true; b.style.display = 'none'; }
+  return b;
+}
+// 自訂顏色 swatch：彩虹圓 + 「+」，看起來像第 9 顆 swatch；點擊開原生 color picker。
+function customSwatch(actions) {
+  const label = drawHtmlEl('label', 'pc-draw-swatch pc-draw-custom-swatch');
+  label.title = '自訂顏色';
+  label.setAttribute('aria-label', '自訂顏色');
+  const custom = drawHtmlEl('input', 'pc-draw-color-custom');
+  custom.type = 'color';
+  custom.setAttribute('aria-label', '自訂顏色');
+  custom.dataset.action = 'custom-color';
+  custom.addEventListener('input', () => actions.setColor(custom.value));
+  custom.addEventListener('change', () => closeMenuOf(custom)); // 選色完成（picker 關閉）→ 收 popover
+  label.appendChild(custom);
+  return label;
+}
+// 線粗 popover：thin → bold 的遞增粗條。
+function widthMenu(actions) {
+  const wrap = drawHtmlEl('div', 'pc-draw-menu');
+  const trigger = drawHtmlEl('button', 'pc-draw-tool pc-draw-trigger');
+  trigger.dataset.action = 'width-menu';
+  trigger.title = '線粗';
+  trigger.setAttribute('aria-label', '線粗');
+  trigger.innerHTML = icon('lineWeight');
+  trigger.onclick = () => togglePopover(wrap);
+  const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-width');
+  pop.dataset.menu = 'width';
+  DRAW_STROKE_WIDTHS.forEach(w => pop.appendChild(widthButton(w, actions)));
+  wrap.appendChild(trigger);
+  wrap.appendChild(pop);
+  return wrap;
+}
+function togglePopover(wrap) {
+  const bar = wrap.closest('.pc-draw-toolbar');
+  if (bar) bar.querySelectorAll('.pc-draw-menu.open').forEach(m => { if (m !== wrap) m.classList.remove('open'); });
+  wrap.classList.toggle('open');
+}
+// 選完選項即關閉所屬 popover（避免選完粗細/顏色 popover 一直浮現）。
+function closeMenuOf(btn) {
+  const m = btn.closest('.pc-draw-menu');
+  if (m) m.classList.remove('open');
+}
+function swatchButton(color, actions) {
+  const b = drawHtmlEl('button', 'pc-draw-swatch');
+  b.dataset.color = color;
+  b.style.background = color;
+  b.title = color;
+  b.setAttribute('aria-label', color);
+  b.onclick = () => { actions.setColor(color); closeMenuOf(b); };
+  return b;
+}
+function widthButton(w, actions) {
+  const b = drawHtmlEl('button', 'pc-draw-width');
+  b.dataset.width = w;
+  b.title = w + 'px';
+  b.setAttribute('aria-label', w + 'px');
+  const dot = drawHtmlEl('span');
+  dot.style.cssText = `display:block;width:18px;height:${Math.min(w, 10)}px;border-radius:4px;background:${DRAW_UI_COLORS.onDark};`;
+  b.appendChild(dot);
+  b.onclick = () => { actions.setStrokeWidth(w); closeMenuOf(b); };
+  return b;
+}
+// 字體大小 popover：用標本文字大小直觀呈現各選項。
+function fontSizeMenu(actions) {
+  const wrap = drawHtmlEl('div', 'pc-draw-menu');
+  const trigger = drawHtmlEl('button', 'pc-draw-tool pc-draw-trigger');
+  trigger.dataset.action = 'fontsize-menu';
+  trigger.title = '字體大小';
+  trigger.setAttribute('aria-label', '字體大小');
+  trigger.innerHTML = icon('text');
+  trigger.onclick = () => togglePopover(wrap);
+  const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-fontsize');
+  pop.dataset.menu = 'fontsize';
+  DRAW_FONT_SIZES.forEach(sz => pop.appendChild(fontSizeButton(sz, actions)));
+  wrap.appendChild(trigger);
+  wrap.appendChild(pop);
+  return wrap;
+}
+function fontSizeButton(sz, actions) {
+  const b = drawHtmlEl('button', 'pc-draw-fontsize');
+  b.dataset.fontSize = sz;
+  b.title = sz + 'px';
+  b.setAttribute('aria-label', sz + 'px');
+  b.style.cssText = `font-size:${Math.max(sz, 10)}px; padding:1px 6px; line-height:1.3; font-family:system-ui,sans-serif;`;
+  b.textContent = 'A';
+  b.onclick = () => { actions.setFontSize(sz); closeMenuOf(b); };
+  return b;
+}
+
+const HEAD_SYMBOL = { none: '—', end: '→', start: '←', both: '↔' };
+const HEAD_LABEL = { none: '無箭頭', end: '終點箭頭', start: '起點箭頭', both: '雙向箭頭' };
+// 端點箭頭 popover：line/arrow 選無/終點/起點/雙向（雙向＝雙箭頭）。
+function headsMenu(actions) {
+  const wrap = drawHtmlEl('div', 'pc-draw-menu');
+  const trigger = drawHtmlEl('button', 'pc-draw-tool pc-draw-trigger');
+  trigger.dataset.action = 'heads-menu';
+  trigger.title = '端點箭頭（單／雙向）';
+  trigger.setAttribute('aria-label', '端點箭頭');
+  trigger.textContent = '↔';
+  trigger.onclick = () => togglePopover(wrap);
+  const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-heads');
+  pop.dataset.menu = 'heads';
+  DRAW_HEAD_MODES.forEach(m => pop.appendChild(headsButton(m, actions)));
+  wrap.appendChild(trigger);
+  wrap.appendChild(pop);
+  return wrap;
+}
+function headsButton(mode, actions) {
+  const b = drawHtmlEl('button', 'pc-draw-heads');
+  b.dataset.heads = mode;
+  b.title = HEAD_LABEL[mode];
+  b.setAttribute('aria-label', HEAD_LABEL[mode]);
+  b.style.cssText = 'font-size:16px; padding:2px 8px; line-height:1.2;';
+  b.textContent = HEAD_SYMBOL[mode];
+  b.onclick = () => { actions.setHeads(mode); closeMenuOf(b); };
+  return b;
+}
+
+function syncToolbar(bar, state, history) {
+  bar.querySelectorAll('.pc-draw-tool[data-tool]').forEach(b => {
+    b.classList.toggle('active', state.mode === 'draw' && b.dataset.tool === state.tool);
+  });
+  const commentBtn = bar.querySelector('.pc-draw-note');
+  if (commentBtn) commentBtn.classList.toggle('active', state.mode === 'note'); // 註記模式 → 高亮
+  const color = (DEFAULT_DRAW_STYLE.color || '').toLowerCase();
+  const dot = bar.querySelector('.pc-draw-cur-color');
+  if (dot) dot.style.background = DEFAULT_DRAW_STYLE.color;
+  bar.querySelectorAll('.pc-draw-swatch[data-color]').forEach(b => { // 排除無 data-color 的自訂 swatch
+    b.classList.toggle('active', b.dataset.color.toLowerCase() === color);
+  });
+  bar.querySelectorAll('.pc-draw-width').forEach(b => {
+    b.classList.toggle('active', Number(b.dataset.width) === DEFAULT_DRAW_STYLE.strokeWidth);
+  });
+  bar.querySelectorAll('.pc-draw-fontsize').forEach(b => {
+    b.classList.toggle('active', Number(b.dataset.fontSize) === DEFAULT_DRAW_STYLE.fontSize);
+  });
+  bar.querySelectorAll('.pc-draw-brush').forEach(b => {
+    b.classList.toggle('active', state.tool === 'pencil' && b.dataset.brush === state.brushType);
+  });
+  const hasSel = state.selectedIds.length > 0;
+  bar.querySelectorAll('.pc-draw-act').forEach(b => {
+    const a = b.dataset.action;
+    const enabled = a === 'undo' ? (history && history.canUndo()) : a === 'redo' ? (history && history.canRedo()) : hasSel;
+    b.disabled = !enabled;
+    b.classList.toggle('pc-draw-disabled', !enabled);
+  });
+  // 依「目前作用對象」(有選取→選取物件；否則→目前工具) 切換各選項菜單可用性：
+  //   字級僅 text 適用；端點箭頭僅 line/arrow；線粗對純 text 無意義。
+  const selTools = state.selectedIds
+    .map(id => { const o = (state.objects || []).find(x => x.id === id); return o && o.tool; })
+    .filter(Boolean);
+  const targets = selTools.length ? selTools : [state.tool];
+  const anyText = targets.includes('text');
+  const allText = targets.every(t => t === 'text');
+  const anyLineArrow = targets.some(t => t === 'arrow' || t === 'line');
+  setMenuEnabled(bar, 'fontsize-menu', anyText);      // 字級：只有 text
+  setMenuEnabled(bar, 'heads-menu', anyLineArrow);    // 端點箭頭：只有 line/arrow
+  setMenuEnabled(bar, 'width-menu', !allText);        // 線粗：純 text 不適用
+}
+// 切換某個選項菜單 trigger 的可用性；disable 時順手收掉它的 popover。
+function setMenuEnabled(bar, action, enabled) {
+  const t = bar.querySelector(`.pc-draw-trigger[data-action="${action}"]`);
+  if (!t) return;
+  t.disabled = !enabled;
+  t.classList.toggle('pc-draw-disabled', !enabled);
+  if (!enabled) { const m = t.closest('.pc-draw-menu'); if (m) m.classList.remove('open'); }
+}
+
+/**
+ * draw/record-panel — P6 側邊「標注紀錄」面板 DOM 與 AI 方案卡：
+ * 右緣 tab、抽屜、每列 row、reply 卡片工廠。皆吃 callback 參數，不持有 closure 狀態。
+ */
+
+// ── P6 側邊「標注紀錄」面板 DOM（右緣 tab + 抽屜，沿用 spec-overlay 的 tab/drawer 模式）──
+function buildRecordTab(onToggle) {
+  const tab = drawHtmlEl('button', 'pc-draw-rec-tab');
+  tab.id = 'pc-draw-rec-tab';
+  tab.textContent = '標注紀錄 ◂';
+  tab.title = '標注紀錄';
+  tab.setAttribute('aria-label', '標注紀錄');
+  tab.onclick = onToggle;
+  return tab;
+}
+function buildRecordDrawer(onClose) {
+  const drawer = drawHtmlEl('div', 'pc-draw-rec-drawer');
+  drawer.id = 'pc-draw-rec-drawer';
+  const hd = drawHtmlEl('div', 'pc-draw-rec-hd');
+  const title = drawHtmlEl('span', 'pc-draw-rec-hd-title'); title.textContent = '標注紀錄';
+  const count = drawHtmlEl('span', 'pc-draw-rec-count'); count.textContent = '0';
+  // 全選/全不選：控制「送出時納入哪些標注」（onchange 在 initDrawLayer 掛上）
+  const allWrap = drawHtmlEl('label', 'pc-draw-rec-all-wrap');
+  const allBox = drawHtmlEl('input', 'pc-draw-rec-all'); allBox.type = 'checkbox'; allBox.checked = true;
+  allBox.setAttribute('aria-label', '全選／全不選送出');
+  const allLbl = drawHtmlEl('span'); allLbl.textContent = '全選';
+  allWrap.appendChild(allBox); allWrap.appendChild(allLbl);
+  const close = drawHtmlEl('button', 'pc-draw-rec-close'); close.textContent = '✕';
+  close.title = '關閉'; close.setAttribute('aria-label', '關閉標注紀錄'); close.onclick = onClose;
+  hd.appendChild(title); hd.appendChild(count); hd.appendChild(allWrap); hd.appendChild(close);
+  drawer.appendChild(hd);
+  drawer.appendChild(drawHtmlEl('div', 'pc-draw-rec-list'));
+  // footer：主要送出按鈕（onclick 在 initDrawLayer 掛上）
+  const footer = drawHtmlEl('div', 'pc-draw-rec-footer');
+  const sendBtn = drawHtmlEl('button', 'pc-draw-rec-send-btn');
+  sendBtn.textContent = '送給 AI（0）';
+  sendBtn.disabled = true;
+  footer.appendChild(sendBtn);
+  drawer.appendChild(footer);
+  return drawer;
+}
+// 一筆標注 → 面板 row（工具圖示 + 色票 + 文字 + selector）。點擊 → onClick(id)。
+function recordRowEl(row, selected, onClick, checked, onToggle, onRemove) {
+  const el = drawHtmlEl('div', 'pc-draw-rec-row' + (selected ? ' selected' : '') + (row.grouped ? ' is-grouped' : ''));
+  el.dataset.id = row.id;
+  el.setAttribute('role', 'button'); el.setAttribute('tabindex', '0');
+  el.setAttribute('aria-label', row.text + (row.grouped ? '（群組成員，勾選會連動整組）' : ''));
+  // 送出勾選框：是否納入送出（獨立於畫布選取；stopPropagation 不觸發整列點選）。
+  const cb = drawHtmlEl('input', 'pc-draw-rec-check'); cb.type = 'checkbox'; cb.checked = checked !== false;
+  cb.setAttribute('aria-label', row.grouped ? '送出時包含此標注（群組連動）' : '送出時包含此標注');
+  if (row.grouped) cb.title = '此列屬於群組，勾選/取消會連動整組';
+  cb.onclick = e => e.stopPropagation();
+  cb.onchange = e => { e.stopPropagation(); if (onToggle) onToggle(row.id, cb.checked); };
+  el.appendChild(cb);
+  const ic = drawHtmlEl('span', 'pc-draw-rec-icon');
+  ic.innerHTML = icon(row.icon, 18);
+  el.appendChild(ic);
+  if (row.color) {
+    const sw = drawHtmlEl('span', 'pc-draw-rec-swatch');
+    sw.style.background = row.color;
+    el.appendChild(sw);
+  }
+  if (row.grouped) { // 群組連動提示：勾這列＝整組一起勾/取消
+    const grp = drawHtmlEl('span', 'pc-draw-rec-group'); grp.textContent = '🔗';
+    grp.title = '群組成員（勾選連動整組）'; grp.setAttribute('aria-hidden', 'true');
+    el.appendChild(grp);
+  }
+  const body = drawHtmlEl('div', 'pc-draw-rec-body');
+  const txt = drawHtmlEl('div', 'pc-draw-rec-text'); txt.textContent = row.text;
+  body.appendChild(txt);
+  if (row.selector) {
+    const sel = drawHtmlEl('div', 'pc-draw-rec-sel');
+    sel.textContent = row.selector; sel.title = row.selector;
+    body.appendChild(sel);
+  }
+  el.appendChild(body);
+  // 已送/未送 標記：送出後沒再改＝已送（綠勾）；新建或改過＝未送（琥珀）。
+  const badge = drawHtmlEl('span', 'pc-draw-rec-status ' + (row.sent ? 'is-sent' : 'is-unsent'));
+  badge.textContent = row.sent ? '✓ 已送' : '● 未送';
+  el.appendChild(badge);
+  if (onRemove) { // 從佇列移除（目前用於「決定」列）
+    const rm = drawHtmlEl('button', 'pc-draw-rec-remove'); rm.textContent = '✕';
+    rm.title = '從佇列移除'; rm.setAttribute('aria-label', '從佇列移除');
+    rm.onclick = e => { e.stopPropagation(); onRemove(row.id); };
+    el.appendChild(rm);
+  }
+  el.onclick = () => onClick(row.id);
+  return el;
+}
+
+// AI 方案卡（錨定貼在標注旁）：標題 + 文字 + 可點選項按鈕；已選則顯示「✓ 已選」。
+// onChoose(reply, option) 在點選項時呼叫。純函式（位置由呼叫端設 style）。
+function replyCardEl(reply, onChoose, onClose, onRechoose) {
+  const card = drawHtmlEl('div', 'pc-draw-reply-card');
+  card.dataset.n = reply.n;
+  const head = drawHtmlEl('div', 'pc-draw-reply-head'); head.textContent = '💬 AI 方案';
+  const close = drawHtmlEl('button', 'pc-draw-reply-close'); close.textContent = '✕';
+  close.title = '關閉這張方案卡'; close.setAttribute('aria-label', '關閉方案卡');
+  close.onclick = () => onClose && onClose(reply);
+  head.appendChild(close);
+  card.appendChild(head);
+  if (reply.text) { const t = drawHtmlEl('div', 'pc-draw-reply-text'); t.textContent = reply.text; card.appendChild(t); }
+  const opts = Array.isArray(reply.options) ? reply.options : [];
+  // 有 html(真實 UI)/desc(說明)/preview(文字示意) → 圖文卡片式；否則純按鈕。
+  const rich = opts.some(o => o.html || o.desc || o.preview);
+  if (reply.chosen) {
+    const c = drawHtmlEl('div', 'pc-draw-reply-chosen');
+    c.textContent = '✓ 已選：' + (reply.chosen.label || reply.chosen.id);
+    card.appendChild(c);
+    const re = drawHtmlEl('button', 'pc-draw-reply-rechoose'); // 取消已選 → 回選項列重挑
+    re.textContent = '改選'; re.title = '取消這個選擇，重新挑一個方案';
+    re.onclick = () => onRechoose && onRechoose(reply);
+    card.appendChild(re);
+  } else if (opts.length) {
+    const row = drawHtmlEl('div', 'pc-draw-reply-opts' + (rich ? ' is-rich' : ''));
+    opts.forEach(o => {
+      const b = drawHtmlEl('div', 'pc-draw-reply-opt');
+      if (!rich) { // 純按鈕：整塊可點（向後相容）
+        b.setAttribute('role', 'button'); b.setAttribute('tabindex', '0');
+        b.textContent = o.label || o.id;
+        b.onclick = () => onChoose && onChoose(reply, o);
+        row.appendChild(b);
+        return;
+      }
+      const lbl = drawHtmlEl('div', 'pc-draw-reply-opt-label'); lbl.textContent = o.label || o.id; b.appendChild(lbl);
+      if (o.desc) { const d = drawHtmlEl('div', 'pc-draw-reply-opt-desc'); d.textContent = o.desc; b.appendChild(d); }
+      // html＝真實 UI 畫面：用頁面全域 styles 渲染，長得跟真的一樣（本地單人信任來源，故 innerHTML）。
+      // 設 pointer-events:none（CSS）→ 戳 mockup 不會誤觸；用下面「選這個方案」鈕才送出。
+      if (o.html) { const m = drawHtmlEl('div', 'pc-draw-reply-mock'); m.innerHTML = o.html; b.appendChild(m); }
+      else if (o.preview) { const p = drawHtmlEl('pre', 'pc-draw-reply-preview'); p.textContent = o.preview; b.appendChild(p); }
+      const choose = drawHtmlEl('button', 'pc-draw-reply-choose'); choose.textContent = '選這個方案';
+      choose.onclick = () => onChoose && onChoose(reply, o); b.appendChild(choose);
+      row.appendChild(b);
+    });
+    card.appendChild(row);
+  }
+  return card;
+}
+
+/**
+ * draw/init-draw-layer — 繪圖層的組裝與生命週期核心：initDrawLayer 建立 SVG/工具列/面板、
+ * 綁定事件、管理 mode 狀態機與 undo/團隊同步，並把 draw/* 各模組（幾何/模型/渲染/工具列/面板）
+ * 接線在一起。resolveTarget / resolveDrawStore 為其私有 wiring。public API 與 DOM 結構、class 名、
+ * z-index、事件行為皆與拆分前一致；由 draw-layer.js 對外 re-export initDrawLayer。
+ */
+
 function resolveTarget(target) {
   if (!target) return document.body;
   if (typeof target === 'string') return document.querySelector(target) || document.body;
@@ -2245,6 +2939,7 @@ function initDrawLayer(target, opts = {}) {
     exportEndpoint: opts.exportEndpoint || null, // 「送給 AI」POST 目標（無則只回 payload）
     recordOpen: false, // P6 側邊標注紀錄抽屜開關（預設關 → 不打擾一般使用）
     sentSigs: {},      // {objId: 上次成功送出時的內容簽章} → 面板每列顯示「已送/未送」
+    sentConfirmN: 0,   // 上次成功送出的筆數。outbox 下已送項會離開清單，靠此讓 footer 維持「✅ 已送出（N 筆）」確認，不退回「送給 AI（0）」假失敗態
     sendUnchecked: {}, // {objId: true} → 該列「不納入送出」（預設全勾；新物件預設納入）
     replies: [],       // AI 貼回頁面的方案卡（{n, anchor, text, options, chosen?}）
     replyCursor: 0,    // reply-poll 游標
@@ -2524,6 +3219,7 @@ function initDrawLayer(target, opts = {}) {
     };
     row.append(cancel, send); body.append(ta, row);
     ta.addEventListener('keydown', ev => {
+      if (ev.isComposing || ev.keyCode === 229) return; // 注音/IME 組字中的 Enter（含 Safari/舊 WebKit keyCode 229）→ 放行給輸入法選字，不觸發送出/存檔
       if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); submit(true); }      // ⌘/Ctrl+Enter → 送 AI
       else if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); submit(false); }              // Enter → 存標注紀錄
       else if (ev.key === 'Escape') { ev.preventDefault(); if (c.id) { const cur = body.closest('.pc-note-card'); if (cur) cur.remove(); openNoteCard(c); } else closeNoteCard(); }
@@ -2564,6 +3260,10 @@ function initDrawLayer(target, opts = {}) {
     if (e.target.closest && e.target.closest('.pc-note-mark, .pc-note-card')) return; // 點在標記/卡 → 各自 handler 處理
     const tg = pickTarget(e.clientX, e.clientY);
     if (!tg) return;
+    // 點到「已有註記的目標」（同 sel / 同自繪 objId）→ 開該註記聚焦編輯，不再誤建新。
+    //（note mark 外框 pointer-events:none，點擊會穿到底層元件；沒有這個 guard 就會在既有註記上重複建新。）
+    const existing = state.notes.find(nt => (tg.sel && nt.sel === tg.sel) || (tg.objId != null && nt.objId === tg.objId));
+    if (existing) { openNoteCard(existing); return; }
     const rel = relWithin(tg);
     openNoteCard({ sel: tg.sel, objId: tg.objId, relX: rel.relX, relY: rel.relY, x: tg.pt.x, y: tg.pt.y, label: tg.label });
   });
@@ -2596,8 +3296,9 @@ function initDrawLayer(target, opts = {}) {
   const drawerSendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
   if (drawerSendBtn) drawerSendBtn.onclick = () => handleDrawerSend();
   // 標注紀錄「送出時納入哪些」勾選集合：unchecked 內的不送（預設全送）。
-  const checkedObjects = () => state.objects.filter(o => !state.sendUnchecked[o.id]);
-  const checkedDecisions = () => state.decisions.filter(d => !state.sendUnchecked[d.id]);
+  // outbox：送出對象＝勾選且「尚未送過（或送後又改過）」；已送未改的不再重複送。
+  const checkedObjects = () => state.objects.filter(o => !state.sendUnchecked[o.id] && !isSent(o));
+  const checkedDecisions = () => state.decisions.filter(d => !state.sendUnchecked[d.id] && state.sentSigs[d.id] !== decisionSig(d));
   const onToggleSendChecked = (id, checked) => {
     // 有 groupId → 整組一起勾/取消；否則只動自己（decision 無 groupId 也走單一）。
     const o = state.objects.find(x => x.id === id);
@@ -2633,15 +3334,14 @@ function initDrawLayer(target, opts = {}) {
       selector: n.sel || null, color: DRAW_UI_COLORS.selection,
       sent: state.sentSigs[n.id] === noteSig(n), isNote: true,
     }));
-    const rows = annRows.concat(decRows).concat(noteRows);
+    // outbox：已送給 AI（且未再改）的項目不再留在清單（畫布上的 note/標注仍在，也不會被重複送）。
+    const rows = annRows.concat(decRows).concat(noteRows).filter(r => !r.sent);
     // 群組視覺提示：標記屬於 ≥2 成員群組的列（勾選會整組連動，讓使用者預期得到）。
     const groupCount = {};
     rows.forEach(r => { if (r.groupId) groupCount[r.groupId] = (groupCount[r.groupId] || 0) + 1; });
     rows.forEach(r => { r.grouped = !!(r.groupId && groupCount[r.groupId] > 1); });
     const checkedRows = rows.filter(r => !state.sendUnchecked[r.id]); // 納入送出的列
     const checkedCount = checkedRows.length;
-    // 勾選的裡面有沒有「還沒送、或送出後又改過」的 → 有才需要送（決定按鈕亮/暗）
-    const hasUnsent = checkedRows.some(r => !r.sent);
     const count = recordDrawer.querySelector('.pc-draw-rec-count');
     if (count) count.textContent = String(rows.length);
     // 全選框：全勾→checked、部分→indeterminate、空清單→disabled
@@ -2651,18 +3351,22 @@ function initDrawLayer(target, opts = {}) {
       allBox.indeterminate = checkedCount > 0 && checkedCount < rows.length;
       allBox.disabled = rows.length === 0;
     }
-    // footer 送出鈕：畫布清空時強制重設（否則 in-flight 中若 clear 仍殘留舊狀態）
+    // footer 送出鈕狀態機（outbox：已送項已離開清單，故 checkedCount>0 必為未送 → 可直接送）：
+    //   有可送項 → 「送給 AI（N）」可送；剛送完、沒有新可送項 → 持久「✅ 已送出（N 筆）」確認
+    //   （不退回「送給 AI（0）」假失敗態）；從沒送過也沒東西 → 「送給 AI（0）」。
     const sendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
     if (sendBtn) {
-      if (!rows.length) delete sendBtn.dataset.inflight; // clear → 強制重設
+      // 只有「真正清空」（清單空且沒有待確認的已送批次）才強制重設 in-flight；
+      // 送出後 outbox 清空清單時保留 in-flight → 「✅ 已送達／📥 已排佇列」即時回饋不被蓋掉。
+      if (!rows.length && !state.sentConfirmN) delete sendBtn.dataset.inflight;
       if (!sendBtn.dataset.inflight) {
         sendBtn.classList.remove('pc-draw-rec-queued');
-        if (checkedCount === 0) {            // 沒勾任何標注 → 不能送
-          sendBtn.textContent = '送給 AI（0）'; sendBtn.disabled = true;
-        } else if (!hasUnsent) {             // 勾選的都送過且沒再改 → 維持「已送出」disabled（明確看出送過了）
-          sendBtn.textContent = `✅ 已送出（${checkedCount} 筆）`; sendBtn.disabled = true;
-        } else {                             // 有新的/改過的 → 可送
+        if (checkedCount > 0) {
           sendBtn.textContent = `送給 AI（${checkedCount}）`; sendBtn.disabled = false;
+        } else if (state.sentConfirmN > 0) {
+          sendBtn.textContent = `✅ 已送出（${state.sentConfirmN} 筆）`; sendBtn.disabled = true;
+        } else {
+          sendBtn.textContent = '送給 AI（0）'; sendBtn.disabled = true;
         }
       }
     }
@@ -3054,7 +3758,9 @@ function initDrawLayer(target, opts = {}) {
           sel: doc.sel || null, objId: doc.objId != null ? doc.objId : null,
           relX: doc.relX, relY: doc.relY, x: doc.x, y: doc.y, label: doc.label || '' });
         changed = true;
-      } else {
+      } else if (doc.geom) {
+        // 只吸收真正的向量繪圖 doc。live-markup 的 /api/draw 與 decide.js 決策按鈕共用同一 collection，
+        // 會混入無 geom 的 doc（如 tool:'choice'）；這些非繪圖 doc 一律略過，否則會被 pickTarget/geomBBox 讀 g.x 而 crash。
         if (doc.tool === 'image' || localObjIds.has(doc.id)) return;
         state.objects.push(rehydrateDrawing(doc));
         changed = true;
@@ -3435,7 +4141,7 @@ function initDrawLayer(target, opts = {}) {
     const p = buildExport(checkedObjects(), { w: svg.clientWidth || host.clientWidth, h: svg.clientHeight || host.clientHeight });
     const decs = checkedDecisions();
     if (decs.length) p.decisions = decs.map(d => ({ replyId: d.replyId, optionId: d.optionId, optionLabel: d.optionLabel }));
-    const checkedNotes = state.notes.filter(n => !state.sendUnchecked[n.id]);
+    const checkedNotes = state.notes.filter(n => !state.sendUnchecked[n.id] && state.sentSigs[n.id] !== noteSig(n)); // outbox：已送未改的不重複送
     if (checkedNotes.length) p.notes = checkedNotes.map(n => ({
       id: n.id, text: n.text, label: n.label || '',
       selector: n.sel || null, objId: n.objId != null ? n.objId : null,
@@ -3581,6 +4287,7 @@ function initDrawLayer(target, opts = {}) {
       checkedObjects().forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
       checkedDecisions().forEach(d => { state.sentSigs[d.id] = decisionSig(d); });
       state.notes.filter(n => !state.sendUnchecked[n.id]).forEach(n => { state.sentSigs[n.id] = noteSig(n); });
+      state.sentConfirmN = n; // outbox 清空清單後，footer 靠此維持「✅ 已送出（N 筆）」確認
       render(); // 立刻更新：畫布隱藏已送標注 + 各列「已送」標記（inflight 仍在 → 不蓋按鈕狀態文字）
       // 2 秒後恢復成可再送（同一批可重送；server 不去重、AI 端 cursor 會收到）。
       setTimeout(() => { delete sendBtn.dataset.inflight; renderRecordPanel(); }, 2000);
@@ -3608,7 +4315,7 @@ function initDrawLayer(target, opts = {}) {
       if (!text) return;
       runCommand({ type: 'create', obj: makeDrawObject({ tool: 'text', geom: { x: point.x, y: point.y }, text, style: opts.style }) });
     };
-    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('keydown', ev => { if (ev.isComposing || ev.keyCode === 229) return; if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
     input.addEventListener('blur', commit);
   }
 
@@ -3640,7 +4347,7 @@ function initDrawLayer(target, opts = {}) {
       o.anchor = selector; // buildExport→selector、annotationRows→selector、隨元件移位重解析外框
       runCommand({ type: 'create', obj: o });
     };
-    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('keydown', ev => { if (ev.isComposing || ev.keyCode === 229) return; if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
     input.addEventListener('blur', commit);
   }
   // 指元件 hover：游標下若有可標注 app 元件 → 顯示虛線外框（重用 snapHighlight 渲染）。
@@ -3693,7 +4400,7 @@ function initDrawLayer(target, opts = {}) {
       o.label = text;                              // 立即套用（預覽）
       pushHistory({ type: 'update', id: o.id, before, after: { label: text } });
     };
-    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('keydown', ev => { if (ev.isComposing || ev.keyCode === 229) return; if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
     input.addEventListener('blur', commit);
   }
   // 雙擊文字物件 → 編輯其內容（o.text）；清空則刪除該物件。
@@ -3726,7 +4433,7 @@ function initDrawLayer(target, opts = {}) {
       pushHistory({ type: 'update', id: o.id, before, after: { text } });
       render();
     };
-    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
+    input.addEventListener('keydown', ev => { if (ev.isComposing || ev.keyCode === 229) return; if (ev.key === 'Enter') { ev.preventDefault(); commit(); } });
     input.addEventListener('blur', commit);
   }
 
@@ -3925,7 +4632,7 @@ function initDrawLayer(target, opts = {}) {
     deleteNote,
     getDecisions: () => state.decisions.slice(), // 方案卡選擇進的佇列
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
-    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; render(); persistLocalSave(); },
+    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sentConfirmN = 0; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; render(); persistLocalSave(); },
     destroy: () => {
       stopLive(); // Batch 4：拆掉 live reposition 監聽/rAF/ResizeObserver
       replyPolling = false; // 停掉 AI 方案卡輪詢
@@ -3956,668 +4663,35 @@ function resolveDrawStore(persist) {
   return null;
 }
 
-// 把 % box 換成 px box（選取框 / marquee 繪製）。
-function toPxBox(b, rect) {
-  return { x: pctToPx(b.x, rect.width), y: pctToPx(b.y, rect.height), w: pctToPx(b.w, rect.width), h: pctToPx(b.h, rect.height) };
-}
+/**
+ * draw-layer — Figma/Excalidraw 風格的視覺標注繪圖層（plan §4.1–§4.3）。
+ *
+ * 在既有 `#pc-overlay` 之上加一個 `#pc-draw` SVG 層，提供：
+ *   - 模式狀態機 mode ∈ { comment, draw, off }；draw 時 SVG `pointer-events:auto`
+ *     吃事件擋掉 app 點擊，comment/off 則 `pointer-events:none` 放行（不跟 app 打架）。
+ *   - 浮動工具列：select / ellipse / arrow / pencil / text / rect / line
+ *     ＋ 顏色筆粗 picker ＋ z-order / 刪除 / undo-redo。
+ *   - 七種工具繪製、選取/移動/縮放、z-order、刪除、undo-redo。
+ *
+ * 座標一律存 viewport-% （沿用 pc.js 既有 % 慣例 → RWD 友善）；render 時才換算成 px。
+ * 幾何換算、bbox、平移/縮放重映射、z-order 重排、undo command apply/invert 全抽成純函式
+ *（下方 export），可單測。
+ *
+ * Usage:
+ *   import { initDrawLayer } from '.../src/draw-layer.js';
+ *   const draw = initDrawLayer('#root');   // 或傳 element；預設 document.body
+ *   draw.setMode('draw'); draw.setTool('select');
+ *
+ * P2 之後（不在本階段）：貼圖、selector 擷取(anchor)、PNG/JSON 匯出。
+ *
+ * P7 團隊持久（選用）：傳 opts.persist（{fb,db,projectId} 或 ready store）→ 把向量物件
+ * 同步到 Firestore `drawings` 子集合；不傳則 0 Firebase（dev 模式行為完全不變）。
+ */
 
-function findById(objects, id) { return objects.find(o => o.id === id); }
+// initDrawLayer 的實作已移至 draw/init-draw-layer.js；此檔為 CDN 入口的聚合層（barrel）：
+// 對外 re-export initDrawLayer 與各純函式模組的 public 匯出面（consumer / 單元測試依賴此表面不變）。
 
-// ── 幾何（依工具，% 座標）──────────────────────────────────────────────────
-function initialGeom(tool, p) {
-  if (tool === 'ellipse' || tool === 'rect' || tool === 'diamond') return { x: p.x, y: p.y, w: 0, h: 0 };
-  if (tool === 'arrow' || tool === 'line') return { from: { ...p }, to: { ...p } };
-  if (tool === 'pencil') return { points: [[p.x, p.y]] };
-  return { x: p.x, y: p.y };
-}
-function updateGeom(drag, p) {
-  if (drag.tool === 'pencil') { drag.points.push([p.x, p.y]); return { points: drag.points.slice() }; }
-  return geomFromDrag(drag.tool, drag.start, p);
-}
-// 判斷物件是否「真的畫了」（避免單點 click 留下空物件）。
-function isDrawn(o) {
-  if (o.tool === 'ellipse' || o.tool === 'rect' || o.tool === 'diamond' || o.tool === 'image') return o.geom.w > 0.2 || o.geom.h > 0.2;
-  if (o.tool === 'arrow' || o.tool === 'line') { const g = o.geom; return Math.abs(g.to.x - g.from.x) > 0.2 || Math.abs(g.to.y - g.from.y) > 0.2; }
-  if (o.tool === 'pencil') return (o.geom.points || []).length > 1;
-  return true; // text 由 input commit 控制
-}
-
-// ── render 一個 DrawObject → SVG 節點（% → px）──────────────────────────────
-function renderObject(o, rect, svg) {
-  const s = o.style || DEFAULT_DRAW_STYLE;
-  const stroke = { stroke: s.color, 'stroke-width': s.strokeWidth, fill: s.fill || 'none' };
-  if (o.tool === 'comment') {
-    // 指元件：被標注元件的虛線外框 + 左上角 💬+序號 角標。geom 已由 viewObject 重解析成元件 rect。
-    const g = o.geom || { x: 0, y: 0, w: 0, h: 0 };
-    const x = pctToPx(g.x, rect.width), y = pctToPx(g.y, rect.height);
-    const w = pctToPx(g.w || 0, rect.width), h = pctToPx(g.h || 0, rect.height);
-    const grp = drawSvgEl('g', { class: 'pc-draw-comment' });
-    grp.appendChild(drawSvgEl('rect', {
-      x, y, width: w, height: h, fill: 'none',
-      stroke: s.color, 'stroke-width': s.strokeWidth, 'stroke-dasharray': '5 4', rx: 4,
-    }));
-    const badgeY = y >= 10 ? y - 5 : y + 13; // [fix4] 元件貼頂時 badge 畫在框內，防 y<0 裁切
-    const badge = drawSvgEl('text', { x: x + 3, y: badgeY, fill: s.color, 'font-size': 13, 'font-weight': 700 });
-    badge.textContent = '💬' + (o.seq || '');
-    grp.appendChild(badge);
-    return grp;
-  }
-  if (o.tool === 'ellipse') {
-    const g = o.geom;
-    return drawSvgEl('ellipse', {
-      cx: pctToPx(g.x + g.w / 2, rect.width), cy: pctToPx(g.y + g.h / 2, rect.height),
-      rx: pctToPx(g.w / 2, rect.width), ry: pctToPx(g.h / 2, rect.height), ...stroke,
-    });
-  }
-  if (o.tool === 'rect') {
-    const g = o.geom;
-    return drawSvgEl('rect', {
-      x: pctToPx(g.x, rect.width), y: pctToPx(g.y, rect.height),
-      width: pctToPx(g.w, rect.width), height: pctToPx(g.h, rect.height), ...stroke,
-    });
-  }
-  if (o.tool === 'image') {
-    const g = o.geom;
-    const img = drawSvgEl('image', {
-      x: pctToPx(g.x, rect.width), y: pctToPx(g.y, rect.height),
-      width: pctToPx(g.w, rect.width), height: pctToPx(g.h, rect.height),
-      preserveAspectRatio: 'xMidYMid meet',
-    });
-    img.setAttribute('href', o.imageRef || '');
-    img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', o.imageRef || ''); // 舊瀏覽器相容
-    return img;
-  }
-  if (o.tool === 'diamond') {
-    const g = o.geom;
-    const box = { x: pctToPx(g.x, rect.width), y: pctToPx(g.y, rect.height), w: pctToPx(g.w, rect.width), h: pctToPx(g.h, rect.height) };
-    const pts = diamondPoints(box).map(([x, y]) => `${x},${y}`).join(' ');
-    return drawSvgEl('polygon', { points: pts, ...stroke });
-  }
-  if (o.tool === 'arrow' || o.tool === 'line') {
-    const g = o.geom;
-    const attrs = {
-      x1: pctToPx(g.from.x, rect.width), y1: pctToPx(g.from.y, rect.height),
-      x2: pctToPx(g.to.x, rect.width), y2: pctToPx(g.to.y, rect.height),
-      stroke: s.color, 'stroke-width': s.strokeWidth, fill: 'none',
-    };
-    const h = arrowHeads(o); // 端點箭頭：none/end/start/both（marker 用 auto-start-reverse 自動翻向）
-    if (h.start || h.end) {
-      const mid = ensureArrowMarker(svg, s.color);
-      if (h.end) attrs['marker-end'] = `url(#${mid})`;
-      if (h.start) attrs['marker-start'] = `url(#${mid})`;
-    }
-    return drawSvgEl('line', attrs);
-  }
-  if (o.tool === 'pencil') {
-    const ptsPx = (o.geom.points || []).map(([x, y]) => [pctToPx(x, rect.width), pctToPx(y, rect.height)]);
-    const brush = o.style.brushType || 'pen';
-    const cfg = brushStyle(brush);
-    const base = (s.strokeWidth || 2) * cfg.widthMul;
-    if (!cfg.fill) { // highlighter：等寬描邊、半透明、flat cap、multiply
-      return drawSvgEl('path', {
-        d: freehandPath(ptsPx), stroke: s.color, 'stroke-width': base, fill: 'none',
-        'stroke-linecap': 'butt', 'stroke-linejoin': 'round', opacity: cfg.opacity,
-        style: 'mix-blend-mode:' + cfg.blend, 'data-brush': brush,
-      });
-    }
-    // pen / marker：頭尾漸細的填充外框（fill=色、無 stroke）
-    return drawSvgEl('path', {
-      d: taperedOutline(ptsPx, base, { taperFrac: cfg.taperFrac, minScale: cfg.minScale }),
-      fill: s.color, stroke: 'none', opacity: cfg.opacity, 'stroke-linejoin': 'round', 'data-brush': brush,
-    });
-  }
-  const t = drawSvgEl('text', { x: pctToPx(o.geom.x, rect.width), y: pctToPx(o.geom.y, rect.height), fill: s.color, 'font-size': s.fontSize || DEFAULT_DRAW_STYLE.fontSize, 'font-family': 'system-ui, sans-serif' });
-  t.textContent = o.text || '';
-  return t;
-}
-
-const LABEL_FONT_SIZE = 14;
-const LABEL_BG_PAD = 5; // 白底每邊外擴 px
-// 綁定標籤 → <g>（含 <text>；line/arrow 另加白底 <rect> 把線蓋掉）。無 label 回 null。
-// 白底先用估算尺寸（fallback），append 後由 sizeLabelBg() 量實際 text bbox 收緊到完全覆蓋。
-function renderLabel(o, rect) {
-  if (o.label == null || o.label === '') return null;
-  const a = labelAnchor(o);
-  const x = pctToPx(a.x, rect.width), y = pctToPx(a.y, rect.height);
-  const isLine = o.tool === 'arrow' || o.tool === 'line';
-  const labelFs = (o.style && o.style.fontSize) || LABEL_FONT_SIZE; // 跟隨物件字體大小
-  const g = drawSvgEl('g', { class: 'pc-draw-label', 'data-label-for': o.id, 'pointer-events': 'none' });
-  if (isLine) { // 白底蓋住線；rect 在前(底層)、text 在後(上層)
-    const w = o.label.length * labelFs + LABEL_BG_PAD * 2; // 估寬偏大（CJK ~1em/字）→ fallback 也蓋住
-    const h = labelFs + LABEL_BG_PAD * 2;
-    g.appendChild(drawSvgEl('rect', { x: x - w / 2, y: y - h / 2, width: w, height: h, fill: DRAW_UI_COLORS.labelBg, rx: 3 }));
-  }
-  const t = drawSvgEl('text', {
-    x, y, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
-    fill: DRAW_UI_COLORS.labelInk, 'font-size': labelFs, 'font-family': 'system-ui, sans-serif',
-  });
-  t.textContent = o.label;
-  g.appendChild(t);
-  return g;
-}
-
-// 量實際 text bbox，把白底 rect 收到「text bbox + padding」完全覆蓋（需 text 已在 DOM）。
-function sizeLabelBg(g) {
-  const bg = g.querySelector('rect');
-  const text = g.querySelector('text');
-  if (!bg || !text) return; // shape 標籤無 bg → 略過
-  let bb;
-  try { bb = text.getBBox(); } catch (_) { bb = null; }
-  if (!bb || !bb.width) return; // 量不到 → 保留估算 fallback
-  bg.setAttribute('x', bb.x - LABEL_BG_PAD);
-  bg.setAttribute('y', bb.y - LABEL_BG_PAD);
-  bg.setAttribute('width', bb.width + LABEL_BG_PAD * 2);
-  bg.setAttribute('height', bb.height + LABEL_BG_PAD * 2);
-}
-
-// <defs> 容器（marker 依顏色按需建立，見 ensureArrowMarker）。render 保留首子節點＝此 defs。
-function buildArrowhead(svg) {
-  svg.appendChild(drawSvgEl('defs'));
-}
-
-// 顏色 → 穩定的 marker id（只保留英數，確保是合法 id；保留 "arrowhead" 關鍵字）。
-function arrowMarkerId(color) {
-  return 'pc-draw-arrowhead-' + String(color).replace(/[^a-z0-9]/gi, '');
-}
-
-// 確保該顏色的箭頭 marker 存在於 <defs>（path fill＝該色 → 箭頭跟著 stroke 變色）。回傳 id。
-function ensureArrowMarker(svg, color) {
-  const id = arrowMarkerId(color);
-  let defs = svg.querySelector('defs');
-  if (!defs) { defs = drawSvgEl('defs'); svg.insertBefore(defs, svg.firstChild); }
-  if (!defs.querySelector('#' + id)) {
-    const marker = drawSvgEl('marker', { id, viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' });
-    marker.appendChild(drawSvgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill: color }));
-    defs.appendChild(marker);
-  }
-  return id;
-}
-
-// ── 工具列 UI（Material 圖示 + 顏色/線粗 popover）────────────────────────────
-// 工具列上的工具排序（Excalidraw 數字順序）；pencil 槽位用 3 個筆刷取代（無獨立鉛筆鈕）。
-const TOOLBAR_TOOL_ORDER = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'pencil', 'text'];
-function buildToolbar(state, actions, opts = {}) {
-  const bar = drawHtmlEl('div', 'pc-draw-toolbar');
-  bar.id = 'pc-draw-toolbar';
-  // 1 select · 2 rect · 3 diamond · 4 ellipse · 5 arrow · 6 line · 7 [pen marker highlighter] · 8 text
-  TOOLBAR_TOOL_ORDER.forEach(tool => {
-    if (tool === 'pencil') DRAW_BRUSHES.forEach(t => bar.appendChild(brushButton(t, actions))); // 7：筆刷群＝自由筆
-    else bar.appendChild(toolButton(tool, actions));
-  });
-  appendSep(bar);
-  bar.appendChild(noteButton(actions)); // 註記模式切換（畫圖層放行 → 底下 pc.js 釘選留言接手）
-  appendSep(bar);
-  bar.appendChild(colorMenu(actions));
-  bar.appendChild(widthMenu(actions));
-  bar.appendChild(fontSizeMenu(actions));
-  bar.appendChild(headsMenu(actions));
-  appendSep(bar);
-  bar.appendChild(actButton('delete', actions)); // 刪除（z-order 已移到右鍵選單）
-  appendSep(bar);
-  ['undo', 'redo'].forEach(a => bar.appendChild(actButton(a, actions)));
-  appendSep(bar);
-  const send = drawHtmlEl('button', 'pc-draw-tool pc-draw-send');
-  send.dataset.action = 'send';
-  send.title = '標注紀錄／送給 AI';
-  send.setAttribute('aria-label', '標注紀錄／送給 AI');
-  send.innerHTML = icon('send');
-  send.onclick = () => actions.openRecord();
-  bar.appendChild(send);
-  appendSep(bar);
-  const help = drawHtmlEl('button', 'pc-draw-tool pc-draw-help-btn');
-  help.dataset.action = 'help';
-  help.title = '快捷鍵與使用說明';
-  help.setAttribute('aria-label', '快捷鍵與使用說明');
-  help.innerHTML = icon('help');
-  help.onclick = () => openDrawHelp(opts);
-  bar.appendChild(help);
-  appendSep(bar);
-  const off = drawHtmlEl('button', 'pc-draw-tool');
-  off.dataset.tool = 'off';
-  off.title = '收合工具列（放行 app 點擊）';
-  off.setAttribute('aria-label', '收合工具列');
-  off.innerHTML = icon('close');
-  off.onclick = () => actions.collapse();
-  bar.appendChild(off);
-  return bar;
-}
-function appendSep(bar) { bar.appendChild(drawHtmlEl('div', 'pc-draw-sep')); }
-
-// 預設教學手冊（可由 initDrawLayer 的 opts.helpUrl 覆寫）。
-const DRAW_HELP_URL = 'https://github.com/mpragnarok/prototype-comments#readme';
-// 工具列「?」說明 modal：列出每個工具的字母快捷鍵 + 其他操作 + 標注紀錄用法 + 手冊連結。
-function openDrawHelp(opts = {}) {
-  if (document.getElementById('pc-draw-help-modal')) return;
-  const url = opts.helpUrl || DRAW_HELP_URL;
-  const toolRows = [...TOOLBAR_TOOL_ORDER, 'eyedropper', 'comment']
-    .map(t => {
-      const name = t === 'eyedropper' ? '取色（吸管）' : t === 'comment' ? '註記模式' : (TOOL_LABELS_ZH[t] || t);
-      const key = t === 'eyedropper' ? 'I' : t === 'comment' ? 'C' : shortcutBadge(t);
-      return `<div class="pc-draw-help-row"><span>${name}</span><kbd>${key}</kbd></div>`;
-    }).join('');
-  const modal = drawHtmlEl('div', 'pc-draw-help-modal');
-  modal.id = 'pc-draw-help-modal';
-  modal.innerHTML = `
-    <div class="pc-draw-help-box">
-      <div class="pc-draw-help-hd">
-        <span>標注工具使用說明</span>
-        <button class="pc-draw-help-x" aria-label="關閉">✕</button>
-      </div>
-      <div class="pc-draw-help-body">
-        <div class="pc-draw-help-sec-t">⌨️ 工具快捷鍵</div>
-        <div class="pc-draw-help-grid">${toolRows}</div>
-        <div class="pc-draw-help-sec-t">🛠 其他操作</div>
-        <div class="pc-draw-help-row"><span>復原／重做</span><kbd>⌘Z / ⇧⌘Z</kbd></div>
-        <div class="pc-draw-help-row"><span>群組／解散</span><kbd>⌘G / ⇧⌘G</kbd></div>
-        <div class="pc-draw-help-row"><span>刪除選取</span><kbd>Delete</kbd></div>
-        <div class="pc-draw-help-sec-t">📋 標注紀錄</div>
-        <div class="pc-draw-help-desc">點工具列的 ➤ 圖示開啟「標注紀錄」抽屜，勾選要送出的標注，按「送給 AI」一次送出給 AI 處理。</div>
-        <a class="pc-draw-help-link" href="${url}" target="_blank" rel="noopener">📖 開啟完整教學手冊 →</a>
-      </div>
-    </div>`;
-  const close = () => modal.remove();
-  modal.querySelector('.pc-draw-help-x').onclick = close;
-  modal.addEventListener('click', e => { if (e.target === modal) close(); });
-  document.body.appendChild(modal);
-}
-// 工具的數字快捷鍵（取自 TOOL_SHORTCUTS 單一真相）。
-function toolNumberKey(tool) {
-  return Object.keys(TOOL_SHORTCUTS).find(k => /^[0-9]$/.test(k) && TOOL_SHORTCUTS[k] === tool) || '';
-}
-// 徽章文字＝數字 + 字母（兩種按鍵都有效，一起顯示提示，例：「2 R」）。
-function shortcutBadge(tool) {
-  return [toolNumberKey(tool), TOOL_KEY[tool]].filter(Boolean).join(' ');
-}
-function toolButton(tool, actions) {
-  const b = drawHtmlEl('button', 'pc-draw-tool');
-  b.dataset.tool = tool;
-  const key = TOOL_KEY[tool];
-  const label = (TOOL_LABELS_ZH[tool] || tool) + (key ? ` (${key})` : '');
-  b.title = label;                       // tooltip 含字母快捷鍵，供探索
-  b.setAttribute('aria-label', label);
-  const badge = toolNumberKey(tool);
-  b.innerHTML = icon(tool) + (badge ? `<span class="pc-draw-kbd" aria-hidden="true">${badge}</span>` : ''); // 常駐數字快捷鍵徽章（字母仍可按，列在 ? 說明）
-  b.onclick = () => actions.setTool(tool);
-  return b;
-}
-// 留言模式切換鈕：非繪圖工具，故用 data-mode（不被 setTool 的 data-tool 邏輯清掉）。
-// 點擊在 draw ⇌ comment 間切；comment 時畫圖層放行，讓底下 pc.js 釘選留言系統接手（同 lavish）。
-function noteButton(actions) {
-  const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-note');
-  b.dataset.mode = 'note';
-  b.title = '註記模式 (C)';
-  b.setAttribute('aria-label', '註記模式');
-  b.innerHTML = icon('comment') + '<span class="pc-draw-kbd" aria-hidden="true">C</span>';
-  b.onclick = () => actions.toggleNote();
-  return b;
-}
-function actButton(action, actions) {
-  const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-act');
-  b.dataset.action = action;
-  b.title = action;
-  b.setAttribute('aria-label', action);
-  b.innerHTML = icon(action);
-  b.onclick = () => actions.act(action);
-  return b;
-}
-function brushButton(type, actions) {
-  const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-brush');
-  b.dataset.brush = type;
-  b.title = BRUSH_LABELS[type] + (type === 'pen' ? ' (P)' : ''); // pen 是自由筆主鍵
-  b.setAttribute('aria-label', BRUSH_LABELS[type]);
-  const badge = type === 'pen' ? toolNumberKey('pencil') : ''; // 徽章「7」只放在 pen（自由筆代表）
-  b.innerHTML = icon(BRUSH_ICON[type]) + (badge ? `<span class="pc-draw-kbd" aria-hidden="true">${badge}</span>` : '');
-  b.onclick = () => actions.setBrush(type);
-  return b;
-}
-
-// 右鍵 context menu：z-order + 刪除，作用於目前選取集合。
-const CTX_SYM = { group: '⧉', ungroup: '⊟' }; // 群組/解散沒有 icon → 用符號
-function buildContextMenu(actions) {
-  const menu = drawHtmlEl('div', 'pc-draw-context');
-  menu.id = 'pc-draw-context';
-  [['front', '置頂'], ['forward', '上移一層'], ['backward', '下移一層'], ['back', '置底'],
-    ['group', '群組'], ['ungroup', '解散群組'], ['delete', '刪除']]
-    .forEach(([action, label]) => {
-      const item = drawHtmlEl('button', 'pc-draw-context-item');
-      item.dataset.action = action;
-      item.setAttribute('aria-label', label);
-      const head = CTX_SYM[action] ? `<span style="display:inline-block;width:18px;text-align:center;font-size:15px">${CTX_SYM[action]}</span>` : icon(action, 18);
-      item.innerHTML = head + `<span>${label}</span>`;
-      item.onclick = () => { actions.act(action); actions.closeContext(); };
-      menu.appendChild(item);
-    });
-  return menu;
-}
-
-// ── P6 側邊「標注紀錄」面板 DOM（右緣 tab + 抽屜，沿用 spec-overlay 的 tab/drawer 模式）──
-function buildRecordTab(onToggle) {
-  const tab = drawHtmlEl('button', 'pc-draw-rec-tab');
-  tab.id = 'pc-draw-rec-tab';
-  tab.textContent = '標注紀錄 ◂';
-  tab.title = '標注紀錄';
-  tab.setAttribute('aria-label', '標注紀錄');
-  tab.onclick = onToggle;
-  return tab;
-}
-function buildRecordDrawer(onClose) {
-  const drawer = drawHtmlEl('div', 'pc-draw-rec-drawer');
-  drawer.id = 'pc-draw-rec-drawer';
-  const hd = drawHtmlEl('div', 'pc-draw-rec-hd');
-  const title = drawHtmlEl('span', 'pc-draw-rec-hd-title'); title.textContent = '標注紀錄';
-  const count = drawHtmlEl('span', 'pc-draw-rec-count'); count.textContent = '0';
-  // 全選/全不選：控制「送出時納入哪些標注」（onchange 在 initDrawLayer 掛上）
-  const allWrap = drawHtmlEl('label', 'pc-draw-rec-all-wrap');
-  const allBox = drawHtmlEl('input', 'pc-draw-rec-all'); allBox.type = 'checkbox'; allBox.checked = true;
-  allBox.setAttribute('aria-label', '全選／全不選送出');
-  const allLbl = drawHtmlEl('span'); allLbl.textContent = '全選';
-  allWrap.appendChild(allBox); allWrap.appendChild(allLbl);
-  const close = drawHtmlEl('button', 'pc-draw-rec-close'); close.textContent = '✕';
-  close.title = '關閉'; close.setAttribute('aria-label', '關閉標注紀錄'); close.onclick = onClose;
-  hd.appendChild(title); hd.appendChild(count); hd.appendChild(allWrap); hd.appendChild(close);
-  drawer.appendChild(hd);
-  drawer.appendChild(drawHtmlEl('div', 'pc-draw-rec-list'));
-  // footer：主要送出按鈕（onclick 在 initDrawLayer 掛上）
-  const footer = drawHtmlEl('div', 'pc-draw-rec-footer');
-  const sendBtn = drawHtmlEl('button', 'pc-draw-rec-send-btn');
-  sendBtn.textContent = '送給 AI（0）';
-  sendBtn.disabled = true;
-  footer.appendChild(sendBtn);
-  drawer.appendChild(footer);
-  return drawer;
-}
-// 一筆標注 → 面板 row（工具圖示 + 色票 + 文字 + selector）。點擊 → onClick(id)。
-function recordRowEl(row, selected, onClick, checked, onToggle, onRemove) {
-  const el = drawHtmlEl('div', 'pc-draw-rec-row' + (selected ? ' selected' : '') + (row.grouped ? ' is-grouped' : ''));
-  el.dataset.id = row.id;
-  el.setAttribute('role', 'button'); el.setAttribute('tabindex', '0');
-  el.setAttribute('aria-label', row.text + (row.grouped ? '（群組成員，勾選會連動整組）' : ''));
-  // 送出勾選框：是否納入送出（獨立於畫布選取；stopPropagation 不觸發整列點選）。
-  const cb = drawHtmlEl('input', 'pc-draw-rec-check'); cb.type = 'checkbox'; cb.checked = checked !== false;
-  cb.setAttribute('aria-label', row.grouped ? '送出時包含此標注（群組連動）' : '送出時包含此標注');
-  if (row.grouped) cb.title = '此列屬於群組，勾選/取消會連動整組';
-  cb.onclick = e => e.stopPropagation();
-  cb.onchange = e => { e.stopPropagation(); if (onToggle) onToggle(row.id, cb.checked); };
-  el.appendChild(cb);
-  const ic = drawHtmlEl('span', 'pc-draw-rec-icon');
-  ic.innerHTML = icon(row.icon, 18);
-  el.appendChild(ic);
-  if (row.color) {
-    const sw = drawHtmlEl('span', 'pc-draw-rec-swatch');
-    sw.style.background = row.color;
-    el.appendChild(sw);
-  }
-  if (row.grouped) { // 群組連動提示：勾這列＝整組一起勾/取消
-    const grp = drawHtmlEl('span', 'pc-draw-rec-group'); grp.textContent = '🔗';
-    grp.title = '群組成員（勾選連動整組）'; grp.setAttribute('aria-hidden', 'true');
-    el.appendChild(grp);
-  }
-  const body = drawHtmlEl('div', 'pc-draw-rec-body');
-  const txt = drawHtmlEl('div', 'pc-draw-rec-text'); txt.textContent = row.text;
-  body.appendChild(txt);
-  if (row.selector) {
-    const sel = drawHtmlEl('div', 'pc-draw-rec-sel');
-    sel.textContent = row.selector; sel.title = row.selector;
-    body.appendChild(sel);
-  }
-  el.appendChild(body);
-  // 已送/未送 標記：送出後沒再改＝已送（綠勾）；新建或改過＝未送（琥珀）。
-  const badge = drawHtmlEl('span', 'pc-draw-rec-status ' + (row.sent ? 'is-sent' : 'is-unsent'));
-  badge.textContent = row.sent ? '✓ 已送' : '● 未送';
-  el.appendChild(badge);
-  if (onRemove) { // 從佇列移除（目前用於「決定」列）
-    const rm = drawHtmlEl('button', 'pc-draw-rec-remove'); rm.textContent = '✕';
-    rm.title = '從佇列移除'; rm.setAttribute('aria-label', '從佇列移除');
-    rm.onclick = e => { e.stopPropagation(); onRemove(row.id); };
-    el.appendChild(rm);
-  }
-  el.onclick = () => onClick(row.id);
-  return el;
-}
-
-// AI 方案卡（錨定貼在標注旁）：標題 + 文字 + 可點選項按鈕；已選則顯示「✓ 已選」。
-// onChoose(reply, option) 在點選項時呼叫。純函式（位置由呼叫端設 style）。
-function replyCardEl(reply, onChoose, onClose, onRechoose) {
-  const card = drawHtmlEl('div', 'pc-draw-reply-card');
-  card.dataset.n = reply.n;
-  const head = drawHtmlEl('div', 'pc-draw-reply-head'); head.textContent = '💬 AI 方案';
-  const close = drawHtmlEl('button', 'pc-draw-reply-close'); close.textContent = '✕';
-  close.title = '關閉這張方案卡'; close.setAttribute('aria-label', '關閉方案卡');
-  close.onclick = () => onClose && onClose(reply);
-  head.appendChild(close);
-  card.appendChild(head);
-  if (reply.text) { const t = drawHtmlEl('div', 'pc-draw-reply-text'); t.textContent = reply.text; card.appendChild(t); }
-  const opts = Array.isArray(reply.options) ? reply.options : [];
-  // 有 html(真實 UI)/desc(說明)/preview(文字示意) → 圖文卡片式；否則純按鈕。
-  const rich = opts.some(o => o.html || o.desc || o.preview);
-  if (reply.chosen) {
-    const c = drawHtmlEl('div', 'pc-draw-reply-chosen');
-    c.textContent = '✓ 已選：' + (reply.chosen.label || reply.chosen.id);
-    card.appendChild(c);
-    const re = drawHtmlEl('button', 'pc-draw-reply-rechoose'); // 取消已選 → 回選項列重挑
-    re.textContent = '改選'; re.title = '取消這個選擇，重新挑一個方案';
-    re.onclick = () => onRechoose && onRechoose(reply);
-    card.appendChild(re);
-  } else if (opts.length) {
-    const row = drawHtmlEl('div', 'pc-draw-reply-opts' + (rich ? ' is-rich' : ''));
-    opts.forEach(o => {
-      const b = drawHtmlEl('div', 'pc-draw-reply-opt');
-      if (!rich) { // 純按鈕：整塊可點（向後相容）
-        b.setAttribute('role', 'button'); b.setAttribute('tabindex', '0');
-        b.textContent = o.label || o.id;
-        b.onclick = () => onChoose && onChoose(reply, o);
-        row.appendChild(b);
-        return;
-      }
-      const lbl = drawHtmlEl('div', 'pc-draw-reply-opt-label'); lbl.textContent = o.label || o.id; b.appendChild(lbl);
-      if (o.desc) { const d = drawHtmlEl('div', 'pc-draw-reply-opt-desc'); d.textContent = o.desc; b.appendChild(d); }
-      // html＝真實 UI 畫面：用頁面全域 styles 渲染，長得跟真的一樣（本地單人信任來源，故 innerHTML）。
-      // 設 pointer-events:none（CSS）→ 戳 mockup 不會誤觸；用下面「選這個方案」鈕才送出。
-      if (o.html) { const m = drawHtmlEl('div', 'pc-draw-reply-mock'); m.innerHTML = o.html; b.appendChild(m); }
-      else if (o.preview) { const p = drawHtmlEl('pre', 'pc-draw-reply-preview'); p.textContent = o.preview; b.appendChild(p); }
-      const choose = drawHtmlEl('button', 'pc-draw-reply-choose'); choose.textContent = '選這個方案';
-      choose.onclick = () => onChoose && onChoose(reply, o); b.appendChild(choose);
-      row.appendChild(b);
-    });
-    card.appendChild(row);
-  }
-  return card;
-}
-
-// 顏色 popover：8 預設色 swatch ＋ <input type=color> 自訂任意 hex。
-function colorMenu(actions) {
-  const wrap = drawHtmlEl('div', 'pc-draw-menu');
-  const trigger = drawHtmlEl('button', 'pc-draw-tool pc-draw-trigger');
-  trigger.dataset.action = 'color-menu';
-  trigger.title = '顏色';
-  trigger.setAttribute('aria-label', '顏色');
-  trigger.appendChild(drawHtmlEl('span', 'pc-draw-cur-color'));
-  trigger.onclick = () => togglePopover(wrap);
-  const pop = drawHtmlEl('div', 'pc-draw-popover');
-  pop.dataset.menu = 'color';
-  DRAW_COLORS.forEach(c => pop.appendChild(swatchButton(c, actions)));
-  pop.appendChild(customSwatch(actions)); // 第 9 顆：自訂調色盤
-  pop.appendChild(eyedropperButton(actions)); // 吸管取樣
-  wrap.appendChild(trigger);
-  wrap.appendChild(pop);
-  return wrap;
-}
-// 吸管：取樣畫面上任意顏色（瀏覽器 EyeDropper API）。不支援時隱藏，不報錯。
-function eyedropperButton(actions) {
-  const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-eyedropper');
-  b.dataset.action = 'eyedropper';
-  b.title = '取樣顏色 (I)'; // tooltip 含快捷鍵；aria-label 維持純名稱（測試/讀屏穩定）
-  b.setAttribute('aria-label', '取樣顏色');
-  b.innerHTML = icon('colorize');
-  b.onclick = () => actions.eyedropper();
-  if (!eyedropperSupported()) { b.disabled = true; b.style.display = 'none'; }
-  return b;
-}
-// 自訂顏色 swatch：彩虹圓 + 「+」，看起來像第 9 顆 swatch；點擊開原生 color picker。
-function customSwatch(actions) {
-  const label = drawHtmlEl('label', 'pc-draw-swatch pc-draw-custom-swatch');
-  label.title = '自訂顏色';
-  label.setAttribute('aria-label', '自訂顏色');
-  const custom = drawHtmlEl('input', 'pc-draw-color-custom');
-  custom.type = 'color';
-  custom.setAttribute('aria-label', '自訂顏色');
-  custom.dataset.action = 'custom-color';
-  custom.addEventListener('input', () => actions.setColor(custom.value));
-  custom.addEventListener('change', () => closeMenuOf(custom)); // 選色完成（picker 關閉）→ 收 popover
-  label.appendChild(custom);
-  return label;
-}
-// 線粗 popover：thin → bold 的遞增粗條。
-function widthMenu(actions) {
-  const wrap = drawHtmlEl('div', 'pc-draw-menu');
-  const trigger = drawHtmlEl('button', 'pc-draw-tool pc-draw-trigger');
-  trigger.dataset.action = 'width-menu';
-  trigger.title = '線粗';
-  trigger.setAttribute('aria-label', '線粗');
-  trigger.innerHTML = icon('lineWeight');
-  trigger.onclick = () => togglePopover(wrap);
-  const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-width');
-  pop.dataset.menu = 'width';
-  DRAW_STROKE_WIDTHS.forEach(w => pop.appendChild(widthButton(w, actions)));
-  wrap.appendChild(trigger);
-  wrap.appendChild(pop);
-  return wrap;
-}
-function togglePopover(wrap) {
-  const bar = wrap.closest('.pc-draw-toolbar');
-  if (bar) bar.querySelectorAll('.pc-draw-menu.open').forEach(m => { if (m !== wrap) m.classList.remove('open'); });
-  wrap.classList.toggle('open');
-}
-// 選完選項即關閉所屬 popover（避免選完粗細/顏色 popover 一直浮現）。
-function closeMenuOf(btn) {
-  const m = btn.closest('.pc-draw-menu');
-  if (m) m.classList.remove('open');
-}
-function swatchButton(color, actions) {
-  const b = drawHtmlEl('button', 'pc-draw-swatch');
-  b.dataset.color = color;
-  b.style.background = color;
-  b.title = color;
-  b.setAttribute('aria-label', color);
-  b.onclick = () => { actions.setColor(color); closeMenuOf(b); };
-  return b;
-}
-function widthButton(w, actions) {
-  const b = drawHtmlEl('button', 'pc-draw-width');
-  b.dataset.width = w;
-  b.title = w + 'px';
-  b.setAttribute('aria-label', w + 'px');
-  const dot = drawHtmlEl('span');
-  dot.style.cssText = `display:block;width:18px;height:${Math.min(w, 10)}px;border-radius:4px;background:${DRAW_UI_COLORS.onDark};`;
-  b.appendChild(dot);
-  b.onclick = () => { actions.setStrokeWidth(w); closeMenuOf(b); };
-  return b;
-}
-// 字體大小 popover：用標本文字大小直觀呈現各選項。
-function fontSizeMenu(actions) {
-  const wrap = drawHtmlEl('div', 'pc-draw-menu');
-  const trigger = drawHtmlEl('button', 'pc-draw-tool pc-draw-trigger');
-  trigger.dataset.action = 'fontsize-menu';
-  trigger.title = '字體大小';
-  trigger.setAttribute('aria-label', '字體大小');
-  trigger.innerHTML = icon('text');
-  trigger.onclick = () => togglePopover(wrap);
-  const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-fontsize');
-  pop.dataset.menu = 'fontsize';
-  DRAW_FONT_SIZES.forEach(sz => pop.appendChild(fontSizeButton(sz, actions)));
-  wrap.appendChild(trigger);
-  wrap.appendChild(pop);
-  return wrap;
-}
-function fontSizeButton(sz, actions) {
-  const b = drawHtmlEl('button', 'pc-draw-fontsize');
-  b.dataset.fontSize = sz;
-  b.title = sz + 'px';
-  b.setAttribute('aria-label', sz + 'px');
-  b.style.cssText = `font-size:${Math.max(sz, 10)}px; padding:1px 6px; line-height:1.3; font-family:system-ui,sans-serif;`;
-  b.textContent = 'A';
-  b.onclick = () => { actions.setFontSize(sz); closeMenuOf(b); };
-  return b;
-}
-
-const HEAD_SYMBOL = { none: '—', end: '→', start: '←', both: '↔' };
-const HEAD_LABEL = { none: '無箭頭', end: '終點箭頭', start: '起點箭頭', both: '雙向箭頭' };
-// 端點箭頭 popover：line/arrow 選無/終點/起點/雙向（雙向＝雙箭頭）。
-function headsMenu(actions) {
-  const wrap = drawHtmlEl('div', 'pc-draw-menu');
-  const trigger = drawHtmlEl('button', 'pc-draw-tool pc-draw-trigger');
-  trigger.dataset.action = 'heads-menu';
-  trigger.title = '端點箭頭（單／雙向）';
-  trigger.setAttribute('aria-label', '端點箭頭');
-  trigger.textContent = '↔';
-  trigger.onclick = () => togglePopover(wrap);
-  const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-heads');
-  pop.dataset.menu = 'heads';
-  DRAW_HEAD_MODES.forEach(m => pop.appendChild(headsButton(m, actions)));
-  wrap.appendChild(trigger);
-  wrap.appendChild(pop);
-  return wrap;
-}
-function headsButton(mode, actions) {
-  const b = drawHtmlEl('button', 'pc-draw-heads');
-  b.dataset.heads = mode;
-  b.title = HEAD_LABEL[mode];
-  b.setAttribute('aria-label', HEAD_LABEL[mode]);
-  b.style.cssText = 'font-size:16px; padding:2px 8px; line-height:1.2;';
-  b.textContent = HEAD_SYMBOL[mode];
-  b.onclick = () => { actions.setHeads(mode); closeMenuOf(b); };
-  return b;
-}
-
-function syncToolbar(bar, state, history) {
-  bar.querySelectorAll('.pc-draw-tool[data-tool]').forEach(b => {
-    b.classList.toggle('active', state.mode === 'draw' && b.dataset.tool === state.tool);
-  });
-  const commentBtn = bar.querySelector('.pc-draw-note');
-  if (commentBtn) commentBtn.classList.toggle('active', state.mode === 'note'); // 註記模式 → 高亮
-  const color = (DEFAULT_DRAW_STYLE.color || '').toLowerCase();
-  const dot = bar.querySelector('.pc-draw-cur-color');
-  if (dot) dot.style.background = DEFAULT_DRAW_STYLE.color;
-  bar.querySelectorAll('.pc-draw-swatch[data-color]').forEach(b => { // 排除無 data-color 的自訂 swatch
-    b.classList.toggle('active', b.dataset.color.toLowerCase() === color);
-  });
-  bar.querySelectorAll('.pc-draw-width').forEach(b => {
-    b.classList.toggle('active', Number(b.dataset.width) === DEFAULT_DRAW_STYLE.strokeWidth);
-  });
-  bar.querySelectorAll('.pc-draw-fontsize').forEach(b => {
-    b.classList.toggle('active', Number(b.dataset.fontSize) === DEFAULT_DRAW_STYLE.fontSize);
-  });
-  bar.querySelectorAll('.pc-draw-brush').forEach(b => {
-    b.classList.toggle('active', state.tool === 'pencil' && b.dataset.brush === state.brushType);
-  });
-  const hasSel = state.selectedIds.length > 0;
-  bar.querySelectorAll('.pc-draw-act').forEach(b => {
-    const a = b.dataset.action;
-    const enabled = a === 'undo' ? (history && history.canUndo()) : a === 'redo' ? (history && history.canRedo()) : hasSel;
-    b.disabled = !enabled;
-    b.classList.toggle('pc-draw-disabled', !enabled);
-  });
-  // 依「目前作用對象」(有選取→選取物件；否則→目前工具) 切換各選項菜單可用性：
-  //   字級僅 text 適用；端點箭頭僅 line/arrow；線粗對純 text 無意義。
-  const selTools = state.selectedIds
-    .map(id => { const o = (state.objects || []).find(x => x.id === id); return o && o.tool; })
-    .filter(Boolean);
-  const targets = selTools.length ? selTools : [state.tool];
-  const anyText = targets.includes('text');
-  const allText = targets.every(t => t === 'text');
-  const anyLineArrow = targets.some(t => t === 'arrow' || t === 'line');
-  setMenuEnabled(bar, 'fontsize-menu', anyText);      // 字級：只有 text
-  setMenuEnabled(bar, 'heads-menu', anyLineArrow);    // 端點箭頭：只有 line/arrow
-  setMenuEnabled(bar, 'width-menu', !allText);        // 線粗：純 text 不適用
-}
-// 切換某個選項菜單 trigger 的可用性；disable 時順手收掉它的 popover。
-function setMenuEnabled(bar, action, enabled) {
-  const t = bar.querySelector(`.pc-draw-trigger[data-action="${action}"]`);
-  if (!t) return;
-  t.disabled = !enabled;
-  t.classList.toggle('pc-draw-disabled', !enabled);
-  if (!enabled) { const m = t.closest('.pc-draw-menu'); if (m) m.classList.remove('open'); }
-}
+// 對外 re-export：保持 draw-layer.js 的 public 匯出面不變（consumer / 單元測試依賴）。
 
 /**
  * prototype-comments
