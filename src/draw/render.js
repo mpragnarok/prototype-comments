@@ -3,7 +3,7 @@
  * 以及繪製過程的幾何小工具（toPxBox / initialGeom / updateGeom / isDrawn / findById）。
  * 由 draw-layer.js 的 render loop 呼叫；不持有 closure 狀態（一律吃參數）。
  */
-import { DEFAULT_DRAW_STYLE, arrowHeads, brushStyle } from './constants.js';
+import { DEFAULT_DRAW_STYLE, DRAW_UI_COLORS, arrowHeads, brushStyle } from './constants.js';
 import { diamondPoints, freehandPath, geomFromDrag, labelAnchor, pctToPx, taperedOutline } from './geometry.js';
 import { drawSvgEl } from './dom.js';
 
@@ -136,11 +136,11 @@ export function renderLabel(o, rect) {
   if (isLine) { // 白底蓋住線；rect 在前(底層)、text 在後(上層)
     const w = o.label.length * labelFs + LABEL_BG_PAD * 2; // 估寬偏大（CJK ~1em/字）→ fallback 也蓋住
     const h = labelFs + LABEL_BG_PAD * 2;
-    g.appendChild(drawSvgEl('rect', { x: x - w / 2, y: y - h / 2, width: w, height: h, fill: '#ffffff', rx: 3 }));
+    g.appendChild(drawSvgEl('rect', { x: x - w / 2, y: y - h / 2, width: w, height: h, fill: DRAW_UI_COLORS.labelBg, rx: 3 }));
   }
   const t = drawSvgEl('text', {
     x, y, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
-    fill: '#1e1e1e', 'font-size': labelFs, 'font-family': 'system-ui, sans-serif',
+    fill: DRAW_UI_COLORS.labelInk, 'font-size': labelFs, 'font-family': 'system-ui, sans-serif',
   });
   t.textContent = o.label;
   g.appendChild(t);

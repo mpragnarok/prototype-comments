@@ -9,6 +9,18 @@ export const DRAW_TOOLS = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'lin
 export const DEFAULT_DRAW_STYLE = { color: '#E5484D', strokeWidth: 2, fill: 'none', fontSize: 16 };
 // Excalidraw/Figma 風格預設色（8 色）＋ picker 另附 <input type=color> 自訂任意 hex。
 export const DRAW_COLORS = ['#1e1e1e', '#e03131', '#2f9e44', '#1971c2', '#f08c00', '#9c36b5', '#0c8599', '#868e96'];
+
+// 繪圖層 chrome（選取疊層 / 紀錄列 / 標籤）的語意色。SVG presentation 屬性吃不到 CSS var()，
+// 故渲染端在 JS 集中於此，與 draw/styles.js 的 --pc-* CSS token 同源（值需一致）。
+// ⚠️ 與 DRAW_COLORS（使用者筆刷 8 色）分屬兩事：這裡是工具本身的介面色，不是內容色。
+export const DRAW_UI_COLORS = {
+  selection: '#635a8f',              // 選取框 / marquee / 端點 / 縮放把手（= --pc-accent）
+  selectionTint: 'rgba(99,90,143,.08)', // marquee 拖選填色（= --pc-accent-rgb @ .08）
+  sent: '#0d7a4f',                   // 已送出決策紀錄列色（= --pc-success）
+  labelBg: '#ffffff',                // 標籤底
+  labelInk: '#1e1e1e',               // 標籤文字
+  onDark: '#e5e7eb',                 // 深色工具列上的線粗示意 dot（= --pc-on-dark）
+};
 export const DRAW_STROKE_WIDTHS = [1, 2, 4, 6]; // thin → bold
 export const DRAW_FONT_SIZES = [12, 16, 20, 28]; // 文字工具字體大小選項（px）
 export const DRAW_HEAD_MODES = ['none', 'end', 'start', 'both']; // 端點箭頭：無/終點/起點/雙向

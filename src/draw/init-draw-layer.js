@@ -6,7 +6,7 @@
  */
 import { createDrawingStore } from '../store.js';
 import {
-  DRAW_MODES, DRAW_TOOLS, DEFAULT_DRAW_STYLE, DRAW_COLORS, DRAW_STROKE_WIDTHS,
+  DRAW_MODES, DRAW_TOOLS, DEFAULT_DRAW_STYLE, DRAW_COLORS, DRAW_UI_COLORS, DRAW_STROKE_WIDTHS,
   DRAW_FONT_SIZES, DRAW_HEAD_MODES, arrowHeads, MIN_DRAW_SIZE_PCT,
   SVG_NS, HANDLE_FIXED, ICON_PATHS, icon,
   DRAW_BRUSHES, BRUSH_LABELS, BRUSH_ICON, BRUSH_RENDER, brushStyle,
@@ -474,13 +474,13 @@ export function initDrawLayer(target, opts = {}) {
     // 佇列＝畫的標注 + 在方案卡上做的「決定」，兩者都可勾選/送出/標已送。
     const annRows = annotationRows(state.objects, state.sentSigs);
     const decRows = state.decisions.map(d => ({
-      id: d.id, tool: 'text', icon: 'text', text: '✅ ' + d.text, selector: null, color: '#0d7a4f',
+      id: d.id, tool: 'text', icon: 'text', text: '✅ ' + d.text, selector: null, color: DRAW_UI_COLORS.sent,
       sent: state.sentSigs[d.id] === decisionSig(d), isDecision: true,
     }));
     const noteRows = state.notes.map((n) => ({
       id: n.id, tool: 'comment', icon: 'comment',
       text: '【註記】' + (n.label ? n.label + ' → ' : '') + n.text,
-      selector: n.sel || null, color: '#635a8f',
+      selector: n.sel || null, color: DRAW_UI_COLORS.selection,
       sent: state.sentSigs[n.id] === noteSig(n), isNote: true,
     }));
     // outbox：已送給 AI（且未再改）的項目不再留在清單（畫布上的 note/標注仍在，也不會被重複送）。
@@ -664,7 +664,7 @@ export function initDrawLayer(target, opts = {}) {
     const b = toPxBox(r, rect);
     svg.appendChild(drawSvgEl('rect', {
       class: 'pc-draw-snap-hl', x: b.x, y: b.y, width: b.w, height: b.h, fill: 'none',
-      stroke: '#635a8f', 'stroke-width': 2, 'stroke-dasharray': '5 4', 'pointer-events': 'none',
+      stroke: DRAW_UI_COLORS.selection, 'stroke-width': 2, 'stroke-dasharray': '5 4', 'pointer-events': 'none',
     }));
   }
 
@@ -825,7 +825,7 @@ export function initDrawLayer(target, opts = {}) {
     const g = drawSvgEl('g', { class: 'pc-draw-selection' });
     objs.forEach(o => {
       const box = selPxBox(o, rect);
-      g.appendChild(drawSvgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, fill: 'none', stroke: '#635a8f', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
+      g.appendChild(drawSvgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, fill: 'none', stroke: DRAW_UI_COLORS.selection, 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
     });
     if (objs.length === 1) { // handle 只在單選時出現
       const o = objs[0];
@@ -835,14 +835,14 @@ export function initDrawLayer(target, opts = {}) {
         ['from', 'to'].forEach(which => {
           const cx = pctToPx(ends[which].x, rect.width);
           const cy = pctToPx(ends[which].y, rect.height);
-          g.appendChild(drawSvgEl('circle', { cx, cy, r: 4, fill: '#fff', stroke: '#635a8f', 'stroke-width': 1, 'data-endpoint': which }));
+          g.appendChild(drawSvgEl('circle', { cx, cy, r: 4, fill: '#fff', stroke: DRAW_UI_COLORS.selection, 'stroke-width': 1, 'data-endpoint': which }));
         });
       } else {
         // 其餘工具：4 角縮放 handle（text 用實際渲染框 → handle 隨字級貼合）
         const box = selPxBox(o, rect);
         ['nw', 'ne', 'se', 'sw'].forEach(name => {
           const c = boxCorner(box, name);
-          g.appendChild(drawSvgEl('rect', { x: c.x - 4, y: c.y - 4, width: 8, height: 8, fill: '#fff', stroke: '#635a8f', 'stroke-width': 1, 'data-handle': name }));
+          g.appendChild(drawSvgEl('rect', { x: c.x - 4, y: c.y - 4, width: 8, height: 8, fill: '#fff', stroke: DRAW_UI_COLORS.selection, 'stroke-width': 1, 'data-handle': name }));
         });
       }
     }
@@ -851,7 +851,7 @@ export function initDrawLayer(target, opts = {}) {
   function renderMarquee(rect) {
     if (!state.marquee) return;
     const box = toPxBox(state.marquee, rect);
-    svg.appendChild(drawSvgEl('rect', { class: 'pc-draw-marquee', x: box.x, y: box.y, width: box.w, height: box.h, fill: 'rgba(99,90,143,.08)', stroke: '#635a8f', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
+    svg.appendChild(drawSvgEl('rect', { class: 'pc-draw-marquee', x: box.x, y: box.y, width: box.w, height: box.h, fill: DRAW_UI_COLORS.selectionTint, stroke: DRAW_UI_COLORS.selection, 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
   }
 
   // ── command 執行（apply＋push）/ undo / redo ─────────────────────────────────
