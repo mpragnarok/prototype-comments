@@ -1920,6 +1920,59 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
   });
 
+  await test('標注紀錄列點擊：跳到該標注置中 + pulse 強調；點 checkbox 不跳', async () => {
+    try {
+      await page.evaluate(() => {
+        const api = window.__drawTest.api;
+        api.clear(); api.setMode('note');
+        const spacer = document.createElement('div'); spacer.id = 'far-spacer'; spacer.style.cssText = 'height:3000px;';
+        const far = document.createElement('button'); far.id = 'far-target'; far.textContent = '遠方元件';
+        far.style.cssText = 'position:absolute; left:120px; top:3000px; width:100px; height:40px;';
+        document.body.appendChild(spacer); document.body.appendChild(far);
+        api.addNote('跳到我', { sel: '#far-target', relX: 0.5, relY: 0.5, label: '遠方元件' });
+        api.toggleRecordPanel(); // 開抽屜
+        window.scrollTo(0, 0);
+      });
+      const id = await page.evaluate(() => window.__drawTest.api.getNotes()[0].id);
+      // 點列本體（文字區）→ 跳轉 + pulse
+      await page.click(`.pc-draw-rec-row[data-id="${id}"] .pc-draw-rec-text`);
+      const pulseNow = await page.evaluate(() => !!document.querySelector('.pc-draw-pulse'));
+      assert(pulseNow, '點列後應立即出現 pulse 視覺強調');
+      // 等 smooth scroll 收斂：mark 落進視窗（非中途某一幀）
+      await page.waitForFunction((nid) => {
+        const mark = document.querySelector(`.pc-note-mark[data-note-id="${nid}"]`);
+        if (!mark) return false;
+        const r = mark.getBoundingClientRect();
+        return window.scrollY > 100 && r.top >= 0 && r.bottom <= window.innerHeight;
+      }, id, { timeout: 3000 });
+      const jumped = await page.evaluate((nid) => {
+        const mark = document.querySelector(`.pc-note-mark[data-note-id="${nid}"]`);
+        const r = mark && mark.getBoundingClientRect();
+        return { scrollY: Math.round(window.scrollY), inView: !!(r && r.top >= 0 && r.bottom <= window.innerHeight) };
+      }, id);
+      console.log('     rec-row jump:', JSON.stringify(jumped));
+      assert(jumped.scrollY > 100, `點列應捲動到標注，實際 scrollY=${jumped.scrollY}`);
+      assert(jumped.inView, '標注應被捲入視野（置中）');
+      // 點 checkbox 不應觸發跳轉
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.click(`.pc-draw-rec-row[data-id="${id}"] .pc-draw-rec-check`);
+      await page.waitForTimeout(250);
+      const afterCb = await page.evaluate(() => Math.round(window.scrollY));
+      console.log('     checkbox no-jump scrollY:', afterCb);
+      // checkbox 已 stopPropagation → 不觸發跳轉；不應捲到遠方標注（~2400），僅容忍 playwright 帶入視野的微量位移
+      assert(afterCb < 100, `點 checkbox 不應觸發跳轉捲動，實際 scrollY=${afterCb}`);
+    } finally {
+      // 不論成敗都清掉注入的高頁面/scroll，避免污染後續以視窗座標下筆的測試
+      await page.evaluate(() => {
+        ['far-spacer', 'far-target'].forEach(i => { const el = document.getElementById(i); if (el) el.remove(); });
+        window.scrollTo(0, 0);
+        document.querySelectorAll('.pc-note-card, .pc-draw-pulse').forEach(n => n.remove());
+        if (window.__drawTest.api.toggleRecordPanel && document.getElementById('pc-draw-rec-drawer').classList.contains('open')) window.__drawTest.api.toggleRecordPanel();
+        window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear();
+      });
+    }
+  });
+
   await test('註記輸入鍵盤：Enter → 存進標注紀錄佇列、關閉輸入卡（非直接送 AI）', async () => {
     await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('note'); });
     const layer = await page.evaluate(() => { const r = document.querySelector('.pc-note-layer').getBoundingClientRect(); return { x: Math.round(r.left + r.width * 0.5), y: Math.round(r.top + r.height * 0.4) }; });

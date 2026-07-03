@@ -642,20 +642,48 @@ export function initDrawLayer(target, opts = {}) {
       });
     }, 180); // debounce：連續操作只在停手後拍一次
   }
-  // 點一筆 row → 選取該物件、若在畫面外則捲入視野（沿用 spec-overlay 的 scrollIntoView）。
+  // 點一筆 row（本體，非勾選框/移除鈕，它們已 stopPropagation）→ 選取/聚焦該標注、
+  // 捲動置中入視野、並給短暫 pulse 強調（沿用選取 violet），讓使用者對得上是哪一筆。
   function onRecordRowClick(id) {
     const note = state.notes.find(n => n.id === id);
-    if (note) { setFocusNote(id); openNoteCard(note); return; }
-    selectOnly(id);
-    render();
-    scrollObjectIntoView(id);
+    if (note) { setFocusNote(id); openNoteCard(note); }
+    else { selectOnly(id); render(); }
+    scrollAnnotationIntoView(id);
+    pulseAnnotation(id);
   }
-  function scrollObjectIntoView(id) {
-    const node = svg.querySelector('[data-id="' + id + '"]');
+  // note → 對應 mark；手繪 → SVG 圖元。畫面外才捲動置中（沿用 spec-overlay 的 scrollIntoView）。
+  function annotationNode(id) {
+    if (state.notes.some(n => n.id === id)) return noteLayer.querySelector('.pc-note-mark[data-note-id="' + id + '"]');
+    return svg.querySelector('[data-id="' + id + '"]');
+  }
+  function scrollAnnotationIntoView(id) {
+    const node = annotationNode(id);
     if (!node || typeof node.getBoundingClientRect !== 'function') return;
     const r = node.getBoundingClientRect();
     const offscreen = r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth;
     if (offscreen && node.scrollIntoView) node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  // 標注在 host/noteLayer 座標系的 px bbox（note＝anchor 元素範圍；手繪＝geom bbox；退化 note 給小方框）。
+  function annotationPxBox(id) {
+    const note = state.notes.find(n => n.id === id);
+    if (note) {
+      const b = resolveNoteBox(note);
+      if (b) return pctToPxBox(b);
+      const p = noteXY(resolveNotePct(note));
+      return { x: p.x - 14, y: p.y - 14, w: 28, h: 28 };
+    }
+    const o = findById(state.objects, id);
+    return o ? pctToPxBox(geomBBox(o, resolveO)) : null;
+  }
+  // 短暫 pulse 定位框：貼在標注 bbox 上、1s 後自動移除（與座標系同步捲動，不隨 render 被清）。
+  function pulseAnnotation(id) {
+    const box = annotationPxBox(id);
+    if (!box) return;
+    const pulse = drawHtmlEl('div', 'pc-draw-pulse');
+    pulse.style.left = box.x + 'px'; pulse.style.top = box.y + 'px';
+    pulse.style.width = Math.max(box.w, 8) + 'px'; pulse.style.height = Math.max(box.h, 8) + 'px';
+    noteLayer.appendChild(pulse);
+    setTimeout(() => pulse.remove(), 1000);
   }
 
   function applyMode() {
