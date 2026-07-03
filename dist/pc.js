@@ -3423,6 +3423,7 @@ function initDrawLayer(target, opts = {}) {
     if (el.classList.contains('pc-draw-toolbar') || el.classList.contains('pc-draw-reply-layer')
       || el.classList.contains('pc-draw-rec-tab') || el.classList.contains('pc-draw-text-input')
       || el.id === 'pc-draw-rec-drawer' || el.id === 'pc-draw-context') return true;
+    if (el.classList.contains('pc-draw-selection') || el.classList.contains('pc-draw-marquee')) return true; // 選取框/橡皮筋不入鏡（不改 state.selectedIds，避免與選取讀取競態）
     // 對話卡（開著的 note 輸入/彈窗）與 hover 高亮框都是 UI chrome → 不入鏡（保留框+角標本身）。
     if (el.classList.contains('pc-note-card') || el.classList.contains('pc-note-hl')) return true;
     const id = el.getAttribute && el.getAttribute('data-id');
@@ -3435,9 +3436,9 @@ function initDrawLayer(target, opts = {}) {
   async function capturePng() {
     const h2c = await loadHtml2canvas().catch(() => null);
     if (h2c) {
-      const prevSel = state.selectedIds.slice();
       try {
-        if (prevSel.length) { state.selectedIds = []; render(); } // 選取框不入鏡
+        // 選取框不入鏡：交給 ignoreElements（isCaptureExcluded）在截圖時跳過 .pc-draw-selection/.pc-draw-marquee，
+        // 不再暫時清空 state.selectedIds——那會在 await 截圖期間讓其他讀取者（含測試）看到空選取，造成競態閃爍。
         const canvas = await h2c(document.body, {
           backgroundColor: '#ffffff',
           scale: Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1),
@@ -3446,7 +3447,6 @@ function initDrawLayer(target, opts = {}) {
         });
         return canvas.toDataURL('image/png');
       } catch (_) { /* fall through to SVG-only */ }
-      finally { if (prevSel.length) { state.selectedIds = prevSel; render(); } }
     }
     return capturePngSvgOnly();
   }
