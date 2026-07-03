@@ -24,6 +24,7 @@ import {
   rectAnchorPoints, nearestPointOnRect, objectSnapPoints, nearestSnap,
   anchorRel, resolveAnchorPoint, resolveEndpoints, mergeEndAnchor, SNAP_THRESHOLD_PCT,
   isLocalEnv, shouldEnableDraw,
+  TOMBSTONE_MAX_AGE_MS, mergeTombstones, isTombstoned, filterTombstoned, compactTombstones,
 } from '../src/draw-layer.js';
 
 let pass = 0, fail = 0;
@@ -1252,6 +1253,53 @@ test("shouldEnableDraw: ('auto','example.com') → false", () => eq(shouldEnable
 test("shouldEnableDraw: (true,'example.com') → true（永遠開）", () => eq(shouldEnableDraw(true, 'example.com'), true));
 test("shouldEnableDraw: (false,'localhost') → false（永遠關）", () => eq(shouldEnableDraw(false, 'localhost'), false));
 test("shouldEnableDraw: (undefined,'localhost') → true（預設等同 auto）", () => eq(shouldEnableDraw(undefined, 'localhost'), true));
+
+// ── 墓碑（tombstone）純函式：mergeTombstones / isTombstoned / filterTombstoned / compactTombstones ──
+console.log('\ndraw-layer unit — 墓碑（tombstone）純函式:');
+
+test('mergeTombstones: 聯集，同 id 取較新 deletedAt（最新者贏）', () => {
+  const a = { d1: 100, d2: 200 };
+  const b = { d2: 500, d3: 300 };
+  const m = mergeTombstones(a, b);
+  eq(m.d1, 100); eq(m.d2, 500, 'd2 取較新'); eq(m.d3, 300);
+});
+test('mergeTombstones: null / undefined 輸入安全，不改入參', () => {
+  const a = { d1: 1 };
+  eq(JSON.stringify(mergeTombstones(a, null)), JSON.stringify({ d1: 1 }));
+  eq(JSON.stringify(mergeTombstones(null, undefined)), JSON.stringify({}));
+  eq(JSON.stringify(a), JSON.stringify({ d1: 1 }), '不應改入參');
+});
+test('isTombstoned: 有 deletedAt → true；無 / 0 / null map → false', () => {
+  assert(isTombstoned({ d1: 123 }, 'd1'), '有墓碑 → true');
+  assert(!isTombstoned({ d1: 0 }, 'd1'), 'deletedAt 0（falsy）→ false');
+  assert(!isTombstoned({}, 'd1'), '無此 id → false');
+  assert(!isTombstoned(null, 'd1'), 'null map → false');
+});
+test('filterTombstoned: 濾掉已墓碑的項、保留其餘（回傳新陣列）', () => {
+  const items = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const out = filterTombstoned(items, { b: 999 });
+  eq(JSON.stringify(out.map(i => i.id)), JSON.stringify(['a', 'c']));
+  assert(out !== items, '應回新陣列');
+});
+test('filterTombstoned: 無墓碑集 → 原內容（copy）；非陣列 → []', () => {
+  const items = [{ id: 'a' }];
+  eq(JSON.stringify(filterTombstoned(items, null)), JSON.stringify([{ id: 'a' }]));
+  eq(JSON.stringify(filterTombstoned(null, { a: 1 })), JSON.stringify([]));
+});
+test('compactTombstones: 丟棄早於 maxAgeMs 的墓碑、保留較新', () => {
+  const now = 1_000_000_000_000;
+  const tombs = { old: now - TOMBSTONE_MAX_AGE_MS - 1, fresh: now - 1000 };
+  const out = compactTombstones(tombs, now);
+  assert(!('old' in out), '超過 30 天的墓碑應被清掉');
+  eq(out.fresh, now - 1000, '較新的保留');
+});
+test('compactTombstones: 邊界（剛好等於 maxAgeMs）保留；null → {}', () => {
+  const now = 2_000_000_000_000;
+  const out = compactTombstones({ edge: now - TOMBSTONE_MAX_AGE_MS }, now);
+  eq(out.edge, now - TOMBSTONE_MAX_AGE_MS, '剛好 30 天（<=）保留');
+  eq(JSON.stringify(compactTombstones(null, now)), JSON.stringify({}));
+});
+test('TOMBSTONE_MAX_AGE_MS: 為 30 天毫秒數', () => eq(TOMBSTONE_MAX_AGE_MS, 30 * 24 * 60 * 60 * 1000));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

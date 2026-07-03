@@ -2442,25 +2442,54 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.localHasImage, '本地仍應有 image 物件（只是不同步到 Firestore）');
   });
 
-  await test('team 模式：刪除本地物件 → store.remove 被呼叫、Firestore doc 消失', async () => {
+  await test('team 模式：刪除本地物件 → 墓碑化（store.tombstone 一次、非硬刪；doc 留存標 deleted）', async () => {
     const r = await teamPage.evaluate(() => {
       const target = window.__teamApi.getObjects().find(o => o.tool === 'ellipse'); // 第一筆本地 ellipse
+      const tombBefore = window.__teamSpy.__calls.tombstone;
       const removeBefore = window.__teamSpy.__calls.remove;
-      const beforeCount = window.__teamFb.__docs().length;
       window.__teamApi.select(target.id);
       window.__teamApi.deleteSelected();
       const docs = window.__teamFb.__docs();
+      const doc = docs.find(d => d.id === target.id);
       return {
         id: target.id,
+        tombDelta: window.__teamSpy.__calls.tombstone - tombBefore,
         removeDelta: window.__teamSpy.__calls.remove - removeBefore,
-        docDelta: beforeCount - docs.length,
-        stillThere: docs.some(d => d.id === target.id),
+        docStillThere: !!doc,
+        docDeleted: doc ? doc.deleted === true : false,
+        docHasDeletedAt: doc ? typeof doc.deletedAt === 'number' : false,
+        localGone: !window.__teamApi.getObjects().some(o => o.id === target.id),
       };
     });
-    console.log('     after delete:', JSON.stringify(r));
-    assert(r.removeDelta === 1, `刪除應呼叫 store.remove 一次，實際 ${r.removeDelta}`);
-    assert(r.docDelta === 1, `Firestore 應少一筆 doc，實際 ${r.docDelta}`);
-    assert(!r.stillThere, '被刪 doc 應從 Firestore 消失');
+    console.log('     after delete (tombstone):', JSON.stringify(r));
+    assert(r.tombDelta === 1, `刪除應呼叫 store.tombstone 一次，實際 ${r.tombDelta}`);
+    assert(r.removeDelta === 0, `刪除不應硬刪（store.remove），實際 ${r.removeDelta}`);
+    assert(r.docStillThere, '墓碑化：doc 應留在 Firestore（不真的刪）');
+    assert(r.docDeleted && r.docHasDeletedAt, 'doc 應標 deleted:true + deletedAt(number)');
+    assert(r.localGone, '本地畫布應已移除該物件');
+  });
+
+  await test('team 模式：墓碑後 stale client 舊快照回寫（非刪 doc）→ 不復活（client 端墓碑優先）', async () => {
+    const r = await teamPage.evaluate(async () => {
+      // A 端畫一顆並刪除（墓碑）
+      window.__teamApi.setTool('rect');
+      // 直接 seed 一顆遠端 rect 當「已存在的協作物件」→ 併入 A
+      window.__teamFb.__seed({ id: 'ghost-1', tool: 'rect', geom: { x: 8, y: 8, w: 12, h: 12 }, style: { color: '#e03131', strokeWidth: 2, fill: 'none' } });
+      const seenBefore = window.__teamApi.getObjects().some(o => o.id === 'ghost-1');
+      // A 刪除 ghost-1 → 墓碑
+      window.__teamApi.select('ghost-1');
+      window.__teamApi.deleteSelected();
+      const goneAfterDelete = !window.__teamApi.getObjects().some(o => o.id === 'ghost-1');
+      // stale client B 用舊快照把 ghost-1（非刪）回寫（覆蓋墓碑 doc）→ 觸發 onSnapshot
+      window.__teamFb.__seed({ id: 'ghost-1', tool: 'rect', geom: { x: 8, y: 8, w: 12, h: 12 }, style: { color: '#e03131', strokeWidth: 2, fill: 'none' } });
+      const revived = window.__teamApi.getObjects().some(o => o.id === 'ghost-1');
+      return { seenBefore, goneAfterDelete, revived, tomb: window.__teamApi.getTombstones()['ghost-1'] };
+    });
+    console.log('     stale write-back:', JSON.stringify(r));
+    assert(r.seenBefore, 'seed 的 ghost-1 應先併入 A');
+    assert(r.goneAfterDelete, '刪除後 A 端應移除 ghost-1');
+    assert(typeof r.tomb === 'number', 'A 端應記下 ghost-1 的墓碑');
+    assert(!r.revived, '舊快照回寫非刪 doc 不應復活已墓碑的 ghost-1');
   });
 
   await test('dev 模式（無 persist）：畫物件 → 對 store 0 呼叫（mock 完全沒被碰）', async () => {
@@ -2578,6 +2607,78 @@ async function dragDraw(page, x1, y1, x2, y2) {
     const stored = await page.evaluate(k => localStorage.getItem(k), noKey);
     assert(stored === null, 'persistLocal=false 應不寫入 localStorage');
     await page.evaluate(() => { localStorage.removeItem('pc-draw-local:e2e-no-persist'); });
+  });
+
+  await test('墓碑化：多分頁 A 刪 → B 舊快照回寫 → 不復活（read-merge-write + 載入過濾）', async () => {
+    const TOMB_PROJ = 'e2e-tomb-multitab';
+    const TOMB_KEY = 'pc-draw-local:' + TOMB_PROJ;
+    const X_ID = 'dX-tomb';
+    // 兩個「分頁」＝兩個 controller，共用同一 projectId（＝同一 localStorage key）。
+    const setup = await page.evaluate(({ key, proj, xid }) => {
+      // 舊工作副本先清乾淨
+      try { if (window.__drawTest.api) window.__drawTest.api.destroy(); } catch (_) {}
+      // 建兩個容器
+      ['tab-a', 'tab-b'].forEach(id => {
+        let el = document.getElementById(id);
+        if (!el) { el = document.createElement('div'); el.id = id; el.style.cssText = 'position:relative;width:300px;height:200px;'; document.body.appendChild(el); }
+      });
+      // 預先種一顆 X 到共用 storage（模擬兩分頁載入時都已有 X）
+      localStorage.setItem(key, JSON.stringify({
+        objects: [{ id: xid, tool: 'rect', geom: { x: 10, y: 10, w: 20, h: 20 }, style: {} }],
+        notes: [], tombstones: {},
+      }));
+      // 兩個 controller 各自從 storage 載入 X
+      window.__tabA = window.__drawTest.initDrawLayer('#tab-a', { projectId: proj });
+      window.__tabB = window.__drawTest.initDrawLayer('#tab-b', { projectId: proj });
+      return {
+        aHasX: window.__tabA.getObjects().some(o => o.id === xid),
+        bHasX: window.__tabB.getObjects().some(o => o.id === xid),
+      };
+    }, { key: TOMB_KEY, proj: TOMB_PROJ, xid: X_ID });
+    assert(setup.aHasX && setup.bHasX, `兩分頁都應載入 X，實際 ${JSON.stringify(setup)}`);
+
+    // A 刪除 X → 寫墓碑；B（仍持有舊快照 X）之後做任一持久化動作（加註記）→ 回寫時不得復活 X
+    const r = await page.evaluate(({ key, xid }) => {
+      window.__tabA.select(xid);
+      window.__tabA.deleteSelected();                 // A：墓碑化 X
+      const afterDelete = JSON.parse(localStorage.getItem(key));
+      window.__tabB.addNote('keep-me', 20, 20);        // B：舊快照仍有 X，觸發 read-merge-write
+      const afterBWrite = JSON.parse(localStorage.getItem(key));
+      return {
+        aTomb: window.__tabA.getTombstones()[xid],
+        storeTombAfterDelete: afterDelete.tombstones && afterDelete.tombstones[xid],
+        storeObjsAfterDelete: afterDelete.objects.map(o => o.id),
+        bStillHasXInMemory: window.__tabB.getObjects().some(o => o.id === xid),
+        storeObjsAfterBWrite: afterBWrite.objects.map(o => o.id),
+        storeTombAfterBWrite: afterBWrite.tombstones && afterBWrite.tombstones[xid],
+        storeNotesAfterBWrite: afterBWrite.notes.map(n => n.text),
+      };
+    }, { key: TOMB_KEY, xid: X_ID });
+    console.log('     multitab tombstone:', JSON.stringify(r));
+    assert(typeof r.aTomb === 'number', 'A 刪除後應記下 X 的墓碑');
+    assert(typeof r.storeTombAfterDelete === 'number', 'storage 應寫入 X 的墓碑');
+    assert(!r.storeObjsAfterDelete.includes(X_ID), `A 刪後 storage objects 不應含 X，實際 ${JSON.stringify(r.storeObjsAfterDelete)}`);
+    assert(r.bStillHasXInMemory, 'B 記憶體仍持有舊 X（模擬 stale 分頁）');
+    assert(!r.storeObjsAfterBWrite.includes(X_ID), `B 回寫後 storage 仍不得含 X（read-merge-write 生效），實際 ${JSON.stringify(r.storeObjsAfterBWrite)}`);
+    assert(typeof r.storeTombAfterBWrite === 'number', 'B 回寫後墓碑應保留（未被舊快照抹掉）');
+    assert(r.storeNotesAfterBWrite.includes('keep-me'), 'B 的新註記應正常寫入');
+
+    // 第三個分頁（重載）從 storage 載入 → X 已死、不復活
+    const reload = await page.evaluate(({ proj, xid }) => {
+      try { window.__tabA.destroy(); window.__tabB.destroy(); } catch (_) {}
+      window.__tabC = window.__drawTest.initDrawLayer('#tab-a', { projectId: proj });
+      return { cHasX: window.__tabC.getObjects().some(o => o.id === xid), cNotes: window.__tabC.getNotes().map(n => n.text) };
+    }, { proj: TOMB_PROJ, xid: X_ID });
+    assert(!reload.cHasX, '重載的分頁不應復活已刪的 X');
+    assert(reload.cNotes.includes('keep-me'), '重載應保留 B 的註記');
+
+    // 清理：destroy + 移除 key/容器，還原 default controller 給後續 test
+    await page.evaluate(key => {
+      try { window.__tabC.destroy(); } catch (_) {}
+      localStorage.removeItem(key);
+      ['tab-a', 'tab-b'].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
+      window.__drawTest.api = window.__drawTest.init();
+    }, TOMB_KEY);
   });
 
   await test('clear() 後 localStorage 更新為空陣列', async () => {

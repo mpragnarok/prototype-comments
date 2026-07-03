@@ -37,6 +37,11 @@ export function createDrawingStore(fb, db, projectId) {
     // drawObj 須已是向量精簡 doc（drawingToDoc 產物）；setDoc by id → upsert。
     save:   drawObj => fb.setDoc(ref(drawObj.id), { ...drawObj, updatedAt: fb.serverTimestamp() }),
     update: (id, patch) => fb.updateDoc(ref(id), { ...patch, updatedAt: fb.serverTimestamp() }),
+    // 軟刪除（墓碑）：不真的刪 doc，改寫 {deleted:true, deletedAt}，讓其他 client 的舊快照
+    // 回寫無法復活已刪項（render/合併時墓碑優先）。setDoc by id → upsert（doc 不存在也安全）。
+    // deletedAt 用 client 端 Date.now()（非 serverTimestamp）→ 跨 client 可直接比較新舊、且可即時讀。
+    tombstone: id => fb.setDoc(ref(id), { id, deleted: true, deletedAt: Date.now(), updatedAt: fb.serverTimestamp() }),
+    // 硬刪除：真正移除 doc。保留給維護腳本 / compact（清理過期墓碑）用，日常刪除走 tombstone。
     remove: id => fb.deleteDoc(ref(id)),
   };
 }

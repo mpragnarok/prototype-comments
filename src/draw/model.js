@@ -207,3 +207,49 @@ export function drawingToDoc(obj) {
   if (obj.endAnchors != null) doc.endAnchors = obj.endAnchors;     // 端點硬鎖（有才帶）
   return doc; // 注意：不含 imageRef / dataURL（PNG 永不進 Firestore）
 }
+
+// ── 墓碑（tombstone）：刪除改標記，不真的移除紀錄 ──────────────────────────────────
+// 根因：多寫入者（多分頁 / 並發 client）各自持有整份 store 再整份回寫，A 端刪掉的項目
+// 被 B 端的舊快照回寫「復活」。改法＝刪除寫入 {deleted:true, deletedAt} 墓碑；render /
+// 清單過濾墓碑；合併時墓碑優先（同 id：deletedAt 最新者贏，且墓碑壓過遠端非刪 doc）。
+// 墓碑集合形狀：{ [id]: deletedAt(ms) }。以下皆純函式，可單測。
+
+// 30 天：compact（清理）時，早於此的墓碑可安全丟棄（久到不再有舊快照能回寫復活）。
+export const TOMBSTONE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+// 合併兩份墓碑集合 → 聯集；同 id 取較新的 deletedAt（最新者贏）。回傳新物件，不改入參。
+export function mergeTombstones(a, b) {
+  const out = {};
+  for (const src of [a, b]) {
+    if (!src) continue;
+    for (const id in src) {
+      const at = Number(src[id]) || 0;
+      if (!(id in out) || at > out[id]) out[id] = at;
+    }
+  }
+  return out;
+}
+
+// 某 id 是否已被墓碑標記（deletedAt 為真值）。
+export function isTombstoned(tombstones, id) {
+  return !!(tombstones && tombstones[id]);
+}
+
+// 從帶 .id 的項目陣列（objects / notes / docs）濾掉已墓碑者。回傳新陣列。
+export function filterTombstoned(items, tombstones) {
+  if (!Array.isArray(items)) return [];
+  if (!tombstones) return items.slice();
+  return items.filter(it => !(it && isTombstoned(tombstones, it.id)));
+}
+
+// compact：丟棄早於 maxAgeMs 的墓碑（now - deletedAt > maxAgeMs）。回傳新物件。
+// 只提供函式、不自動排程（由維護腳本 / 呼叫端決定何時跑）。
+export function compactTombstones(tombstones, now = Date.now(), maxAgeMs = TOMBSTONE_MAX_AGE_MS) {
+  const out = {};
+  if (!tombstones) return out;
+  for (const id in tombstones) {
+    const at = Number(tombstones[id]) || 0;
+    if (now - at <= maxAgeMs) out[id] = at;
+  }
+  return out;
+}

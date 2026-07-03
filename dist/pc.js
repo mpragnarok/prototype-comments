@@ -739,6 +739,11 @@ function createDrawingStore(fb, db, projectId) {
     // drawObj 須已是向量精簡 doc（drawingToDoc 產物）；setDoc by id → upsert。
     save:   drawObj => fb.setDoc(ref(drawObj.id), { ...drawObj, updatedAt: fb.serverTimestamp() }),
     update: (id, patch) => fb.updateDoc(ref(id), { ...patch, updatedAt: fb.serverTimestamp() }),
+    // 軟刪除（墓碑）：不真的刪 doc，改寫 {deleted:true, deletedAt}，讓其他 client 的舊快照
+    // 回寫無法復活已刪項（render/合併時墓碑優先）。setDoc by id → upsert（doc 不存在也安全）。
+    // deletedAt 用 client 端 Date.now()（非 serverTimestamp）→ 跨 client 可直接比較新舊、且可即時讀。
+    tombstone: id => fb.setDoc(ref(id), { id, deleted: true, deletedAt: Date.now(), updatedAt: fb.serverTimestamp() }),
+    // 硬刪除：真正移除 doc。保留給維護腳本 / compact（清理過期墓碑）用，日常刪除走 tombstone。
     remove: id => fb.deleteDoc(ref(id)),
   };
 }
@@ -1840,6 +1845,52 @@ function drawingToDoc(obj) {
   if (obj.groupId != null) doc.groupId = obj.groupId;              // 群組 id
   if (obj.endAnchors != null) doc.endAnchors = obj.endAnchors;     // 端點硬鎖（有才帶）
   return doc; // 注意：不含 imageRef / dataURL（PNG 永不進 Firestore）
+}
+
+// ── 墓碑（tombstone）：刪除改標記，不真的移除紀錄 ──────────────────────────────────
+// 根因：多寫入者（多分頁 / 並發 client）各自持有整份 store 再整份回寫，A 端刪掉的項目
+// 被 B 端的舊快照回寫「復活」。改法＝刪除寫入 {deleted:true, deletedAt} 墓碑；render /
+// 清單過濾墓碑；合併時墓碑優先（同 id：deletedAt 最新者贏，且墓碑壓過遠端非刪 doc）。
+// 墓碑集合形狀：{ [id]: deletedAt(ms) }。以下皆純函式，可單測。
+
+// 30 天：compact（清理）時，早於此的墓碑可安全丟棄（久到不再有舊快照能回寫復活）。
+const TOMBSTONE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+// 合併兩份墓碑集合 → 聯集；同 id 取較新的 deletedAt（最新者贏）。回傳新物件，不改入參。
+function mergeTombstones(a, b) {
+  const out = {};
+  for (const src of [a, b]) {
+    if (!src) continue;
+    for (const id in src) {
+      const at = Number(src[id]) || 0;
+      if (!(id in out) || at > out[id]) out[id] = at;
+    }
+  }
+  return out;
+}
+
+// 某 id 是否已被墓碑標記（deletedAt 為真值）。
+function isTombstoned(tombstones, id) {
+  return !!(tombstones && tombstones[id]);
+}
+
+// 從帶 .id 的項目陣列（objects / notes / docs）濾掉已墓碑者。回傳新陣列。
+function filterTombstoned(items, tombstones) {
+  if (!Array.isArray(items)) return [];
+  if (!tombstones) return items.slice();
+  return items.filter(it => !(it && isTombstoned(tombstones, it.id)));
+}
+
+// compact：丟棄早於 maxAgeMs 的墓碑（now - deletedAt > maxAgeMs）。回傳新物件。
+// 只提供函式、不自動排程（由維護腳本 / 呼叫端決定何時跑）。
+function compactTombstones(tombstones, now = Date.now(), maxAgeMs = TOMBSTONE_MAX_AGE_MS) {
+  const out = {};
+  if (!tombstones) return out;
+  for (const id in tombstones) {
+    const at = Number(tombstones[id]) || 0;
+    if (now - at <= maxAgeMs) out[id] = at;
+  }
+  return out;
 }
 
 /**
@@ -2947,6 +2998,7 @@ function initDrawLayer(target, opts = {}) {
     editingId: null,   // 正在以輸入框編輯的文字物件 id（render 時隱藏原件，避免重疊兩個框）
     collapsed: false,  // 工具列是否收合成右下 FAB（按 ✕ 收合；點 FAB / 按工具快捷鍵展開）
     notes: [],      // 註記 pin（{id, kind:'note', text, x, y}；x/y 為 % 座標，同繪圖座標系）
+    tombstones: {}, // 墓碑 {id: deletedAt(ms)}：刪除不移除紀錄、改記墓碑 → 舊快照回寫無法復活已刪項
   };
   const history = makeUndoStack();
   // ── P7 團隊持久（選用）：把 opts.persist 解析成 drawings store（ready store 或 {fb,db,projectId}）。
@@ -2960,9 +3012,16 @@ function initDrawLayer(target, opts = {}) {
   function persistLocalSave() {
     if (!useLocalPersist || !_storage) return;
     try {
+      // 併回寫（read-merge-write）：先讀既有快照，把本地墓碑與快照裡的墓碑合併（deletedAt 最新者贏），
+      // 再用合併後的墓碑過濾 objects/notes 才寫回。→ 別的分頁刪掉的項目，不會被本分頁的舊快照回寫復活。
+      let storedTombs = null;
+      try { const prev = JSON.parse(_storage.getItem(localKey) || '{}'); storedTombs = prev && prev.tombstones; } catch (_) { }
+      const tombstones = mergeTombstones(state.tombstones, storedTombs);
+      state.tombstones = tombstones; // 吸收別分頁的墓碑到本地，供後續合併/過濾
       _storage.setItem(localKey, JSON.stringify({
-        objects: serializeObjectsForLocal(state.objects),
-        notes: state.notes,
+        objects: filterTombstoned(serializeObjectsForLocal(state.objects), tombstones),
+        notes: filterTombstoned(state.notes, tombstones),
+        tombstones,
       }));
     } catch (_) { }
   }
@@ -3016,11 +3075,12 @@ function initDrawLayer(target, opts = {}) {
   }
   function deleteNote(id) {
     state.notes = state.notes.filter(c => c.id !== id);
+    state.tombstones[id] = Date.now(); // 墓碑：記下刪除時間 → 舊快照回寫無法復活
     if (focusNoteId === id) focusNoteId = null;
     const card = noteLayer.querySelector(`.pc-note-card[data-note-id="${id}"]`);
     if (card) card.remove();
     renderNotes();
-    if (drawStore) { try { drawStore.remove(id); } catch (_) { } }
+    if (drawStore) { try { syncTombstone(id); } catch (_) { } }
     persistLocalSave();
   }
   // 留言錨定的 DOM selector 集合 → live reposition 監聽用。
@@ -3708,11 +3768,26 @@ function initDrawLayer(target, opts = {}) {
   // ── command 執行（apply＋push）/ undo / redo ─────────────────────────────────
   function runCommand(cmd) {
     state.objects = applyCommand(state.objects, cmd);
+    markTombstones(deletedIdsOf(cmd), true); // 刪除類 command → 記墓碑（create/update 為空集 → no-op）
     history.push(cmd);
     if (cmd.type === 'create') state.selectedIds = [cmd.obj.id];
     render();
     syncCommand(cmd); // P7：團隊模式才會真的寫 Firestore（drawStore 為 null 時 no-op）
     persistLocalSave(); // dev 模式本機持久化
+  }
+  // 刪除類 command 涉及的物件 id（create/update/reorder → 空陣列）。tombstone 記錄/清除共用。
+  function deletedIdsOf(cmd) {
+    if (!cmd) return [];
+    if (cmd.type === 'delete') return cmd.obj ? [cmd.obj.id] : [];
+    if (cmd.type === 'deleteMany') return (cmd.items || []).map(it => it.obj && it.obj.id).filter(Boolean);
+    if (cmd.type === 'batch') return (cmd.cmds || []).flatMap(deletedIdsOf);
+    return [];
+  }
+  // on=true：標墓碑（刪除 / redo 刪除）；on=false：清墓碑（undo 刪除 → 物件復原，不該再被過濾）。
+  function markTombstones(ids, on) {
+    if (!ids.length) return;
+    const now = Date.now();
+    ids.forEach(id => { if (on) state.tombstones[id] = now; else delete state.tombstones[id]; });
   }
   // 物件已即時改好（拖曳預覽），只補登歷史（不重複 apply）。
   function pushHistory(cmd) { history.push(cmd); render(); syncCommand(cmd); persistLocalSave(); }
@@ -3736,7 +3811,16 @@ function initDrawLayer(target, opts = {}) {
   function syncSaveById(id) { const o = findById(state.objects, id); if (o) syncSaveObj(o); }
   function syncRemoveObj(obj) {
     if (!drawStore || !obj || obj.tool === 'image') return; // image 從未存過 → 不需刪
-    try { Promise.resolve(drawStore.remove(obj.id)).catch(() => {}); } catch (_) { /* ignore */ }
+    syncTombstone(obj.id);
+  }
+  // 軟刪除到 store：寫墓碑 doc（不真的刪）→ 其他 client 舊快照回寫無法復活。
+  // store 無 tombstone（舊 store）時退回硬刪，維持相容。
+  function syncTombstone(id) {
+    if (!drawStore) return;
+    try {
+      const op = drawStore.tombstone ? drawStore.tombstone(id) : drawStore.remove(id);
+      Promise.resolve(op).catch(() => {});
+    } catch (_) { /* 持久化失敗不影響本地繪圖 */ }
   }
 
   // remote 訂閱：teammate 的向量物件即時併入（只「新增」缺的 id，de-dupe，不覆蓋本地進行中物件）。
@@ -3752,6 +3836,16 @@ function initDrawLayer(target, opts = {}) {
     let changed = false;
     remoteDocs.forEach(doc => {
       if (!doc || doc.id == null) return;
+      // 墓碑 doc：記下墓碑（deletedAt 最新者贏）+ 從本地移除該 id。teammate 刪的東西即時在本端消失。
+      if (doc.deleted) {
+        const at = Number(doc.deletedAt) || Date.now();
+        if (!state.tombstones[doc.id] || at > state.tombstones[doc.id]) state.tombstones[doc.id] = at;
+        if (localObjIds.has(doc.id)) { state.objects = state.objects.filter(o => o.id !== doc.id); changed = true; }
+        if (localNoteIds.has(doc.id)) { state.notes = state.notes.filter(n => n.id !== doc.id); changed = true; }
+        return;
+      }
+      // 墓碑優先：已被墓碑標記的 id，遠端非刪 doc（含 stale client 的舊快照回寫）一律不復活。
+      if (isTombstoned(state.tombstones, doc.id)) return;
       if (doc.kind === 'note') {
         if (localNoteIds.has(doc.id)) return;
         state.notes.push({ id: doc.id, kind: 'note', text: doc.text,
@@ -3767,6 +3861,7 @@ function initDrawLayer(target, opts = {}) {
       }
     });
     if (changed) {
+      ensureSelectionValid(); // 墓碑移除的物件若在選取中 → 清掉 dangling selection
       bumpIdSeq([...state.objects.map(o => o.id), ...state.objects.map(o => o.groupId).filter(Boolean), ...state.notes.map(n => n.id)]);
       render();
     }
@@ -3785,6 +3880,7 @@ function initDrawLayer(target, opts = {}) {
     const cmd = history.undo();
     if (!cmd) return;
     state.objects = invertCommand(state.objects, cmd);
+    markTombstones(deletedIdsOf(cmd), false); // undo 刪除 → 物件復原 → 清墓碑（否則會被過濾掉又消失）
     ensureSelectionValid();
     render();
     persistLocalSave();
@@ -3793,6 +3889,7 @@ function initDrawLayer(target, opts = {}) {
     const cmd = history.redo();
     if (!cmd) return;
     state.objects = applyCommand(state.objects, cmd);
+    markTombstones(deletedIdsOf(cmd), true); // redo 刪除 → 物件再度移除 → 重記墓碑
     ensureSelectionValid();
     render();
     persistLocalSave();
@@ -4574,10 +4671,12 @@ function initDrawLayer(target, opts = {}) {
       const raw = _storage.getItem(localKey);
       if (raw) {
         const stored = JSON.parse(raw);
-        if (Array.isArray(stored)) { state.objects = hydrateObjectsFromLocal(stored); } // backward compat
+        if (Array.isArray(stored)) { state.objects = hydrateObjectsFromLocal(stored); } // backward compat（舊格式無墓碑）
         else if (stored) {
-          state.objects = hydrateObjectsFromLocal(stored.objects || []);
-          state.notes = (stored.notes || []);
+          state.tombstones = stored.tombstones || {}; // 向後相容：舊快照無 tombstones → 空集
+          // 載入即用墓碑過濾（雙保險：即使快照 objects/notes 混入已刪項也不還原）。
+          state.objects = filterTombstoned(hydrateObjectsFromLocal(stored.objects || []), state.tombstones);
+          state.notes = filterTombstoned(stored.notes || [], state.tombstones);
         }
         // 還原後推進 id 計數器，避免新物件 id 與還原物件碰撞（見 bumpIdSeq 註解）。
         bumpIdSeq([
@@ -4630,6 +4729,14 @@ function initDrawLayer(target, opts = {}) {
     // 放一則註記（測試 / 程式化）：addNote(text, {sel|objId, relX,relY, x,y, label}) 或舊式 addNote(text, x, y)。
     addNote: (text, a, b) => saveNote(text, (a && typeof a === 'object') ? a : { x: a, y: b }),
     deleteNote,
+    getTombstones: () => ({ ...state.tombstones }), // 目前墓碑集合 {id: deletedAt}（測試 / 檢視用）
+    // compact：清掉早於 maxAgeMs（預設 30 天）的墓碑並回寫。只清本地墓碑索引；
+    // Firestore 上的墓碑 doc 由維護腳本用 store.remove 硬刪（保留該入口）。回傳清理後的集合。
+    compactTombstones: (now, maxAgeMs) => {
+      state.tombstones = compactTombstones(state.tombstones, now, maxAgeMs);
+      persistLocalSave();
+      return { ...state.tombstones };
+    },
     getDecisions: () => state.decisions.slice(), // 方案卡選擇進的佇列
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
     clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sentConfirmN = 0; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; render(); persistLocalSave(); },
