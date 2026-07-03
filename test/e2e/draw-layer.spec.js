@@ -1884,6 +1884,42 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { document.querySelectorAll('.pc-note-card').forEach(n => n.remove()); window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
   });
 
+  await test('多選批次刪除：off 模式 Shift+點 note mark → 選取(視覺回饋)；Delete 全刪；Ctrl+Z 整批還原', async () => {
+    await page.evaluate(() => {
+      const api = window.__drawTest.api;
+      api.clear(); api.setMode('note');
+      api.addNote('第一則', { sel: '#price-card', relX: 0.5, relY: 0.5, label: 'A' });
+      api.addNote('第二則', { sel: '#submit-btn', relX: 0.5, relY: 0.5, label: 'B' });
+      api.setMode('off'); // 關閉 note 模式
+    });
+    const ids = await page.evaluate(() => window.__drawTest.api.getNotes().map(n => n.id));
+    await page.click(`.pc-note-mark[data-note-id="${ids[0]}"] .pc-note-tab`, { modifiers: ['Shift'] });
+    await page.click(`.pc-note-mark[data-note-id="${ids[1]}"] .pc-note-tab`, { modifiers: ['Shift'] });
+    const sel = await page.evaluate(() => ({
+      selected: window.__drawTest.api.getSelectedNoteIds().length,
+      marked: document.querySelectorAll('.pc-note-mark.is-selected').length,
+      cardOpen: !!document.querySelector('.pc-note-card'),
+    }));
+    console.log('     note multi-select:', JSON.stringify(sel));
+    assert(sel.selected === 2, `Shift+點兩個 mark 應選取 2，實際 ${sel.selected}`);
+    assert(sel.marked === 2, `選取的 mark 應有視覺回饋 is-selected，實際 ${sel.marked}`);
+    assert(!sel.cardOpen, 'Shift+點不應開啟對話卡');
+    // 再 Shift+點第一個 → 取消選取（toggle）
+    await page.click(`.pc-note-mark[data-note-id="${ids[0]}"] .pc-note-tab`, { modifiers: ['Shift'] });
+    const toggled = await page.evaluate(() => window.__drawTest.api.getSelectedNoteIds().length);
+    assert(toggled === 1, `再 Shift+點應移除選取，實際剩 ${toggled}`);
+    await page.click(`.pc-note-mark[data-note-id="${ids[0]}"] .pc-note-tab`, { modifiers: ['Shift'] }); // 加回，湊 2
+    await page.keyboard.press('Delete');
+    const afterDel = await page.evaluate(() => window.__drawTest.api.getNotes().length);
+    console.log('     note batch delete:', afterDel);
+    assert(afterDel === 0, `Delete 應一次刪光選取的 note，實際剩 ${afterDel}`);
+    await page.keyboard.press('Control+z');
+    const afterUndo = await page.evaluate(() => window.__drawTest.api.getNotes().length);
+    console.log('     note batch delete undo:', afterUndo);
+    assert(afterUndo === 2, `Ctrl+Z 應一次還原整批刪除的 note，實際 ${afterUndo}`);
+    await page.evaluate(() => { window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+  });
+
   await test('註記輸入鍵盤：Enter → 存進標注紀錄佇列、關閉輸入卡（非直接送 AI）', async () => {
     await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('note'); });
     const layer = await page.evaluate(() => { const r = document.querySelector('.pc-note-layer').getBoundingClientRect(); return { x: Math.round(r.left + r.width * 0.5), y: Math.round(r.top + r.height * 0.4) }; });

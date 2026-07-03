@@ -247,7 +247,8 @@ export function initDrawLayer(target, opts = {}) {
   // badge 騎在框「角」外側（不落在框內緣）→ 不覆蓋元件內容；外框 pointer-events:none，
   // 只有 badge 可點開卡。圓形小（21px）放不下 icon，只留數字 → 靠外框本身區分「這是 note」。
   function notePin(c, n) {
-    const mark = drawHtmlEl('div', 'pc-note-mark' + (c.objId != null ? ' is-obj' : ''));
+    const cls = 'pc-note-mark' + (c.objId != null ? ' is-obj' : '') + (isNoteSelected(c.id) ? ' is-selected' : '');
+    const mark = drawHtmlEl('div', cls);
     mark.dataset.noteId = c.id;
     const box = resolveNoteBox(c);
     if (box) {
@@ -262,11 +263,24 @@ export function initDrawLayer(target, opts = {}) {
     const tab = drawHtmlEl('button', 'pc-note-tab');
     tab.textContent = String(n);
     tab.title = c.text;
-    tab.onclick = (e) => { e.stopPropagation(); openNoteCard(c); };
+    tab.onclick = (e) => {
+      e.stopPropagation();
+      // note 模式關閉時：Shift+點 mark ＝加入/移除多選集合（不開卡）；其餘照舊開對話卡。
+      if (e.shiftKey && state.mode !== 'note') { toggleNoteSelect(c.id); return; }
+      openNoteCard(c);
+    };
     mark.appendChild(tab);
     return mark;
   }
-  // 批次刪除目前選取的 note mark（可 undo）。選取互動（Shift+點）於後續 commit 接上。
+  // ── note 多選（off/繪圖模式 Shift+點 mark）+ 批次刪除（可 undo）───────────────────
+  const isNoteSelected = id => state.selectedNoteIds.includes(id);
+  function toggleNoteSelect(id) {
+    state.selectedNoteIds = isNoteSelected(id)
+      ? state.selectedNoteIds.filter(x => x !== id)
+      : [...state.selectedNoteIds, id];
+    renderNotes();
+  }
+  // 批次刪除目前選取的 note mark（可 undo；掛在功能一建立的 note undo 命令上）。
   function deleteSelectedNotes() {
     if (state.selectedNoteIds.length) deleteNotesById(state.selectedNoteIds.slice());
   }
@@ -651,6 +665,7 @@ export function initDrawLayer(target, opts = {}) {
     toolbar.classList.toggle('pc-draw-collapsed', state.collapsed); // 收合 → 隱藏整條工具列
     fab.classList.toggle('show', state.collapsed);                  // 收合 → 顯示右下 FAB
     noteLayer.classList.toggle('pc-note-active', state.mode === 'note'); // note 模式 → 註記層吃指標選元件
+    if (state.mode === 'note' && state.selectedNoteIds.length) state.selectedNoteIds = []; // 進 note 模式 → 清掉 off 模式的多選（選取是 off/繪圖模式概念）
     if (state.mode !== 'note') { closeAllNoteCards(); clearHover(); closeNotePanel(); } // 離開 note → 收掉卡/框/面板
     syncToolbar(toolbar, state, history);
   }
@@ -1850,6 +1865,7 @@ export function initDrawLayer(target, opts = {}) {
     getObjects: () => { stampZ(); return state.objects.map(serializeDrawObject); },
     getSelected: () => (state.selectedIds.length ? state.selectedIds[0] : null), // 向後相容：回傳首個
     getSelectedIds: () => state.selectedIds.slice(),
+    getSelectedNoteIds: () => state.selectedNoteIds.slice(), // note 多選集合（Shift+點 mark；測試/程式化用）
     select: id => { state.selectedIds = id ? [id] : []; render(); },
     selectIds: ids => { state.selectedIds = (ids || []).slice(); render(); },
     bringToFront: () => zorder('front'),

@@ -39,6 +39,9 @@ export const DRAW_STYLES = `
    外框內側透明 → 底層元件透出來仍是亮的；四周 rgba 暗罩由 noteLayer(inset:0) 裁切。 */
 .pc-note-mark.is-spotlight { box-shadow: 0 0 0 3px #6b4fb5, 0 0 0 9999px rgba(15,23,42,.55); }
 .pc-note-mark.is-spotlight.is-obj { box-shadow: 0 0 0 3px #BA1A1A, 0 0 0 9999px rgba(15,23,42,.55); }
+/* note 多選（off/繪圖模式 Shift+點）：沿用選取框 violet 虛線風格；badge 也套環，涵蓋 is-point（0×0 外框）情形。 */
+.pc-note-mark.is-selected { outline: 2px dashed #635a8f; outline-offset: 2px; }
+.pc-note-mark.is-selected .pc-note-tab { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #635a8f; }
 /* 貼元件的對話卡：中性墨黑「手繪便利貼」皮（辨識度靠形/描邊/陰影，不靠色 → 疊任何頁面都不撞色）。
    prompt 在上、AI 方案卡在下；左上小尾巴指向被標元件。 */
 .pc-note-card {
