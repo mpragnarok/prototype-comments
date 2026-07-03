@@ -3,7 +3,7 @@
  * 右鍵選單）、工具列狀態同步（syncToolbar / setMenuEnabled）與使用說明。皆吃 state/actions 參數，
  * 不持有 closure 狀態。由 draw-layer.js 建構工具列時呼叫。
  */
-import { icon, TOOL_KEY, TOOL_LABELS_ZH, TOOL_SHORTCUTS, BRUSH_LABELS, BRUSH_ICON, DRAW_BRUSHES, DRAW_COLORS, DRAW_STROKE_WIDTHS, DRAW_FONT_SIZES, DRAW_HEAD_MODES, DEFAULT_DRAW_STYLE } from './constants.js';
+import { icon, TOOL_KEY, TOOL_LABELS_ZH, TOOL_SHORTCUTS, BRUSH_LABELS, BRUSH_ICON, DRAW_BRUSHES, DRAW_COLORS, DRAW_UI_COLORS, DRAW_STROKE_WIDTHS, DRAW_FONT_SIZES, DRAW_HEAD_MODES, DEFAULT_DRAW_STYLE } from './constants.js';
 import { drawHtmlEl } from './dom.js';
 import { eyedropperSupported } from './model.js';
 
@@ -248,7 +248,7 @@ export function widthButton(w, actions) {
   b.title = w + 'px';
   b.setAttribute('aria-label', w + 'px');
   const dot = drawHtmlEl('span');
-  dot.style.cssText = `display:block;width:18px;height:${Math.min(w, 10)}px;border-radius:4px;background:#e5e7eb;`;
+  dot.style.cssText = `display:block;width:18px;height:${Math.min(w, 10)}px;border-radius:4px;background:${DRAW_UI_COLORS.onDark};`;
   b.appendChild(dot);
   b.onclick = () => { actions.setStrokeWidth(w); closeMenuOf(b); };
   return b;

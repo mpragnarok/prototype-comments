@@ -936,6 +936,18 @@ const DRAW_TOOLS = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'pe
 const DEFAULT_DRAW_STYLE = { color: '#E5484D', strokeWidth: 2, fill: 'none', fontSize: 16 };
 // Excalidraw/Figma 風格預設色（8 色）＋ picker 另附 <input type=color> 自訂任意 hex。
 const DRAW_COLORS = ['#1e1e1e', '#e03131', '#2f9e44', '#1971c2', '#f08c00', '#9c36b5', '#0c8599', '#868e96'];
+
+// 繪圖層 chrome（選取疊層 / 紀錄列 / 標籤）的語意色。SVG presentation 屬性吃不到 CSS var()，
+// 故渲染端在 JS 集中於此，與 draw/styles.js 的 --pc-* CSS token 同源（值需一致）。
+// ⚠️ 與 DRAW_COLORS（使用者筆刷 8 色）分屬兩事：這裡是工具本身的介面色，不是內容色。
+const DRAW_UI_COLORS = {
+  selection: '#635a8f',              // 選取框 / marquee / 端點 / 縮放把手（= --pc-accent）
+  selectionTint: 'rgba(99,90,143,.08)', // marquee 拖選填色（= --pc-accent-rgb @ .08）
+  sent: '#0d7a4f',                   // 已送出決策紀錄列色（= --pc-success）
+  labelBg: '#ffffff',                // 標籤底
+  labelInk: '#1e1e1e',               // 標籤文字
+  onDark: '#e5e7eb',                 // 深色工具列上的線粗示意 dot（= --pc-on-dark）
+};
 const DRAW_STROKE_WIDTHS = [1, 2, 4, 6]; // thin → bold
 const DRAW_FONT_SIZES = [12, 16, 20, 28]; // 文字工具字體大小選項（px）
 const DRAW_HEAD_MODES = ['none', 'end', 'start', 'both']; // 端點箭頭：無/終點/起點/雙向
@@ -1853,6 +1865,47 @@ function drawHtmlEl(tag, cls) {
  */
 
 const DRAW_STYLES = `
+/* ── 語意色 token（design system）：draw 引擎 chrome 用色集中於此，逐處以 var() 取用。
+   ⚠️ 筆刷 8 色調色盤（DRAW_COLORS，draw/constants.js）＝功能性使用者色盤，不在此收斂、原值不動。
+   純白 #fff、繪圖內容色 #E5484D（文字工具 ink）、彩虹自訂色 swatch，以及陰影/遮罩 rgba 效果值
+   維持字面值（非品牌色，收斂無益且易致視覺漂移）。 */
+:root {
+  /* accent — 系統主色（violet：選取/啟用/連結/紀錄強調） */
+  --pc-accent: #635a8f;
+  --pc-accent-strong: #4d4670;
+  --pc-accent-ring: #6b4fb5;         /* spotlight 聚焦環 */
+  --pc-accent-rgb: 99, 90, 143;      /* rgba() 淡色底用 */
+  /* status */
+  --pc-danger: #BA1A1A;              /* 自繪物件高亮（紅） */
+  --pc-danger-rgb: 186, 26, 26;
+  --pc-danger-ink: #b91c1c;          /* danger 按鈕文字/邊框 */
+  --pc-danger-hover: #d64545;        /* 移除鈕 hover */
+  --pc-success: #0d7a4f;             /* 已送出 */
+  --pc-success-rgb: 22, 163, 74;
+  --pc-warning: #B7791F;             /* 已排佇列（琥珀） */
+  --pc-warning-ink: #9a6a00;         /* 未送出文字 */
+  --pc-warning-rgb: 183, 121, 31;
+  /* 深色 surface（工具列/選單/help/context/fab/popover） */
+  --pc-surface-dark: #1e1e1e;
+  --pc-surface-dark-hover: #333;
+  --pc-border-dark: #444;
+  --pc-divider-dark: #3a3a3a;
+  --pc-on-dark: #e5e7eb;
+  --pc-on-dark-muted: #9aa0a6;
+  /* 淺色 surface / neutral ramp（便利貼卡＋側欄抽屜，沿用留言層 slate） */
+  --pc-surface-note: #fffdf7;
+  --pc-surface-muted: #f8fafc;
+  --pc-ink: #1f2937;
+  --pc-ink-strong: #111827;
+  --pc-ink-2: #475569;
+  --pc-ink-3: #6b7280;
+  --pc-slate: #1e293b;
+  --pc-muted: #94a3b8;
+  --pc-border: #cbd5e1;
+  --pc-border-2: #e2e8f0;
+  --pc-border-3: #eef2f6;
+}
+
 /* width/height:100% 不可省：<svg> 是 replaced element，預設 intrinsic 300×150，
    只給 inset:0 不會撐滿 host → 超出 300px 的點會穿到底下的 app（pointerdown 收不到）。 */
 #pc-draw { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 220; pointer-events: none; }
@@ -1863,87 +1916,87 @@ const DRAW_STYLES = `
 .pc-note-layer.pc-note-active { pointer-events: auto; cursor: crosshair; }
 /* hover 高亮框（inspect 式虛線）：DOM 元件 teal、自繪物件 red */
 .pc-note-hl { position: absolute; pointer-events: none; box-sizing: border-box; border-radius: 6px; z-index: 1; }
-.pc-note-hl.is-dom { outline: 2px dashed #635a8f; outline-offset: 1px; background: rgba(99,90,143,.06); }
-.pc-note-hl.is-obj { outline: 2px dashed #BA1A1A; outline-offset: 1px; background: rgba(186,26,26,.06); }
-.pc-note-hl-label { position: absolute; top: -20px; left: 0; background: #635a8f; color: #fff;
+.pc-note-hl.is-dom { outline: 2px dashed var(--pc-accent); outline-offset: 1px; background: rgba(var(--pc-accent-rgb), .06); }
+.pc-note-hl.is-obj { outline: 2px dashed var(--pc-danger); outline-offset: 1px; background: rgba(var(--pc-danger-rgb), .06); }
+.pc-note-hl-label { position: absolute; top: -20px; left: 0; background: var(--pc-accent); color: #fff;
   font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 5px; white-space: nowrap; }
-.pc-note-hl.is-obj .pc-note-hl-label { background: #BA1A1A; }
+.pc-note-hl.is-obj .pc-note-hl-label { background: var(--pc-danger); }
 /* 元件上的留言標記：持續實線外框（貼齊元件、零間隙）+ 角落圓 badge（violet=DOM、red=自繪）。
    badge 騎在框左上「角」外側（不落在框內緣）→ 不覆蓋元件內容；外框 pointer-events:none 讓底層仍可
    被 hover/點選下一則 note，只有 badge 可點。系統色改用 violet（避免與 Jubo teal 品牌色打架）。 */
 .pc-note-mark { position: absolute; box-sizing: border-box; pointer-events: none; z-index: 2;
-  border: 2px solid #635a8f; border-radius: 6px; }
-.pc-note-mark.is-obj { border-color: #BA1A1A; }
+  border: 2px solid var(--pc-accent); border-radius: 6px; }
+.pc-note-mark.is-obj { border-color: var(--pc-danger); }
 .pc-note-mark.is-point { border: none; width: 0; height: 0; } /* 無法解析範圍 → 只剩 badge */
 .pc-note-tab { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%);
   pointer-events: auto; cursor: pointer; display: flex; align-items: center; justify-content: center;
-  width: 21px; height: 21px; border-radius: 50%; background: #635a8f; color: #fff;
+  width: 21px; height: 21px; border-radius: 50%; background: var(--pc-accent); color: #fff;
   font-size: 11px; font-weight: 700; line-height: 1; border: 2px solid #fff;
   box-shadow: 0 1px 4px rgba(0,0,0,.3); }
-.pc-note-mark.is-obj .pc-note-tab { background: #BA1A1A; }
+.pc-note-mark.is-obj .pc-note-tab { background: var(--pc-danger); }
 .pc-note-tab:hover { filter: brightness(1.1); }
-.pc-note-card.is-focused { box-shadow: 4px 4px 0 rgba(17,24,39,.9); border-color: #111827; }
+.pc-note-card.is-focused { box-shadow: 4px 4px 0 rgba(17,24,39,.9); border-color: var(--pc-ink-strong); }
 .pc-note-mark.is-dim { opacity: 0.4; }
 /* spotlight：聚焦某則 note 時，用超大 box-shadow 把四周罩暗、只留目標元件亮著 + 亮環（Driver.js/Shepherd 式）。
    外框內側透明 → 底層元件透出來仍是亮的；四周 rgba 暗罩由 noteLayer(inset:0) 裁切。 */
-.pc-note-mark.is-spotlight { box-shadow: 0 0 0 3px #6b4fb5, 0 0 0 9999px rgba(15,23,42,.55); }
-.pc-note-mark.is-spotlight.is-obj { box-shadow: 0 0 0 3px #BA1A1A, 0 0 0 9999px rgba(15,23,42,.55); }
+.pc-note-mark.is-spotlight { box-shadow: 0 0 0 3px var(--pc-accent-ring), 0 0 0 9999px rgba(15,23,42,.55); }
+.pc-note-mark.is-spotlight.is-obj { box-shadow: 0 0 0 3px var(--pc-danger), 0 0 0 9999px rgba(15,23,42,.55); }
 /* 貼元件的對話卡：中性墨黑「手繪便利貼」皮（辨識度靠形/描邊/陰影，不靠色 → 疊任何頁面都不撞色）。
    prompt 在上、AI 方案卡在下；左上小尾巴指向被標元件。 */
 .pc-note-card {
   position: absolute; transform: translate(10px, 8px); pointer-events: auto; z-index: 3;
-  background: #fffdf7; color: #1f2937; border: 2px solid #1f2937; border-radius: 13px 9px 15px 8px; width: 232px;
+  background: var(--pc-surface-note); color: var(--pc-ink); border: 2px solid var(--pc-ink); border-radius: 13px 9px 15px 8px; width: 232px;
   box-shadow: 3px 3px 0 rgba(31,41,55,.85); font-size: 13px; line-height: 1.5; overflow: visible;
 }
 .pc-note-card::after { /* 指向元件的小尾巴（左上 → 指向卡片上方的錨點）*/
   content: ''; position: absolute; left: 18px; top: -11px; width: 0; height: 0;
-  border-width: 0 9px 11px 9px; border-style: solid; border-color: transparent transparent #1f2937 transparent;
+  border-width: 0 9px 11px 9px; border-style: solid; border-color: transparent transparent var(--pc-ink) transparent;
 }
 .pc-note-card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px;
-  background: transparent; border-bottom: 1px dashed #cbd5e1; padding: 8px 11px 6px; font-size: 11.5px; font-weight: 700; color: #1f2937; }
+  background: transparent; border-bottom: 1px dashed var(--pc-border); padding: 8px 11px 6px; font-size: 11.5px; font-weight: 700; color: var(--pc-ink); }
 .pc-note-card-head .pc-n-target { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-note-card-head button { border: none; background: transparent; color: #6b7280; font-size: 13px; cursor: pointer; padding: 0 2px; line-height: 1; }
+.pc-note-card-head button { border: none; background: transparent; color: var(--pc-ink-3); font-size: 13px; cursor: pointer; padding: 0 2px; line-height: 1; }
 .pc-note-card-body { padding: 9px 11px 11px; }
 .pc-note-card textarea {
   width: 100%; box-sizing: border-box; resize: vertical; min-height: 50px; border-radius: 8px 6px 9px 5px;
-  border: 1.5px solid #1f2937; background: #fff; color: #1f2937; padding: 6px 8px; font: inherit; font-size: 12.5px;
+  border: 1.5px solid var(--pc-ink); background: #fff; color: var(--pc-ink); padding: 6px 8px; font: inherit; font-size: 12.5px;
 }
-.pc-note-prompt-text { white-space: pre-wrap; word-break: break-word; background: #fff; color: #1f2937;
-  border: 1.5px solid #1f2937; border-radius: 8px 6px 9px 5px; padding: 7px 9px; font-size: 12.5px; }
-.pc-note-prompt-lbl { font-size: 10px; font-weight: 700; color: #6b7280; margin-bottom: 2px; }
+.pc-note-prompt-text { white-space: pre-wrap; word-break: break-word; background: #fff; color: var(--pc-ink);
+  border: 1.5px solid var(--pc-ink); border-radius: 8px 6px 9px 5px; padding: 7px 9px; font-size: 12.5px; }
+.pc-note-prompt-lbl { font-size: 10px; font-weight: 700; color: var(--pc-ink-3); margin-bottom: 2px; }
 .pc-note-row { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
-.pc-note-row button { border: 1.5px solid #1f2937; border-radius: 8px 6px 9px 5px; padding: 4px 12px; font-size: 12px; cursor: pointer; color: #fff; background: #111827; }
-.pc-note-row button.ghost { background: #fff; color: #1f2937; }
-.pc-note-row button.danger { background: #fff; color: #b91c1c; border-color: #b91c1c; }
+.pc-note-row button { border: 1.5px solid var(--pc-ink); border-radius: 8px 6px 9px 5px; padding: 4px 12px; font-size: 12px; cursor: pointer; color: #fff; background: var(--pc-ink-strong); }
+.pc-note-row button.ghost { background: #fff; color: var(--pc-ink); }
+.pc-note-row button.danger { background: #fff; color: var(--pc-danger-ink); border-color: var(--pc-danger-ink); }
 .pc-note-reply-slot { margin-top: 9px; }
-.pc-note-expand { margin-top: 8px; font-size: 11.5px; color: #1f2937; font-weight: 700; cursor: pointer; background: none; border: none; padding: 0; text-decoration: underline; }
+.pc-note-expand { margin-top: 8px; font-size: 11.5px; color: var(--pc-ink); font-weight: 700; cursor: pointer; background: none; border: none; padding: 0; text-decoration: underline; }
 /* 兩段式：放大成置中大面板（複雜圖文好讀） */
 .pc-note-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 2147483646; }
 .pc-note-panel { position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); z-index: 2147483647;
-  background: #fff; color: #1f2937; border-radius: 14px; width: min(560px, 92vw); max-height: 84vh; overflow: hidden;
+  background: #fff; color: var(--pc-ink); border-radius: 14px; width: min(560px, 92vw); max-height: 84vh; overflow: hidden;
   display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0,0,0,.4); }
 .pc-note-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px;
-  border-bottom: 1px solid #eef0f2; font-weight: 700; color: #4d4670; }
-.pc-note-panel-head button { border: none; background: transparent; font-size: 18px; color: #94a3b8; cursor: pointer; }
+  border-bottom: 1px solid #eef0f2; font-weight: 700; color: var(--pc-accent-strong); }
+.pc-note-panel-head button { border: none; background: transparent; font-size: 18px; color: var(--pc-muted); cursor: pointer; }
 .pc-note-panel-body { padding: 16px; overflow-y: auto; }
 .pc-draw-selection rect[data-handle] { cursor: nwse-resize; }
 .pc-draw-toolbar {
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
   z-index: 2147483600; display: flex; align-items: center; gap: 4px;
-  background: #1e1e1e; padding: 6px; border-radius: 12px;
+  background: var(--pc-surface-dark); padding: 6px; border-radius: 12px;
   box-shadow: 0 6px 24px rgba(0,0,0,.35); font-family: system-ui, -apple-system, sans-serif;
 }
 .pc-draw-tool {
   position: relative;
   width: 34px; height: 34px; border: none; border-radius: 8px; cursor: pointer;
-  background: transparent; color: #e5e7eb; font-size: 16px; line-height: 1;
+  background: transparent; color: var(--pc-on-dark); font-size: 16px; line-height: 1;
   display: flex; align-items: center; justify-content: center; transition: background .12s;
 }
-.pc-draw-tool:hover { background: #333; }
+.pc-draw-tool:hover { background: var(--pc-surface-dark-hover); }
 /* 只有「目前工具」該highlight。滑鼠點過/快捷鍵切換後殘留的瀏覽器 focus 外框會讓上一個工具看起來也被選 →
    滑鼠 focus 不顯外框（鍵盤 Tab 導覽的 :focus-visible 仍保留，維持無障礙）。 */
 .pc-draw-tool:focus:not(:focus-visible) { outline: none; }
-.pc-draw-tool.active { background: #635a8f; color: #fff; }
+.pc-draw-tool.active { background: var(--pc-accent); color: #fff; }
 .pc-draw-tool svg { display: block; }
 /* 常駐數字快捷鍵徽章（Excalidraw 風格，右下角、不擋點擊、不位移圖示） */
 .pc-draw-kbd {
@@ -1960,26 +2013,26 @@ const DRAW_STYLES = `
 }
 .pc-draw-help-box {
   width: 340px; max-width: 88vw; max-height: 80vh; overflow: auto;
-  background: #1e1e1e; color: #e5e7eb; border-radius: 12px;
+  background: var(--pc-surface-dark); color: var(--pc-on-dark); border-radius: 12px;
   box-shadow: 0 12px 40px rgba(0,0,0,.5);
 }
 .pc-draw-help-hd {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 14px; border-bottom: 1px solid #333; font-weight: 600;
+  padding: 12px 14px; border-bottom: 1px solid var(--pc-surface-dark-hover); font-weight: 600;
 }
 .pc-draw-help-x { background: transparent; border: none; color: #aaa; font-size: 15px; cursor: pointer; line-height: 1; }
 .pc-draw-help-body { padding: 12px 14px; }
-.pc-draw-help-sec-t { font-size: 12px; color: #9aa0a6; margin: 14px 0 6px; }
+.pc-draw-help-sec-t { font-size: 12px; color: var(--pc-on-dark-muted); margin: 14px 0 6px; }
 .pc-draw-help-sec-t:first-child { margin-top: 0; }
 .pc-draw-help-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; }
 .pc-draw-help-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; padding: 3px 0; }
 .pc-draw-help-row kbd, .pc-draw-help-desc kbd {
-  font: 11px/1 ui-monospace, monospace; background: #333; color: #e5e7eb;
-  border-radius: 4px; padding: 3px 6px; border: 1px solid #444; white-space: nowrap;
+  font: 11px/1 ui-monospace, monospace; background: var(--pc-surface-dark-hover); color: var(--pc-on-dark);
+  border-radius: 4px; padding: 3px 6px; border: 1px solid var(--pc-border-dark); white-space: nowrap;
 }
 .pc-draw-help-desc { font-size: 12px; color: #c5c9ce; line-height: 1.6; }
 .pc-draw-help-link {
-  display: inline-block; margin-top: 12px; color: #635a8f; font-size: 13px; text-decoration: none;
+  display: inline-block; margin-top: 12px; color: var(--pc-accent); font-size: 13px; text-decoration: none;
 }
 .pc-draw-help-link:hover { text-decoration: underline; }
 /* 收合 FAB（off 模式時取代整條工具列的右下小圓鈕） */
@@ -1987,20 +2040,20 @@ const DRAW_STYLES = `
 .pc-draw-fab {
   position: fixed; right: 20px; bottom: 20px; z-index: 2147483600;
   width: 48px; height: 48px; border-radius: 50%; border: none; cursor: pointer;
-  background: #1e1e1e; color: #e5e7eb; box-shadow: 0 6px 24px rgba(0,0,0,.35);
+  background: var(--pc-surface-dark); color: var(--pc-on-dark); box-shadow: 0 6px 24px rgba(0,0,0,.35);
   display: none; align-items: center; justify-content: center;
 }
 .pc-draw-fab.show { display: flex; }
-.pc-draw-fab:hover { background: #635a8f; color: #fff; }
+.pc-draw-fab:hover { background: var(--pc-accent); color: #fff; }
 .pc-draw-fab svg { width: 22px; height: 22px; }
-.pc-draw-sep { width: 1px; height: 22px; background: #3a3a3a; margin: 0 2px; }
+.pc-draw-sep { width: 1px; height: 22px; background: var(--pc-divider-dark); margin: 0 2px; }
 /* 顏色/線粗收進 popover，避免 pill 過長溢出 */
 .pc-draw-menu { position: relative; display: flex; align-items: center; }
 .pc-draw-cur-color { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #555; display: block; }
 .pc-draw-popover {
   position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
   display: none; flex-wrap: wrap; gap: 8px; width: 152px; box-sizing: border-box;
-  background: #1e1e1e; padding: 10px; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.4);
+  background: var(--pc-surface-dark); padding: 10px; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.4);
 }
 .pc-draw-popover-width { width: auto; flex-wrap: nowrap; }
 .pc-draw-menu.open .pc-draw-popover { display: flex; }
@@ -2008,7 +2061,7 @@ const DRAW_STYLES = `
   width: 22px; height: 22px; border-radius: 50%; padding: 0; cursor: pointer;
   border: 2px solid transparent;
 }
-.pc-draw-swatch.active { border-color: #fff; box-shadow: 0 0 0 1px #635a8f; }
+.pc-draw-swatch.active { border-color: #fff; box-shadow: 0 0 0 1px var(--pc-accent); }
 /* 第 9 顆：彩虹圓 + 「+」，明確邀請「挑自己的顏色」 */
 .pc-draw-custom-swatch {
   position: relative; display: flex; align-items: center; justify-content: center;
@@ -2027,23 +2080,23 @@ const DRAW_STYLES = `
   width: 30px; height: 30px; border: none; border-radius: 8px; cursor: pointer;
   background: transparent; display: flex; align-items: center; justify-content: center;
 }
-.pc-draw-width:hover { background: #333; }
-.pc-draw-width.active { background: #635a8f; }
+.pc-draw-width:hover { background: var(--pc-surface-dark-hover); }
+.pc-draw-width.active { background: var(--pc-accent); }
 .pc-draw-disabled { opacity: .35; cursor: not-allowed; }
-.pc-draw-eyedropper { color: #e5e7eb; }
+.pc-draw-eyedropper { color: var(--pc-on-dark); }
 /* 右鍵 context menu */
 .pc-draw-context {
   position: fixed; z-index: 2147483601; display: none; flex-direction: column;
-  min-width: 132px; padding: 4px; background: #1e1e1e; border-radius: 8px;
+  min-width: 132px; padding: 4px; background: var(--pc-surface-dark); border-radius: 8px;
   box-shadow: 0 6px 24px rgba(0,0,0,.4); font-family: system-ui, -apple-system, sans-serif;
 }
 .pc-draw-context.open { display: flex; }
 .pc-draw-context-item {
   display: flex; align-items: center; gap: 8px; width: 100%;
   padding: 6px 8px; border: none; border-radius: 6px; cursor: pointer;
-  background: transparent; color: #e5e7eb; font-size: 13px; text-align: left;
+  background: transparent; color: var(--pc-on-dark); font-size: 13px; text-align: left;
 }
-.pc-draw-context-item:hover { background: #635a8f; color: #fff; }
+.pc-draw-context-item:hover { background: var(--pc-accent); color: #fff; }
 .pc-draw-context-item svg { flex: none; }
 .pc-draw-text-input {
   position: absolute; z-index: 230; width: auto !important; min-width: 80px; max-width: 60vw;
@@ -2056,96 +2109,96 @@ const DRAW_STYLES = `
    預設 drawer 關閉（off by default）→ comment-only/一般使用不被打擾，靠 tab 才打開。 */
 .pc-draw-rec-tab {
   position: fixed; top: 62%; right: 0; transform: translateY(-50%); z-index: 2147483603;
-  display: none; border: none; cursor: pointer; background: #635a8f; color: #fff;
+  display: none; border: none; cursor: pointer; background: var(--pc-accent); color: #fff;
   padding: 14px 7px; border-radius: 10px 0 0 10px; box-shadow: -2px 0 12px rgba(0,0,0,.2);
   writing-mode: vertical-rl; font: 700 12px/1 system-ui, -apple-system, sans-serif; letter-spacing: 2px;
   transition: background .15s;
 }
-.pc-draw-rec-tab:hover { background: #4d4670; }
+.pc-draw-rec-tab:hover { background: var(--pc-accent-strong); }
 .pc-draw-rec-tab.show { display: block; }
 .pc-draw-rec-drawer {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 2147483602;
-  width: 300px; max-width: 90vw; background: #fff; border-left: 1px solid #e2e8f0;
+  width: 300px; max-width: 90vw; background: #fff; border-left: 1px solid var(--pc-border-2);
   display: flex; flex-direction: column; box-shadow: -2px 0 16px rgba(0,0,0,.12);
   transform: translateX(100%); transition: transform .22s ease;
   font-family: system-ui, -apple-system, sans-serif;
 }
 .pc-draw-rec-drawer.open { transform: translateX(0); }
-.pc-draw-rec-hd { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid #eef2f6; }
-.pc-draw-rec-hd-title { color: #635a8f; font-weight: 700; font-size: 13px; }
-.pc-draw-rec-count { background: rgba(99,90,143,.12); color: #4d4670; border-radius: 9px;
+.pc-draw-rec-hd { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--pc-border-3); }
+.pc-draw-rec-hd-title { color: var(--pc-accent); font-weight: 700; font-size: 13px; }
+.pc-draw-rec-count { background: rgba(var(--pc-accent-rgb), .12); color: var(--pc-accent-strong); border-radius: 9px;
   font-size: 10px; padding: 1px 7px; line-height: 16px; }
 .pc-draw-rec-close { margin-left: auto; border: none; background: none; cursor: pointer;
-  color: #94a3b8; font-size: 18px; line-height: 1; padding: 2px 4px; }
-.pc-draw-rec-close:hover { color: #475569; }
-.pc-draw-rec-list { padding: 10px; overflow-y: auto; flex: 1; background: #f8fafc; }
+  color: var(--pc-muted); font-size: 18px; line-height: 1; padding: 2px 4px; }
+.pc-draw-rec-close:hover { color: var(--pc-ink-2); }
+.pc-draw-rec-list { padding: 10px; overflow-y: auto; flex: 1; background: var(--pc-surface-muted); }
 .pc-draw-rec-row {
   display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
-  background: #fff; border: 1px solid #eef2f6; border-radius: 7px; padding: 8px 10px;
+  background: #fff; border: 1px solid var(--pc-border-3); border-radius: 7px; padding: 8px 10px;
   margin-bottom: 8px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04);
 }
 .pc-draw-rec-row:last-child { margin-bottom: 0; }
-.pc-draw-rec-row:hover { border-color: #635a8f; }
-.pc-draw-rec-row.selected { border-color: #635a8f; background: rgba(99,90,143,.08); box-shadow: 0 0 0 1px #635a8f; }
-.pc-draw-rec-icon { flex: none; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; color: #475569; }
+.pc-draw-rec-row:hover { border-color: var(--pc-accent); }
+.pc-draw-rec-row.selected { border-color: var(--pc-accent); background: rgba(var(--pc-accent-rgb), .08); box-shadow: 0 0 0 1px var(--pc-accent); }
+.pc-draw-rec-icon { flex: none; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; color: var(--pc-ink-2); }
 .pc-draw-rec-icon svg { display: block; }
 .pc-draw-rec-swatch { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); }
 .pc-draw-rec-group { flex: none; font-size: 11px; line-height: 1; opacity: .75; }
-.pc-draw-rec-row.is-grouped { border-left: 2px solid #635a8f; }
+.pc-draw-rec-row.is-grouped { border-left: 2px solid var(--pc-accent); }
 .pc-draw-rec-body { min-width: 0; flex: 1; }
 .pc-draw-rec-status { flex: none; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 999px; white-space: nowrap; }
-.pc-draw-rec-status.is-sent { color: #0d7a4f; background: rgba(22,163,74,.12); }
-.pc-draw-rec-status.is-unsent { color: #9a6a00; background: rgba(183,121,31,.14); }
-.pc-draw-rec-check { flex: none; width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: #635a8f; }
-.pc-draw-rec-all-wrap { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #475569; cursor: pointer; user-select: none; }
-.pc-draw-rec-all { width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: #635a8f; }
+.pc-draw-rec-status.is-sent { color: var(--pc-success); background: rgba(var(--pc-success-rgb), .12); }
+.pc-draw-rec-status.is-unsent { color: var(--pc-warning-ink); background: rgba(var(--pc-warning-rgb), .14); }
+.pc-draw-rec-check { flex: none; width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: var(--pc-accent); }
+.pc-draw-rec-all-wrap { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--pc-ink-2); cursor: pointer; user-select: none; }
+.pc-draw-rec-all { width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: var(--pc-accent); }
 /* AI 方案卡層：錨定在標注旁。容器不吃指標，卡片本身吃。 */
 .pc-draw-reply-layer { position: absolute; inset: 0; pointer-events: none; z-index: 2147483640; }
 .pc-draw-reply-card { position: absolute; pointer-events: auto; max-width: 300px; transform: translate(12px, 12px);
-  background: #fff; border: 1.5px solid #635a8f; border-radius: 10px; padding: 10px 12px;
-  box-shadow: 0 6px 24px rgba(99,90,143,.22); font: 13px/1.5 system-ui, -apple-system, sans-serif; color: #1e293b; }
-.pc-draw-reply-head { font-size: 11px; font-weight: 700; color: #4d4670; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; }
-.pc-draw-reply-close { border: none; background: transparent; color: #94a3b8; font-size: 13px; line-height: 1; cursor: pointer; padding: 0 2px; }
-.pc-draw-reply-close:hover { color: #475569; }
+  background: #fff; border: 1.5px solid var(--pc-accent); border-radius: 10px; padding: 10px 12px;
+  box-shadow: 0 6px 24px rgba(var(--pc-accent-rgb), .22); font: 13px/1.5 system-ui, -apple-system, sans-serif; color: var(--pc-slate); }
+.pc-draw-reply-head { font-size: 11px; font-weight: 700; color: var(--pc-accent-strong); margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; }
+.pc-draw-reply-close { border: none; background: transparent; color: var(--pc-muted); font-size: 13px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.pc-draw-reply-close:hover { color: var(--pc-ink-2); }
 .pc-draw-rec-remove { flex: none; border: none; background: transparent; color: #b0bcc8; font-size: 12px; line-height: 1; cursor: pointer; padding: 2px 4px; }
-.pc-draw-rec-remove:hover { color: #d64545; }
+.pc-draw-rec-remove:hover { color: var(--pc-danger-hover); }
 .pc-draw-reply-text { margin-bottom: 8px; white-space: pre-wrap; }
 .pc-draw-reply-opts { display: flex; flex-wrap: wrap; gap: 6px; }
 .pc-draw-reply-opts.is-rich { flex-direction: column; flex-wrap: nowrap; gap: 8px; }
-.pc-draw-reply-opt { padding: 6px 10px; border: 1px solid #635a8f; border-radius: 7px; background: rgba(99,90,143,.08);
-  color: #4d4670; font-size: 12px; font-weight: 600; cursor: pointer; }
-.pc-draw-reply-opt:hover { background: #635a8f; color: #fff; }
-.pc-draw-reply-opts.is-rich .pc-draw-reply-opt { background: #f8fafc; color: #1e293b; }
-.pc-draw-reply-opts.is-rich .pc-draw-reply-opt:hover { background: #eef7f7; border-color: #4d4670; color: #1e293b; }
-.pc-draw-reply-opt-label { font-weight: 700; color: #4d4670; font-size: 13px; }
-.pc-draw-reply-opt-desc { font-weight: 400; color: #475569; font-size: 12px; margin-top: 2px; }
-.pc-draw-reply-preview { margin: 6px 0 0; padding: 6px 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px;
+.pc-draw-reply-opt { padding: 6px 10px; border: 1px solid var(--pc-accent); border-radius: 7px; background: rgba(var(--pc-accent-rgb), .08);
+  color: var(--pc-accent-strong); font-size: 12px; font-weight: 600; cursor: pointer; }
+.pc-draw-reply-opt:hover { background: var(--pc-accent); color: #fff; }
+.pc-draw-reply-opts.is-rich .pc-draw-reply-opt { background: var(--pc-surface-muted); color: var(--pc-slate); }
+.pc-draw-reply-opts.is-rich .pc-draw-reply-opt:hover { background: #eef7f7; border-color: var(--pc-accent-strong); color: var(--pc-slate); }
+.pc-draw-reply-opt-label { font-weight: 700; color: var(--pc-accent-strong); font-size: 13px; }
+.pc-draw-reply-opt-desc { font-weight: 400; color: var(--pc-ink-2); font-size: 12px; margin-top: 2px; }
+.pc-draw-reply-preview { margin: 6px 0 0; padding: 6px 8px; background: #fff; border: 1px solid var(--pc-border-2); border-radius: 6px;
   font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #334155; white-space: pre; overflow-x: auto; }
 /* 真實 UI 預覽：用頁面全域樣式渲染。pointer-events:none → 戳不會誤觸；margin 歸零避免卡片內過寬留白。 */
-.pc-draw-reply-mock { margin: 6px 0; padding: 8px; background: #fff; border: 1px dashed #cbd5e1; border-radius: 6px; pointer-events: none; }
+.pc-draw-reply-mock { margin: 6px 0; padding: 8px; background: #fff; border: 1px dashed var(--pc-border); border-radius: 6px; pointer-events: none; }
 .pc-draw-reply-mock .field, .pc-draw-reply-mock fieldset { margin: 0 !important; }
 .pc-draw-reply-choose { margin-top: 8px; width: 100%; padding: 6px 10px; border: none; border-radius: 7px;
-  background: #635a8f; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
-.pc-draw-reply-choose:hover { background: #4d4670; }
-.pc-draw-reply-chosen { color: #0d7a4f; font-weight: 700; font-size: 12px; }
-.pc-draw-reply-rechoose { margin-top: 6px; padding: 3px 10px; border: 1px solid #cbd5e1; border-radius: 6px;
-  background: #fff; color: #475569; font-size: 12px; cursor: pointer; }
-.pc-draw-reply-rechoose:hover { border-color: #635a8f; color: #4d4670; background: #f4fbfb; }
-.pc-draw-rec-text { color: #1e293b; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-draw-rec-sel { margin-top: 2px; color: #4d4670; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--pc-accent); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
+.pc-draw-reply-choose:hover { background: var(--pc-accent-strong); }
+.pc-draw-reply-chosen { color: var(--pc-success); font-weight: 700; font-size: 12px; }
+.pc-draw-reply-rechoose { margin-top: 6px; padding: 3px 10px; border: 1px solid var(--pc-border); border-radius: 6px;
+  background: #fff; color: var(--pc-ink-2); font-size: 12px; cursor: pointer; }
+.pc-draw-reply-rechoose:hover { border-color: var(--pc-accent); color: var(--pc-accent-strong); background: #f4fbfb; }
+.pc-draw-rec-text { color: var(--pc-slate); font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-draw-rec-sel { margin-top: 2px; color: var(--pc-accent-strong); font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-draw-rec-empty { color: #94a3b8; font-size: 12px; text-align: center; padding: 28px 12px; line-height: 1.6; }
+.pc-draw-rec-empty { color: var(--pc-muted); font-size: 12px; text-align: center; padding: 28px 12px; line-height: 1.6; }
 /* ── 抽屜 footer：「送給 AI（N）」主要送出按鈕（teal 主色）── */
-.pc-draw-rec-footer { padding: 10px 14px; border-top: 1px solid #eef2f6; background: #fff; }
+.pc-draw-rec-footer { padding: 10px 14px; border-top: 1px solid var(--pc-border-3); background: #fff; }
 .pc-draw-rec-send-btn {
   width: 100%; padding: 8px; border: none; border-radius: 7px; cursor: pointer;
-  background: #635a8f; color: #fff; font: 600 13px/1.4 system-ui, -apple-system, sans-serif;
+  background: var(--pc-accent); color: #fff; font: 600 13px/1.4 system-ui, -apple-system, sans-serif;
   transition: background .12s, opacity .12s;
 }
 .pc-draw-rec-send-btn:disabled { opacity: .5; cursor: not-allowed; }
-.pc-draw-rec-send-btn:not(:disabled):hover { background: #4d4670; }
+.pc-draw-rec-send-btn:not(:disabled):hover { background: var(--pc-accent-strong); }
 /* AI 未連線、已排佇列：用琥珀色與「已送達」的綠/teal 區隔，讓使用者一眼看出差異。 */
-.pc-draw-rec-send-btn.pc-draw-rec-queued { background: #B7791F; }
+.pc-draw-rec-send-btn.pc-draw-rec-queued { background: var(--pc-warning); }
 .pc-draw-rec-send-btn.pc-draw-rec-queued:disabled { opacity: .85; }
 `;
 
@@ -2292,11 +2345,11 @@ function renderLabel(o, rect) {
   if (isLine) { // 白底蓋住線；rect 在前(底層)、text 在後(上層)
     const w = o.label.length * labelFs + LABEL_BG_PAD * 2; // 估寬偏大（CJK ~1em/字）→ fallback 也蓋住
     const h = labelFs + LABEL_BG_PAD * 2;
-    g.appendChild(drawSvgEl('rect', { x: x - w / 2, y: y - h / 2, width: w, height: h, fill: '#ffffff', rx: 3 }));
+    g.appendChild(drawSvgEl('rect', { x: x - w / 2, y: y - h / 2, width: w, height: h, fill: DRAW_UI_COLORS.labelBg, rx: 3 }));
   }
   const t = drawSvgEl('text', {
     x, y, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
-    fill: '#1e1e1e', 'font-size': labelFs, 'font-family': 'system-ui, sans-serif',
+    fill: DRAW_UI_COLORS.labelInk, 'font-size': labelFs, 'font-family': 'system-ui, sans-serif',
   });
   t.textContent = o.label;
   g.appendChild(t);
@@ -2587,7 +2640,7 @@ function widthButton(w, actions) {
   b.title = w + 'px';
   b.setAttribute('aria-label', w + 'px');
   const dot = drawHtmlEl('span');
-  dot.style.cssText = `display:block;width:18px;height:${Math.min(w, 10)}px;border-radius:4px;background:#e5e7eb;`;
+  dot.style.cssText = `display:block;width:18px;height:${Math.min(w, 10)}px;border-radius:4px;background:${DRAW_UI_COLORS.onDark};`;
   b.appendChild(dot);
   b.onclick = () => { actions.setStrokeWidth(w); closeMenuOf(b); };
   return b;
@@ -3272,13 +3325,13 @@ function initDrawLayer(target, opts = {}) {
     // 佇列＝畫的標注 + 在方案卡上做的「決定」，兩者都可勾選/送出/標已送。
     const annRows = annotationRows(state.objects, state.sentSigs);
     const decRows = state.decisions.map(d => ({
-      id: d.id, tool: 'text', icon: 'text', text: '✅ ' + d.text, selector: null, color: '#0d7a4f',
+      id: d.id, tool: 'text', icon: 'text', text: '✅ ' + d.text, selector: null, color: DRAW_UI_COLORS.sent,
       sent: state.sentSigs[d.id] === decisionSig(d), isDecision: true,
     }));
     const noteRows = state.notes.map((n) => ({
       id: n.id, tool: 'comment', icon: 'comment',
       text: '【註記】' + (n.label ? n.label + ' → ' : '') + n.text,
-      selector: n.sel || null, color: '#635a8f',
+      selector: n.sel || null, color: DRAW_UI_COLORS.selection,
       sent: state.sentSigs[n.id] === noteSig(n), isNote: true,
     }));
     // outbox：已送給 AI（且未再改）的項目不再留在清單（畫布上的 note/標注仍在，也不會被重複送）。
@@ -3462,7 +3515,7 @@ function initDrawLayer(target, opts = {}) {
     const b = toPxBox(r, rect);
     svg.appendChild(drawSvgEl('rect', {
       class: 'pc-draw-snap-hl', x: b.x, y: b.y, width: b.w, height: b.h, fill: 'none',
-      stroke: '#635a8f', 'stroke-width': 2, 'stroke-dasharray': '5 4', 'pointer-events': 'none',
+      stroke: DRAW_UI_COLORS.selection, 'stroke-width': 2, 'stroke-dasharray': '5 4', 'pointer-events': 'none',
     }));
   }
 
@@ -3623,7 +3676,7 @@ function initDrawLayer(target, opts = {}) {
     const g = drawSvgEl('g', { class: 'pc-draw-selection' });
     objs.forEach(o => {
       const box = selPxBox(o, rect);
-      g.appendChild(drawSvgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, fill: 'none', stroke: '#635a8f', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
+      g.appendChild(drawSvgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, fill: 'none', stroke: DRAW_UI_COLORS.selection, 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
     });
     if (objs.length === 1) { // handle 只在單選時出現
       const o = objs[0];
@@ -3633,14 +3686,14 @@ function initDrawLayer(target, opts = {}) {
         ['from', 'to'].forEach(which => {
           const cx = pctToPx(ends[which].x, rect.width);
           const cy = pctToPx(ends[which].y, rect.height);
-          g.appendChild(drawSvgEl('circle', { cx, cy, r: 4, fill: '#fff', stroke: '#635a8f', 'stroke-width': 1, 'data-endpoint': which }));
+          g.appendChild(drawSvgEl('circle', { cx, cy, r: 4, fill: '#fff', stroke: DRAW_UI_COLORS.selection, 'stroke-width': 1, 'data-endpoint': which }));
         });
       } else {
         // 其餘工具：4 角縮放 handle（text 用實際渲染框 → handle 隨字級貼合）
         const box = selPxBox(o, rect);
         ['nw', 'ne', 'se', 'sw'].forEach(name => {
           const c = boxCorner(box, name);
-          g.appendChild(drawSvgEl('rect', { x: c.x - 4, y: c.y - 4, width: 8, height: 8, fill: '#fff', stroke: '#635a8f', 'stroke-width': 1, 'data-handle': name }));
+          g.appendChild(drawSvgEl('rect', { x: c.x - 4, y: c.y - 4, width: 8, height: 8, fill: '#fff', stroke: DRAW_UI_COLORS.selection, 'stroke-width': 1, 'data-handle': name }));
         });
       }
     }
@@ -3649,7 +3702,7 @@ function initDrawLayer(target, opts = {}) {
   function renderMarquee(rect) {
     if (!state.marquee) return;
     const box = toPxBox(state.marquee, rect);
-    svg.appendChild(drawSvgEl('rect', { class: 'pc-draw-marquee', x: box.x, y: box.y, width: box.w, height: box.h, fill: 'rgba(99,90,143,.08)', stroke: '#635a8f', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
+    svg.appendChild(drawSvgEl('rect', { class: 'pc-draw-marquee', x: box.x, y: box.y, width: box.w, height: box.h, fill: DRAW_UI_COLORS.selectionTint, stroke: DRAW_UI_COLORS.selection, 'stroke-width': 1, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
   }
 
   // ── command 執行（apply＋push）/ undo / redo ─────────────────────────────────
