@@ -1839,6 +1839,140 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { document.querySelectorAll('.pc-note-card').forEach(n => n.remove()); window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
   });
 
+  await test('註記卡快捷鍵：view 卡聚焦按 Delete → 刪除該註記、關卡；Ctrl+Z 還原', async () => {
+    await page.evaluate(() => {
+      const api = window.__drawTest.api;
+      api.clear(); api.setMode('note');
+      api.addNote('刪我', { sel: '#price-card', relX: 0.5, relY: 0.5, label: 'div' });
+    });
+    const id = await page.evaluate(() => window.__drawTest.api.getNotes()[0].id);
+    await page.click(`.pc-note-mark[data-note-id="${id}"] .pc-note-tab`); // 開 view 卡（聚焦；焦點不在輸入框）
+    await page.waitForSelector('.pc-note-card');
+    await page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await page.keyboard.press('Delete');
+    const r = await page.evaluate(() => ({ notes: window.__drawTest.api.getNotes().length, card: !!document.querySelector('.pc-note-card') }));
+    console.log('     note-card Delete:', JSON.stringify(r));
+    assert(r.notes === 0, `Delete 應刪除聚焦的註記，實際剩 ${r.notes}`);
+    assert(!r.card, 'Delete 後對話卡應關閉');
+    await page.keyboard.press('Control+z');
+    const back = await page.evaluate(() => window.__drawTest.api.getNotes().length);
+    console.log('     note-card Delete undo:', back);
+    assert(back === 1, `Ctrl+Z 應還原被刪的註記，實際 ${back}`);
+    await page.evaluate(() => { document.querySelectorAll('.pc-note-card').forEach(n => n.remove()); window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+  });
+
+  await test('註記卡快捷鍵：view 卡聚焦按 E → 進入編輯（textarea 帶原文）；打字中不觸發', async () => {
+    await page.evaluate(() => {
+      const api = window.__drawTest.api;
+      api.clear(); api.setMode('note');
+      api.addNote('原始文字', { sel: '#price-card', relX: 0.5, relY: 0.5, label: 'div' });
+    });
+    const id = await page.evaluate(() => window.__drawTest.api.getNotes()[0].id);
+    await page.click(`.pc-note-mark[data-note-id="${id}"] .pc-note-tab`);
+    await page.waitForSelector('.pc-note-card');
+    await page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await page.keyboard.press('e');
+    await page.waitForSelector('.pc-note-card textarea', { timeout: 2000 });
+    const r = await page.evaluate(() => ({ ta: !!document.querySelector('.pc-note-card textarea'), val: (document.querySelector('.pc-note-card textarea') || {}).value }));
+    console.log('     note-card E→edit:', JSON.stringify(r));
+    assert(r.ta && r.val === '原始文字', `按 E 應進入編輯並帶原文，實際 ${JSON.stringify(r)}`);
+    // 打字中（focus 在 textarea）按 e → 應只輸入字元、不再觸發任何快捷鍵，卡片仍在編輯態
+    await page.click('.pc-note-card textarea');
+    await page.keyboard.press('e');
+    const typing = await page.evaluate(() => ({ ta: !!document.querySelector('.pc-note-card textarea'), notes: window.__drawTest.api.getNotes().length }));
+    assert(typing.ta && typing.notes === 1, `打字中按 e 不應觸發刪除/切換，實際 ${JSON.stringify(typing)}`);
+    await page.evaluate(() => { document.querySelectorAll('.pc-note-card').forEach(n => n.remove()); window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+  });
+
+  await test('多選批次刪除：off 模式 Shift+點 note mark → 選取(視覺回饋)；Delete 全刪；Ctrl+Z 整批還原', async () => {
+    await page.evaluate(() => {
+      const api = window.__drawTest.api;
+      api.clear(); api.setMode('note');
+      api.addNote('第一則', { sel: '#price-card', relX: 0.5, relY: 0.5, label: 'A' });
+      api.addNote('第二則', { sel: '#submit-btn', relX: 0.5, relY: 0.5, label: 'B' });
+      api.setMode('off'); // 關閉 note 模式
+    });
+    const ids = await page.evaluate(() => window.__drawTest.api.getNotes().map(n => n.id));
+    await page.click(`.pc-note-mark[data-note-id="${ids[0]}"] .pc-note-tab`, { modifiers: ['Shift'] });
+    await page.click(`.pc-note-mark[data-note-id="${ids[1]}"] .pc-note-tab`, { modifiers: ['Shift'] });
+    const sel = await page.evaluate(() => ({
+      selected: window.__drawTest.api.getSelectedNoteIds().length,
+      marked: document.querySelectorAll('.pc-note-mark.is-selected').length,
+      cardOpen: !!document.querySelector('.pc-note-card'),
+    }));
+    console.log('     note multi-select:', JSON.stringify(sel));
+    assert(sel.selected === 2, `Shift+點兩個 mark 應選取 2，實際 ${sel.selected}`);
+    assert(sel.marked === 2, `選取的 mark 應有視覺回饋 is-selected，實際 ${sel.marked}`);
+    assert(!sel.cardOpen, 'Shift+點不應開啟對話卡');
+    // 再 Shift+點第一個 → 取消選取（toggle）
+    await page.click(`.pc-note-mark[data-note-id="${ids[0]}"] .pc-note-tab`, { modifiers: ['Shift'] });
+    const toggled = await page.evaluate(() => window.__drawTest.api.getSelectedNoteIds().length);
+    assert(toggled === 1, `再 Shift+點應移除選取，實際剩 ${toggled}`);
+    await page.click(`.pc-note-mark[data-note-id="${ids[0]}"] .pc-note-tab`, { modifiers: ['Shift'] }); // 加回，湊 2
+    await page.keyboard.press('Delete');
+    const afterDel = await page.evaluate(() => window.__drawTest.api.getNotes().length);
+    console.log('     note batch delete:', afterDel);
+    assert(afterDel === 0, `Delete 應一次刪光選取的 note，實際剩 ${afterDel}`);
+    await page.keyboard.press('Control+z');
+    const afterUndo = await page.evaluate(() => window.__drawTest.api.getNotes().length);
+    console.log('     note batch delete undo:', afterUndo);
+    assert(afterUndo === 2, `Ctrl+Z 應一次還原整批刪除的 note，實際 ${afterUndo}`);
+    await page.evaluate(() => { window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+  });
+
+  await test('標注紀錄列點擊：跳到該標注置中 + pulse 強調；點 checkbox 不跳', async () => {
+    try {
+      await page.evaluate(() => {
+        const api = window.__drawTest.api;
+        api.clear(); api.setMode('note');
+        const spacer = document.createElement('div'); spacer.id = 'far-spacer'; spacer.style.cssText = 'height:3000px;';
+        const far = document.createElement('button'); far.id = 'far-target'; far.textContent = '遠方元件';
+        far.style.cssText = 'position:absolute; left:120px; top:3000px; width:100px; height:40px;';
+        document.body.appendChild(spacer); document.body.appendChild(far);
+        api.addNote('跳到我', { sel: '#far-target', relX: 0.5, relY: 0.5, label: '遠方元件' });
+        api.toggleRecordPanel(); // 開抽屜
+        window.scrollTo(0, 0);
+      });
+      const id = await page.evaluate(() => window.__drawTest.api.getNotes()[0].id);
+      // 點列本體（文字區）→ 跳轉 + pulse
+      await page.click(`.pc-draw-rec-row[data-id="${id}"] .pc-draw-rec-text`);
+      const pulseNow = await page.evaluate(() => !!document.querySelector('.pc-draw-pulse'));
+      assert(pulseNow, '點列後應立即出現 pulse 視覺強調');
+      // 等 smooth scroll 收斂：mark 落進視窗（非中途某一幀）
+      await page.waitForFunction((nid) => {
+        const mark = document.querySelector(`.pc-note-mark[data-note-id="${nid}"]`);
+        if (!mark) return false;
+        const r = mark.getBoundingClientRect();
+        return window.scrollY > 100 && r.top >= 0 && r.bottom <= window.innerHeight;
+      }, id, { timeout: 3000 });
+      const jumped = await page.evaluate((nid) => {
+        const mark = document.querySelector(`.pc-note-mark[data-note-id="${nid}"]`);
+        const r = mark && mark.getBoundingClientRect();
+        return { scrollY: Math.round(window.scrollY), inView: !!(r && r.top >= 0 && r.bottom <= window.innerHeight) };
+      }, id);
+      console.log('     rec-row jump:', JSON.stringify(jumped));
+      assert(jumped.scrollY > 100, `點列應捲動到標注，實際 scrollY=${jumped.scrollY}`);
+      assert(jumped.inView, '標注應被捲入視野（置中）');
+      // 點 checkbox 不應觸發跳轉
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.click(`.pc-draw-rec-row[data-id="${id}"] .pc-draw-rec-check`);
+      await page.waitForTimeout(250);
+      const afterCb = await page.evaluate(() => Math.round(window.scrollY));
+      console.log('     checkbox no-jump scrollY:', afterCb);
+      // checkbox 已 stopPropagation → 不觸發跳轉；不應捲到遠方標注（~2400），僅容忍 playwright 帶入視野的微量位移
+      assert(afterCb < 100, `點 checkbox 不應觸發跳轉捲動，實際 scrollY=${afterCb}`);
+    } finally {
+      // 不論成敗都清掉注入的高頁面/scroll，避免污染後續以視窗座標下筆的測試
+      await page.evaluate(() => {
+        ['far-spacer', 'far-target'].forEach(i => { const el = document.getElementById(i); if (el) el.remove(); });
+        window.scrollTo(0, 0);
+        document.querySelectorAll('.pc-note-card, .pc-draw-pulse').forEach(n => n.remove());
+        if (window.__drawTest.api.toggleRecordPanel && document.getElementById('pc-draw-rec-drawer').classList.contains('open')) window.__drawTest.api.toggleRecordPanel();
+        window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear();
+      });
+    }
+  });
+
   await test('註記輸入鍵盤：Enter → 存進標注紀錄佇列、關閉輸入卡（非直接送 AI）', async () => {
     await page.evaluate(() => { window.__drawTest.api.clear(); window.__drawTest.api.setMode('note'); });
     const layer = await page.evaluate(() => { const r = document.querySelector('.pc-note-layer').getBoundingClientRect(); return { x: Math.round(r.left + r.width * 0.5), y: Math.round(r.top + r.height * 0.4) }; });

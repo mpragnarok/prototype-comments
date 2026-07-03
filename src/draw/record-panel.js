@@ -76,7 +76,8 @@ export function recordRowEl(row, selected, onClick, checked, onToggle, onRemove)
     body.appendChild(sel);
   }
   el.appendChild(body);
-  // 已送/未送 標記：送出後沒再改＝已送（綠勾）；新建或改過＝未送（琥珀）。
+  // 送出狀態標記：outbox 下已送出（且未再改）的項目會直接離開清單（renderRecordPanel 以 !r.sent 過濾），
+  // 故清單裡的列一律顯示「● 未送」；is-sent（✓ 已送）分支保留給非 outbox 呼叫端 / 未來重用。
   const badge = drawHtmlEl('span', 'pc-draw-rec-status ' + (row.sent ? 'is-sent' : 'is-unsent'));
   badge.textContent = row.sent ? '✓ 已送' : '● 未送';
   el.appendChild(badge);
