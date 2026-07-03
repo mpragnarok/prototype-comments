@@ -35,14 +35,15 @@
   // P7 e2e helper：建一個會記錄呼叫次數的 spy store（dev 模式「0 store 呼叫」斷言用）。
   function makeSpyStore(fb) {
     const inner = createDrawingStore(fb, {}, 'proj-e2e');
-    const calls = { subscribe: 0, save: 0, update: 0, remove: 0 };
+    const calls = { subscribe: 0, save: 0, update: 0, remove: 0, tombstone: 0 };
     const spy = {
       __calls: calls,
       query: (...a) => inner.query(...a),
       subscribe: (onChange, onErr) => { calls.subscribe++; return inner.subscribe(onChange, onErr); },
       save: d => { calls.save++; return inner.save(d); },
       update: (id, p) => { calls.update++; return inner.update(id, p); },
-      remove: id => { calls.remove++; return inner.remove(id); },
+      tombstone: id => { calls.tombstone++; return inner.tombstone(id); }, // 軟刪除（墓碑）
+      remove: id => { calls.remove++; return inner.remove(id); },          // 硬刪除（維護用）
     };
     return spy;
   }

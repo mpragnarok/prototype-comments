@@ -55,4 +55,5 @@ export {
   reorderIds, reorderMany, applyStylePatch, eyedropperSupported, applyCommand, invertCommand,
   makeUndoStack, bumpIdSeq, makeDrawObject, serializeDrawObject, serializeObjectsForLocal, hydrateObjectsFromLocal,
   drawingToDoc,
+  TOMBSTONE_MAX_AGE_MS, mergeTombstones, isTombstoned, filterTombstoned, compactTombstones,
 } from './draw/model.js';
