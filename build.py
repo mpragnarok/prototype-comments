@@ -22,7 +22,8 @@ Usage:
 Default output: ../jubo-line-badminton-check-in-system/docs/design/pc.js
 Always also writes: dist/pc.js (CDN release artifact + e2e harness source).
 """
-import re, os, sys
+import re, os, sys, subprocess
+from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(ROOT, 'src')
@@ -97,8 +98,31 @@ def build():
     return '\n\n'.join(parts) + '\n', order
 
 
+def git_sha():
+    """Short SHA of the source tree, or 'unknown' outside a git checkout."""
+    try:
+        return subprocess.run(
+            ['git', '-C', ROOT, 'rev-parse', '--short', 'HEAD'],
+            capture_output=True, text=True, check=True).stdout.strip() or 'unknown'
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return 'unknown'
+
+
+def stamp(result, sha, built_utc):
+    """Prepend a provenance header and bake the SHA into PC_VERSION.
+
+    The header lets anyone reading the deployed CDN artifact see which commit
+    it came from; PC_VERSION exposes the same SHA to code at runtime (it is
+    'dev' in unbundled source)."""
+    result = result.replace("PC_VERSION = 'dev'", "PC_VERSION = '%s'" % sha, 1)
+    return '/* pc.js %s %s */\n%s' % (sha, built_utc, result)
+
+
 def main():
     result, order = build()
+    sha = git_sha()
+    built_utc = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    result = stamp(result, sha, built_utc)
     nbytes = len(result.encode('utf-8'))
 
     print('Modules (%d, dependency order):' % len(order))

@@ -15,6 +15,10 @@ import { createStore } from './store.js';
 import { createNoteModule } from './note-comments.js';
 import { initDrawLayer, shouldEnableDraw } from './draw-layer.js';
 
+// Build stamp: build.py rewrites this to the git short SHA when it bundles
+// dist/pc.js. Stays 'dev' when index.js is imported directly from source.
+export const PC_VERSION = 'dev';
+
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';
 const FB_BASE = `https://www.gstatic.com/firebasejs/${FB_VER}`;

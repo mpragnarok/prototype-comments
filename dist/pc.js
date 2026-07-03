@@ -1,3 +1,4 @@
+/* pc.js fbcffc6 2026-07-03T13:30:52Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -4705,6 +4706,10 @@ function resolveDrawStore(persist) {
  * No secrets are stored here. All Firebase config is passed by the consumer.
  */
 
+
+// Build stamp: build.py rewrites this to the git short SHA when it bundles
+// dist/pc.js. Stays 'dev' when index.js is imported directly from source.
+export const PC_VERSION = 'fbcffc6';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';
