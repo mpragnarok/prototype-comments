@@ -1,4 +1,4 @@
-/* pc.js fbcffc6 2026-07-03T13:30:52Z */
+/* pc.js 50b140f 2026-07-03T15:29:10Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -2098,6 +2098,20 @@ const DRAW_STYLES = `
 .pc-draw-fab.show { display: flex; }
 .pc-draw-fab:hover { background: var(--pc-accent); color: #fff; }
 .pc-draw-fab svg { width: 22px; height: 22px; }
+/* 回饋匣（opt-in feedbackBox）：右下常駐單鍵，打包標註＋決策一次送出。
+   放 bottom:80px 讓開它時（draw/note 模式）避開底部置中工具列，收合成 FAB 時也不疊到 FAB（right/bottom:20）。 */
+.pc-draw-feedback-box {
+  position: fixed; right: 20px; bottom: 80px; z-index: 2147483601;
+  border: none; border-radius: 999px; cursor: pointer;
+  padding: 11px 20px; font-size: 14px; font-weight: 700; line-height: 1;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--pc-accent); color: #fff;
+  box-shadow: 0 6px 24px rgba(0,0,0,.28);
+  transition: background .12s, opacity .12s;
+}
+.pc-draw-feedback-box:hover { background: var(--pc-accent-strong); }
+.pc-draw-feedback-box.is-empty { background: var(--pc-surface-dark); opacity: .55; cursor: default; }
+.pc-draw-feedback-box.is-sent { background: #2f9e44; }
 .pc-draw-sep { width: 1px; height: 22px; background: var(--pc-divider-dark); margin: 0 2px; }
 /* 顏色/線粗收進 popover，避免 pill 過長溢出 */
 .pc-draw-menu { position: relative; display: flex; align-items: center; }
@@ -3379,6 +3393,83 @@ function initDrawLayer(target, opts = {}) {
   document.body.appendChild(recordDrawer);
   document.body.appendChild(recordTab);
 
+  // ── 回饋匣（opt-in opts.feedbackBox / api.setFeedbackBox）：右下常駐「📮 送出回饋（N）」單鍵 ──
+  //   N＝未送出的標註 + 已選未送出的決策 + 未送出的註記。按一下＝一次打包送出：
+  //   決策寫 choice doc（與 hub 既有 pc-draw.json `tool:'choice'` 資料流一致）；標註/註記標記已送出
+  //   （其向量早在畫/存的當下就經 drawStore 落盤）。取代「決策按🚀、標註另外送」兩套。
+  let feedbackBox = null;
+  function ensureFeedbackBox() {
+    if (feedbackBox) return feedbackBox;
+    feedbackBox = drawHtmlEl('button', 'pc-draw-feedback-box');
+    feedbackBox.type = 'button';
+    feedbackBox.onclick = () => handleFeedbackSend();
+    document.body.appendChild(feedbackBox);
+    renderFeedbackBox();
+    return feedbackBox;
+  }
+  function removeFeedbackBox() { if (feedbackBox) { feedbackBox.remove(); feedbackBox = null; } }
+  const uncheckedUnsentNotes = () => state.notes.filter(n => !state.sendUnchecked[n.id] && state.sentSigs[n.id] !== noteSig(n));
+  function feedbackCount() { return checkedObjects().length + checkedDecisions().length + uncheckedUnsentNotes().length; }
+  function renderFeedbackBox() {
+    if (!feedbackBox || feedbackBox.dataset.inflight) return; // 送出中/回執顯示中 → 不覆寫
+    const n = feedbackCount();
+    feedbackBox.textContent = `📮 送出回饋（${n}）`;
+    feedbackBox.disabled = n === 0;
+    feedbackBox.classList.toggle('is-empty', n === 0);
+  }
+  // 決策 → choice doc（沿用 decide.js 既有格式；stable id 讓重送覆蓋而非累積）。
+  function decisionToChoiceDoc(d) {
+    return {
+      id: 'decision-' + d.id, tool: 'choice',
+      anchor: d.anchor || 'feedback-box',
+      page: (typeof document !== 'undefined' && document.title) || '',
+      text: d.text || ('決定：' + (d.optionLabel || d.optionId || d.id)),
+    };
+  }
+  async function handleFeedbackSend() {
+    if (!feedbackBox || feedbackBox.dataset.inflight) return;
+    const objs = checkedObjects(), decs = checkedDecisions(), notes = uncheckedUnsentNotes();
+    const n = objs.length + decs.length + notes.length;
+    if (!n) return; // 全沒東西 → 不送
+    feedbackBox.dataset.inflight = '1';
+    feedbackBox.disabled = true;
+    feedbackBox.textContent = '送出中…';
+    // 決策寫 choice doc（drawStore 落盤 → agent 讀得到）。任一失敗 → 保留佇列、提示可重送。
+    let ok = true;
+    if (drawStore) {
+      for (const d of decs) {
+        try { await Promise.resolve(drawStore.save(decisionToChoiceDoc(d))); } catch (_) { ok = false; }
+      }
+    }
+    if (!ok) {
+      feedbackBox.textContent = '⚠️ 送出失敗，再點一次';
+      feedbackBox.classList.remove('is-empty');
+      feedbackBox.disabled = false;
+      delete feedbackBox.dataset.inflight;
+      return;
+    }
+    // 標註/註記早已由 drawStore 自動落盤（畫/存的當下）→ 這裡標記已送出：離開未送清單、從畫布隱藏。
+    objs.forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
+    decs.forEach(d => { state.sentSigs[d.id] = decisionSig(d); });
+    notes.forEach(nn => { state.sentSigs[nn.id] = noteSig(nn); });
+    state.sentConfirmN = n;
+    render(); // 隱藏已送標註（inflight 仍在 → renderFeedbackBox 不覆寫下方回執）
+    const parts = [];
+    if (decs.length) parts.push('決策 ' + decs.length);
+    if (objs.length + notes.length) parts.push('標註 ' + (objs.length + notes.length));
+    feedbackBox.textContent = `✅ 已送出 ${n} 筆` + (parts.length ? `（${parts.join(' · ')}）` : '');
+    feedbackBox.classList.remove('is-empty');
+    feedbackBox.classList.add('is-sent');
+    feedbackBox.disabled = true;
+    setTimeout(() => { // 2.6s 後回到常駐計數態（同一批改動後可再送）
+      if (!feedbackBox) return;
+      delete feedbackBox.dataset.inflight;
+      feedbackBox.classList.remove('is-sent');
+      renderFeedbackBox();
+    }, 2600);
+  }
+  if (opts.feedbackBox) ensureFeedbackBox();
+
   // 依目前 objects/selectedIds 重畫面板（render() 每次變動都會喚起 → 即時更新）。
   function renderRecordPanel() {
     recordTab.classList.toggle('show', !state.recordOpen);
@@ -3662,6 +3753,7 @@ function initDrawLayer(target, opts = {}) {
     syncLiveLoop();       // Batch 4：有 anchor 才啟動 live reposition 監聽
     renderReplies();     // AI 方案卡：錨定貼在標注旁
     renderNotes();    // 元件註記 pin：隨元件 scroll/resize 重新定位
+    renderFeedbackBox(); // 回饋匣（若啟用）：更新「📮 送出回饋（N）」計數
   }
 
   // ── AI 方案卡（reply 通道）：渲染 + 輪詢 + 回送選擇 ─────────────────────────────
@@ -4739,6 +4831,22 @@ function initDrawLayer(target, opts = {}) {
       return { ...state.tombstones };
     },
     getDecisions: () => state.decisions.slice(), // 方案卡選擇進的佇列
+    // 外部決策 UI（如 hub decide.js 的 .opt 卡）把「選定」灌進佇列 → 由回饋匣一起計數/送出。
+    // d = { id, text, optionLabel?, optionId?, replyId?, anchor? }；同 id 再呼叫＝改選（取代舊決定）。
+    addDecision: (d) => {
+      if (!d || d.id == null) return null;
+      state.decisions = state.decisions.filter(x => x.id !== d.id);
+      const dec = { id: d.id, replyId: d.replyId != null ? d.replyId : d.id, optionId: d.optionId, optionLabel: d.optionLabel, text: d.text, anchor: d.anchor };
+      state.decisions.push(dec);
+      delete state.sendUnchecked[d.id];
+      delete state.sentSigs[d.id]; // 改選 → 回未送 → 回饋匣重新計數
+      render();
+      return dec;
+    },
+    removeDecision: (id) => { removeDecision(id); render(); },
+    // 開/關回饋匣（hub decide.js 於引擎就緒後呼叫 setFeedbackBox(true) 啟用單鍵送出）。
+    setFeedbackBox: (on) => { if (on) ensureFeedbackBox(); else removeFeedbackBox(); },
+    getFeedbackCount: () => feedbackCount(),
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
     clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sentConfirmN = 0; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; render(); persistLocalSave(); },
     destroy: () => {
@@ -4747,6 +4855,7 @@ function initDrawLayer(target, opts = {}) {
       svg.remove(); toolbar.remove(); contextMenu.remove(); replyLayer.remove();
       noteLayer.remove(); closeNotePanel(); // 留言層 + 放大面板/遮罩
       recordTab.remove(); recordDrawer.remove();
+      removeFeedbackBox();
       window.removeEventListener('resize', render);
       window.removeEventListener('scroll', renderReplies, true);
       window.removeEventListener('keydown', onKey);
@@ -4816,7 +4925,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = 'fbcffc6';
+export const PC_VERSION = '50b140f';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';

@@ -185,6 +185,20 @@ export const DRAW_STYLES = `
 .pc-draw-fab.show { display: flex; }
 .pc-draw-fab:hover { background: var(--pc-accent); color: #fff; }
 .pc-draw-fab svg { width: 22px; height: 22px; }
+/* 回饋匣（opt-in feedbackBox）：右下常駐單鍵，打包標註＋決策一次送出。
+   放 bottom:80px 讓開它時（draw/note 模式）避開底部置中工具列，收合成 FAB 時也不疊到 FAB（right/bottom:20）。 */
+.pc-draw-feedback-box {
+  position: fixed; right: 20px; bottom: 80px; z-index: 2147483601;
+  border: none; border-radius: 999px; cursor: pointer;
+  padding: 11px 20px; font-size: 14px; font-weight: 700; line-height: 1;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--pc-accent); color: #fff;
+  box-shadow: 0 6px 24px rgba(0,0,0,.28);
+  transition: background .12s, opacity .12s;
+}
+.pc-draw-feedback-box:hover { background: var(--pc-accent-strong); }
+.pc-draw-feedback-box.is-empty { background: var(--pc-surface-dark); opacity: .55; cursor: default; }
+.pc-draw-feedback-box.is-sent { background: #2f9e44; }
 .pc-draw-sep { width: 1px; height: 22px; background: var(--pc-divider-dark); margin: 0 2px; }
 /* 顏色/線粗收進 popover，避免 pill 過長溢出 */
 .pc-draw-menu { position: relative; display: flex; align-items: center; }
