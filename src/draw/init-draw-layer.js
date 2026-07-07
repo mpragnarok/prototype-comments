@@ -207,6 +207,7 @@ export function initDrawLayer(target, opts = {}) {
     const card = noteLayer.querySelector(`.pc-note-card[data-note-id="${id}"]`);
     if (card) card.remove();
     renderNotes();
+    renderRecordPanel(); // 同步標注紀錄面板：卡片『刪除』鈕直呼此函式，漏此行則已刪 note 殘留在紀錄側欄
     if (drawStore) { try { syncTombstone(id); } catch (_) { } }
     persistLocalSave();
   }
@@ -495,7 +496,7 @@ export function initDrawLayer(target, opts = {}) {
     render(); // 立即從畫布隱藏/顯示 + 連帶 renderRecordPanel 更新列與截圖預覽
   };
   const removeDecision = (id) => { state.decisions = state.decisions.filter(d => d.id !== id); delete state.sendUnchecked[id]; delete state.sentSigs[id]; renderRecordPanel(); };
-  const removeNote = (id) => { deleteNote(id); renderRecordPanel(); };
+  const removeNote = (id) => deleteNote(id); // deleteNote 已含 renderRecordPanel（畫布+紀錄面板都同步）
   const drawerAllBox = recordDrawer.querySelector('.pc-draw-rec-all');
   if (drawerAllBox) drawerAllBox.onchange = () => {
     state.sendUnchecked = {};
