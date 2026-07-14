@@ -218,7 +218,7 @@ export function initDrawLayer(target, opts = {}) {
   // 取消勾選（不送 AI）的 note 直接不畫（與「畫的標注」一致：uncheck → 從畫布消失）。
   // 編號只對「已勾選」連續給 1..n，與送出的 p.notes 陣列順序一致 → 截圖角標可對照 JSON。
   function renderNotes() {
-    [...noteLayer.querySelectorAll('.pc-note-mark')].forEach(n => n.remove());
+    [...noteLayer.querySelectorAll('.pc-note-mark')].forEach(n => { n.remove(); });
     let n = 0;
     state.notes.forEach((c) => {
       if (!onCurrentScreen(c)) return; // 決策 A：不屬當前頁的註記不畫
@@ -319,7 +319,7 @@ export function initDrawLayer(target, opts = {}) {
 
   // ── 對話卡（H：prompt 在上、AI 方案卡在下，整段貼著元件）──
   function closeAllNoteCards() {
-    noteLayer.querySelectorAll('.pc-note-card').forEach(n => n.remove());
+    noteLayer.querySelectorAll('.pc-note-card').forEach(n => { n.remove(); });
     pendingAnchor = null;
     focusNoteId = null;
   }
@@ -424,7 +424,7 @@ export function initDrawLayer(target, opts = {}) {
     return el;
   }
   // 兩段式：放大成置中大面板（複雜圖文好讀）。
-  function closeNotePanel() { [...host.querySelectorAll('.pc-note-backdrop, .pc-note-panel')].forEach(n => n.remove()); }
+  function closeNotePanel() { [...host.querySelectorAll('.pc-note-backdrop, .pc-note-panel')].forEach(n => { n.remove(); }); }
   function openNotePanel(c, rep) {
     closeNotePanel();
     const back = drawHtmlEl('div', 'pc-note-backdrop'); back.onclick = closeNotePanel;
@@ -648,10 +648,10 @@ export function initDrawLayer(target, opts = {}) {
       return;
     }
     list.appendChild(recordPreviewEl()); // 置頂：送給 AI 的畫面截圖預覽
-    rows.forEach(row => list.appendChild(recordRowEl(
+    rows.forEach(row => { list.appendChild(recordRowEl(
       row, isSelected(row.id), onRecordRowClick, !state.sendUnchecked[row.id], onToggleSendChecked,
       row.isNote ? removeNote : (row.isDecision ? removeDecision : null)
-    )));
+    )); });
     refreshRecordPreview();
   }
   // 標注紀錄頂部「送出畫面」縮圖：顯示 capturePng() 的結果（=送給 AI 的 PNG）。
@@ -797,7 +797,7 @@ export function initDrawLayer(target, opts = {}) {
       const ea = o.endAnchors; if (!ea) return;
       ['from', 'to'].forEach(w => { if (ea[w] && ea[w].kind === 'el') sels.add(ea[w].selector); });
     });
-    noteSelectors().forEach(s => sels.add(s)); // 註記錨定的 DOM 元件也要監聽 scroll/resize
+    noteSelectors().forEach(s => { sels.add(s); }); // 註記錨定的 DOM 元件也要監聽 scroll/resize
     return sels;
   }
   function liveTick() {
@@ -1014,7 +1014,7 @@ export function initDrawLayer(target, opts = {}) {
       if (cmd.type === 'create') syncSaveObj(cmd.obj);
       else if (cmd.type === 'update') syncSaveById(cmd.id);
       else if (cmd.type === 'reorder') (cmd.after || []).forEach(syncSaveById); // z 變更 → 重存
-      else if (cmd.type === 'deleteMany') (cmd.items || []).forEach(it => syncRemoveObj(it.obj));
+      else if (cmd.type === 'deleteMany') (cmd.items || []).forEach(it => { syncRemoveObj(it.obj); });
       else if (cmd.type === 'batch') (cmd.cmds || []).forEach(syncCommand);
     } catch (_) { /* 持久化失敗不影響本地繪圖 */ }
   }
@@ -1529,7 +1529,7 @@ export function initDrawLayer(target, opts = {}) {
       clone.setAttribute('width', w);
       clone.setAttribute('height', h);
       clone.setAttribute('xmlns', SVG_NS);
-      clone.querySelectorAll('.pc-draw-selection, .pc-draw-marquee').forEach(n => n.remove()); // 不要選取框
+      clone.querySelectorAll('.pc-draw-selection, .pc-draw-marquee').forEach(n => { n.remove(); }); // 不要選取框
       // 只截「納入送出」的標注：移除未勾選物件的圖元，讓截圖與送出的 JSON 一致。
       clone.querySelectorAll('[data-id]').forEach(n => { if (state.sendUnchecked[n.getAttribute('data-id')]) n.remove(); });
       const xml = new XMLSerializer().serializeToString(clone);

@@ -15,7 +15,7 @@ export function buildToolbar(state, actions, opts = {}) {
   bar.id = 'pc-draw-toolbar';
   // 1 select · 2 rect · 3 diamond · 4 ellipse · 5 arrow · 6 line · 7 [pen marker highlighter] · 8 text
   TOOLBAR_TOOL_ORDER.forEach(tool => {
-    if (tool === 'pencil') DRAW_BRUSHES.forEach(t => bar.appendChild(brushButton(t, actions))); // 7：筆刷群＝自由筆
+    if (tool === 'pencil') DRAW_BRUSHES.forEach(t => { bar.appendChild(brushButton(t, actions)); }); // 7：筆刷群＝自由筆
     else bar.appendChild(toolButton(tool, actions));
   });
   appendSep(bar);
@@ -28,7 +28,7 @@ export function buildToolbar(state, actions, opts = {}) {
   appendSep(bar);
   bar.appendChild(actButton('delete', actions)); // 刪除（z-order 已移到右鍵選單）
   appendSep(bar);
-  ['undo', 'redo'].forEach(a => bar.appendChild(actButton(a, actions)));
+  ['undo', 'redo'].forEach(a => { bar.appendChild(actButton(a, actions)); });
   appendSep(bar);
   const send = drawHtmlEl('button', 'pc-draw-tool pc-draw-send');
   send.dataset.action = 'send';
@@ -175,7 +175,7 @@ export function colorMenu(actions) {
   trigger.onclick = () => togglePopover(wrap);
   const pop = drawHtmlEl('div', 'pc-draw-popover');
   pop.dataset.menu = 'color';
-  DRAW_COLORS.forEach(c => pop.appendChild(swatchButton(c, actions)));
+  DRAW_COLORS.forEach(c => { pop.appendChild(swatchButton(c, actions)); });
   pop.appendChild(customSwatch(actions)); // 第 9 顆：自訂調色盤
   pop.appendChild(eyedropperButton(actions)); // 吸管取樣
   wrap.appendChild(trigger);
@@ -218,7 +218,7 @@ export function widthMenu(actions) {
   trigger.onclick = () => togglePopover(wrap);
   const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-width');
   pop.dataset.menu = 'width';
-  DRAW_STROKE_WIDTHS.forEach(w => pop.appendChild(widthButton(w, actions)));
+  DRAW_STROKE_WIDTHS.forEach(w => { pop.appendChild(widthButton(w, actions)); });
   wrap.appendChild(trigger);
   wrap.appendChild(pop);
   return wrap;
@@ -264,7 +264,7 @@ export function fontSizeMenu(actions) {
   trigger.onclick = () => togglePopover(wrap);
   const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-fontsize');
   pop.dataset.menu = 'fontsize';
-  DRAW_FONT_SIZES.forEach(sz => pop.appendChild(fontSizeButton(sz, actions)));
+  DRAW_FONT_SIZES.forEach(sz => { pop.appendChild(fontSizeButton(sz, actions)); });
   wrap.appendChild(trigger);
   wrap.appendChild(pop);
   return wrap;
@@ -293,7 +293,7 @@ export function headsMenu(actions) {
   trigger.onclick = () => togglePopover(wrap);
   const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-heads');
   pop.dataset.menu = 'heads';
-  DRAW_HEAD_MODES.forEach(m => pop.appendChild(headsButton(m, actions)));
+  DRAW_HEAD_MODES.forEach(m => { pop.appendChild(headsButton(m, actions)); });
   wrap.appendChild(trigger);
   wrap.appendChild(pop);
   return wrap;

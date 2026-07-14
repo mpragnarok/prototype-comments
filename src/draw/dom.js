@@ -7,7 +7,7 @@ import { SVG_NS } from './constants.js';
 // ── DOM helpers（draw 前綴避免 bundle 時與 index.js 同名 top-level 衝突）────────
 export function drawSvgEl(tag, attrs = {}) {
   const n = document.createElementNS(SVG_NS, tag);
-  Object.entries(attrs).forEach(([k, v]) => n.setAttribute(k, String(v)));
+  Object.entries(attrs).forEach(([k, v]) => { n.setAttribute(k, String(v)); });
   return n;
 }
 export function drawHtmlEl(tag, cls) {

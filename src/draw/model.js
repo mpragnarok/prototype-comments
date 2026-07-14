@@ -108,7 +108,7 @@ export function invertCommand(objects, cmd) {
   if (cmd.type === 'deleteMany') {
     const next = objects.slice();
     cmd.items.slice().sort((a, b) => a.index - b.index) // 由小到大插回 → 原索引正確
-      .forEach(it => next.splice(Math.min(it.index, next.length), 0, it.obj));
+      .forEach(it => { next.splice(Math.min(it.index, next.length), 0, it.obj); });
     return next;
   }
   return objects;
