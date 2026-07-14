@@ -1,4 +1,4 @@
-/* pc.js 50b140f 2026-07-03T15:29:10Z */
+/* pc.js 38c35a4 2026-07-14T07:02:35Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -1793,11 +1793,12 @@ function bumpIdSeq(ids) {
 
 // 組裝一個 DrawObject（plan §4.2 子集：id/tool/geom/style[/text]）。
 // z 由繪圖層在 commit 時依 DOM 順序戳上（stampZ），純函式不負責。
-function makeDrawObject({ id, tool, geom, style, text, imageRef, endAnchors } = {}) {
+function makeDrawObject({ id, tool, geom, style, text, imageRef, endAnchors, screenId } = {}) {
   const obj = { id: id || nextDrawId(), tool, geom, style: normalizeStyle(style) };
   if (text != null) obj.text = text;
   if (imageRef != null) obj.imageRef = imageRef; // image 物件的 dataURL（P3）/ 本機路徑（P4）
   if (endAnchors != null) obj.endAnchors = endAnchors; // arrow/line 端點 element/object 硬鎖
+  if (screenId != null) obj.screenId = screenId; // 決策 A：標注所屬頁面/screen（未傳＝全域，向後相容全畫）
   return obj;
 }
 
@@ -1811,6 +1812,7 @@ function serializeDrawObject(obj) {
   if (obj.z != null) out.z = obj.z;
   if (obj.groupId != null) out.groupId = obj.groupId;
   if (obj.endAnchors != null) out.endAnchors = obj.endAnchors; // 端點硬鎖（有才帶）
+  if (obj.screenId != null) out.screenId = obj.screenId;       // 頁面/screen 歸屬（有才帶）
   return out;
 }
 
@@ -1824,7 +1826,7 @@ function serializeObjectsForLocal(objects) {
 function hydrateObjectsFromLocal(docs) {
   if (!Array.isArray(docs)) return [];
   return docs.map(doc => {
-    const obj = makeDrawObject({ id: doc.id, tool: doc.tool, geom: doc.geom, style: doc.style, text: doc.text });
+    const obj = makeDrawObject({ id: doc.id, tool: doc.tool, geom: doc.geom, style: doc.style, text: doc.text, screenId: doc.screenId });
     if (doc.label != null) obj.label = doc.label;
     if (doc.anchor != null) obj.anchor = doc.anchor;
     if (doc.endAnchors != null) obj.endAnchors = doc.endAnchors;
@@ -1845,6 +1847,7 @@ function drawingToDoc(obj) {
   if (obj.z != null) doc.z = obj.z;                                // z-order
   if (obj.groupId != null) doc.groupId = obj.groupId;              // 群組 id
   if (obj.endAnchors != null) doc.endAnchors = obj.endAnchors;     // 端點硬鎖（有才帶）
+  if (obj.screenId != null) doc.screenId = obj.screenId;          // 頁面/screen 歸屬（有才帶）
   return doc; // 注意：不含 imageRef / dataURL（PNG 永不進 Firestore）
 }
 
@@ -3016,6 +3019,12 @@ function initDrawLayer(target, opts = {}) {
     tombstones: {}, // 墓碑 {id: deletedAt(ms)}：刪除不移除紀錄、改記墓碑 → 舊快照回寫無法復活已刪項
   };
   const history = makeUndoStack();
+  // ── 決策 A：頁面/screen 歸屬（選用 opts.getScreenId）──────────────────────────
+  // 傳入 getScreenId() → 新標注/註記存檔時打上當前 screenId；render/清單只顯示當前 screen
+  // 的項目（不刪物件，換頁只是不畫、換回還在）。未傳 → currentScreenId()=null → 一律全畫（向後相容）。
+  const currentScreenId = () => (typeof opts.getScreenId === 'function' ? (opts.getScreenId() ?? null) : null);
+  // 某項目（obj/note）是否屬於當前 screen：未啟用 screen 過濾、或項目無 screenId（全域/舊資料）、或相符 → true。
+  const onCurrentScreen = (x) => (typeof opts.getScreenId !== 'function') || !x || x.screenId == null || x.screenId === currentScreenId();
   // ── P7 團隊持久（選用）：把 opts.persist 解析成 drawings store（ready store 或 {fb,db,projectId}）。
   // 失敗或未提供 → drawStore = null → 一律走純本地（dev 模式 0 Firebase）。
   const drawStore = resolveDrawStore(opts.persist);
@@ -3024,6 +3033,23 @@ function initDrawLayer(target, opts = {}) {
   const localKey = 'pc-draw-local:' + (opts.projectId || 'default');
   const _storage = opts._storage || (typeof localStorage !== 'undefined' ? localStorage : null);
   const useLocalPersist = !drawStore && opts.persistLocal !== false;
+  // 送出後「已送」狀態（sentSigs）是每個瀏覽器的本地觀看狀態（非協作資料）→ 即使走 drawStore
+  // 團隊模式也存 localStorage。修 bug：不持久化時重整/重訂閱後 sentSigs 歸零，已送標注會從
+  // drawStore/本地快照被當「未送」重新畫回畫布與清單（「送出後又出現」）。
+  const sentKey = 'pc-draw-sent:' + (opts.projectId || 'default');
+  function persistSentState() {
+    if (!_storage) return;
+    try { _storage.setItem(sentKey, JSON.stringify({ sentSigs: state.sentSigs, sentConfirmN: state.sentConfirmN })); } catch (_) { /* 配額/隱私模式失敗不影響繪圖 */ }
+  }
+  function loadSentState() {
+    if (!_storage) return;
+    try {
+      const raw = _storage.getItem(sentKey);
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (s && typeof s === 'object') { state.sentSigs = s.sentSigs || {}; state.sentConfirmN = s.sentConfirmN || 0; }
+    } catch (_) { /* 損毀 → 從空白開始 */ }
+  }
   function persistLocalSave() {
     if (!useLocalPersist || !_storage) return;
     try {
@@ -3073,6 +3099,7 @@ function initDrawLayer(target, opts = {}) {
     if (c.x != null) doc.x = c.x;
     if (c.y != null) doc.y = c.y;
     if (c.label != null) doc.label = c.label;
+    if (c.screenId != null) doc.screenId = c.screenId; // 決策 A：頁面/screen 歸屬（有才帶）
     return doc;
   }
   function saveNote(text, anchor, id) {
@@ -3081,7 +3108,11 @@ function initDrawLayer(target, opts = {}) {
     const existing = id && state.notes.find(c => c.id === id);
     let c;
     if (existing) { existing.text = t; c = existing; }
-    else { c = Object.assign({ id: nextDrawId(), kind: 'note', text: t }, anchor || {}); state.notes.push(c); }
+    else {
+      c = Object.assign({ id: nextDrawId(), kind: 'note', text: t }, anchor || {});
+      if (typeof opts.getScreenId === 'function' && c.screenId == null) c.screenId = currentScreenId(); // 決策 A：新註記歸屬當前 screen
+      state.notes.push(c);
+    }
     renderNotes();
     renderRecordPanel(); // 加/改 note 後同步標注紀錄面板（新列 + 全選框 checked/indeterminate 狀態）
     if (drawStore) { try { existing ? drawStore.save({ id: c.id, kind: 'note', text: t }) : drawStore.save(noteToDoc(c)); } catch (_) { } }
@@ -3095,6 +3126,7 @@ function initDrawLayer(target, opts = {}) {
     const card = noteLayer.querySelector(`.pc-note-card[data-note-id="${id}"]`);
     if (card) card.remove();
     renderNotes();
+    renderRecordPanel(); // 同步標注紀錄面板：卡片『刪除』鈕直呼此函式，漏此行則已刪 note 殘留在紀錄側欄
     if (drawStore) { try { syncTombstone(id); } catch (_) { } }
     persistLocalSave();
   }
@@ -3108,6 +3140,7 @@ function initDrawLayer(target, opts = {}) {
     [...noteLayer.querySelectorAll('.pc-note-mark')].forEach(n => n.remove());
     let n = 0;
     state.notes.forEach((c) => {
+      if (!onCurrentScreen(c)) return; // 決策 A：不屬當前頁的註記不畫
       if (state.sendUnchecked[c.id]) return;
       noteLayer.appendChild(notePin(c, ++n));
     });
@@ -3382,7 +3415,7 @@ function initDrawLayer(target, opts = {}) {
     render(); // 立即從畫布隱藏/顯示 + 連帶 renderRecordPanel 更新列與截圖預覽
   };
   const removeDecision = (id) => { state.decisions = state.decisions.filter(d => d.id !== id); delete state.sendUnchecked[id]; delete state.sentSigs[id]; renderRecordPanel(); };
-  const removeNote = (id) => { deleteNote(id); renderRecordPanel(); };
+  const removeNote = (id) => deleteNote(id); // deleteNote 已含 renderRecordPanel（畫布+紀錄面板都同步）
   const drawerAllBox = recordDrawer.querySelector('.pc-draw-rec-all');
   if (drawerAllBox) drawerAllBox.onchange = () => {
     state.sendUnchecked = {};
@@ -3453,6 +3486,7 @@ function initDrawLayer(target, opts = {}) {
     decs.forEach(d => { state.sentSigs[d.id] = decisionSig(d); });
     notes.forEach(nn => { state.sentSigs[nn.id] = noteSig(nn); });
     state.sentConfirmN = n;
+    persistSentState(); // 修 bug：持久化「已送」→ 重整/重訂閱後不再把已送標註當未送畫回
     render(); // 隱藏已送標註（inflight 仍在 → renderFeedbackBox 不覆寫下方回執）
     const parts = [];
     if (decs.length) parts.push('決策 ' + decs.length);
@@ -3475,12 +3509,13 @@ function initDrawLayer(target, opts = {}) {
     recordTab.classList.toggle('show', !state.recordOpen);
     recordDrawer.classList.toggle('open', state.recordOpen);
     // 佇列＝畫的標注 + 在方案卡上做的「決定」，兩者都可勾選/送出/標已送。
-    const annRows = annotationRows(state.objects, state.sentSigs);
+    // 決策 A：清單也依當前 screen 過濾（與畫布一致）；決策卡為全域 AI 產物，不分頁。
+    const annRows = annotationRows(state.objects.filter(onCurrentScreen), state.sentSigs);
     const decRows = state.decisions.map(d => ({
       id: d.id, tool: 'text', icon: 'text', text: '✅ ' + d.text, selector: null, color: DRAW_UI_COLORS.sent,
       sent: state.sentSigs[d.id] === decisionSig(d), isDecision: true,
     }));
-    const noteRows = state.notes.map((n) => ({
+    const noteRows = state.notes.filter(onCurrentScreen).map((n) => ({
       id: n.id, tool: 'comment', icon: 'comment',
       text: '【註記】' + (n.label ? n.label + ' → ' : '') + n.text,
       selector: n.sel || null, color: DRAW_UI_COLORS.selection,
@@ -3731,6 +3766,7 @@ function initDrawLayer(target, opts = {}) {
     let _commentSeqFallback = _commentSeqMap.size; // draft 用 next 號
     [...state.objects, state.draft].forEach(o => {
       if (!o) return;
+      if (o !== state.draft && !onCurrentScreen(o)) return; // 決策 A：不屬當前頁的標注不畫（不刪，換回頁還在）
       if (o !== state.draft && isSent(o)) return; // 已送出 → 不畫在畫布（保留在標注紀錄）
       if (o !== state.draft && state.sendUnchecked[o.id]) return; // 標注紀錄取消勾選 → 從畫布隱藏（也不進送出截圖）
       if (o.id === state.editingId) return;       // 正在編輯的文字 → 隱藏原件，只留輸入框（不重疊兩個）
@@ -3860,6 +3896,10 @@ function initDrawLayer(target, opts = {}) {
 
   // ── command 執行（apply＋push）/ undo / redo ─────────────────────────────────
   function runCommand(cmd) {
+    // 決策 A：新畫的標注打上當前 screenId（只在啟用 getScreenId 時；未設過才戳，redo 不覆蓋）。
+    if (cmd.type === 'create' && cmd.obj && cmd.obj.screenId == null && typeof opts.getScreenId === 'function') {
+      cmd.obj.screenId = currentScreenId();
+    }
     state.objects = applyCommand(state.objects, cmd);
     markTombstones(deletedIdsOf(cmd), true); // 刪除類 command → 記墓碑（create/update 為空集 → no-op）
     history.push(cmd);
@@ -3943,7 +3983,8 @@ function initDrawLayer(target, opts = {}) {
         if (localNoteIds.has(doc.id)) return;
         state.notes.push({ id: doc.id, kind: 'note', text: doc.text,
           sel: doc.sel || null, objId: doc.objId != null ? doc.objId : null,
-          relX: doc.relX, relY: doc.relY, x: doc.x, y: doc.y, label: doc.label || '' });
+          relX: doc.relX, relY: doc.relY, x: doc.x, y: doc.y, label: doc.label || '',
+          ...(doc.screenId != null ? { screenId: doc.screenId } : {}) });
         changed = true;
       } else if (doc.geom) {
         // 只吸收真正的向量繪圖 doc。live-markup 的 /api/draw 與 decide.js 決策按鈕共用同一 collection，
@@ -3961,7 +4002,7 @@ function initDrawLayer(target, opts = {}) {
   }
   // Firestore doc（含 updatedAt 等 metadata）→ 乾淨 DrawObject（丟掉非向量欄位）。
   function rehydrateDrawing(doc) {
-    const obj = makeDrawObject({ id: doc.id, tool: doc.tool, geom: doc.geom, style: doc.style, text: doc.text });
+    const obj = makeDrawObject({ id: doc.id, tool: doc.tool, geom: doc.geom, style: doc.style, text: doc.text, screenId: doc.screenId });
     if (doc.label != null) obj.label = doc.label;
     if (doc.anchor != null) obj.anchor = doc.anchor;
     if (doc.groupId != null) obj.groupId = doc.groupId;
@@ -4478,6 +4519,7 @@ function initDrawLayer(target, opts = {}) {
       checkedDecisions().forEach(d => { state.sentSigs[d.id] = decisionSig(d); });
       state.notes.filter(n => !state.sendUnchecked[n.id]).forEach(n => { state.sentSigs[n.id] = noteSig(n); });
       state.sentConfirmN = n; // outbox 清空清單後，footer 靠此維持「✅ 已送出（N 筆）」確認
+      persistSentState(); // 修 bug：持久化「已送」→ 重整/重訂閱後不再把已送標注當未送畫回
       render(); // 立刻更新：畫布隱藏已送標注 + 各列「已送」標記（inflight 仍在 → 不蓋按鈕狀態文字）
       // 2 秒後恢復成可再送（同一批可重送；server 不去重、AI 端 cursor 會收到）。
       setTimeout(() => { delete sendBtn.dataset.inflight; renderRecordPanel(); }, 2000);
@@ -4781,6 +4823,7 @@ function initDrawLayer(target, opts = {}) {
     } catch (_) { /* localStorage 失敗 / JSON 損毀 → 從空白開始 */ }
   }
 
+  loadSentState(); // 修 bug：還原「已送」狀態 → 已送標注重整後仍隱藏、不會又出現在畫布/清單
   applyMode();
   render();
   startSync(); // P7：團隊模式才訂閱 + 載入既有 drawings（dev 模式 drawStore=null → no-op）
@@ -4848,7 +4891,9 @@ function initDrawLayer(target, opts = {}) {
     setFeedbackBox: (on) => { if (on) ensureFeedbackBox(); else removeFeedbackBox(); },
     getFeedbackCount: () => feedbackCount(),
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
-    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sentConfirmN = 0; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; render(); persistLocalSave(); },
+    // 決策 A：外部（如 live-markup 換頁監聽）呼叫 → 依當前 getScreenId() 重畫，只顯示當前頁標注。
+    refresh: () => render(),
+    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sentConfirmN = 0; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; render(); persistLocalSave(); persistSentState(); },
     destroy: () => {
       stopLive(); // Batch 4：拆掉 live reposition 監聽/rAF/ResizeObserver
       replyPolling = false; // 停掉 AI 方案卡輪詢
@@ -4925,7 +4970,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = '50b140f';
+export const PC_VERSION = '38c35a4';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';
