@@ -84,7 +84,7 @@ function comparePng(basePath, outPath, diffPath) {
     console.log('baseline 已更新 →', path.relative(process.cwd(), OUT_DIR));
   } else {
     console.log('比對結果:');
-    results.forEach(r => console.log(r));
+    results.forEach(r => { console.log(r); });
     process.exit(failed ? 1 : 0);
   }
 })().catch(e => { console.error(e); process.exit(1); });

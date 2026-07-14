@@ -28,8 +28,8 @@ export function createMockFirebase(initial = {}) {
     id,
     data: () => ({ ...data }),
   }));
-  const emitSnap = () => state.snapListeners.forEach(l => l({ docs: docsArray() }));
-  const emitAuth = () => state.authListeners.forEach(cb => cb(state.user));
+  const emitSnap = () => state.snapListeners.forEach(l => { l({ docs: docsArray() }); });
+  const emitAuth = () => state.authListeners.forEach(cb => { cb(state.user); });
 
   return {
     // ─ app ─
