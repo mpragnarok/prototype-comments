@@ -161,7 +161,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
     const tools = await page.evaluate(() => window.__drawTest.api.getObjects().map(o => o.tool));
     console.log('     objects:', JSON.stringify(tools));
     assert(tools.length === 4, `應有 4 筆物件，實際 ${tools.length}`);
-    ['ellipse', 'arrow', 'pencil', 'text'].forEach(t => assert(tools.includes(t), `缺 ${t}`));
+    ['ellipse', 'arrow', 'pencil', 'text'].forEach(t => { assert(tools.includes(t), `缺 ${t}`); });
   });
 
   await test('模式狀態機 toggle pointer-events：comment/off→none，draw→auto', async () => {
@@ -672,7 +672,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
     });
     console.log('     bug2 arrows:', JSON.stringify(r));
     assert(r.length === 2, `應有 2 條箭頭，實際 ${r.length}`);
-    r.forEach((a, i) => assert(a.markerFill === a.stroke, `箭頭 ${i} marker fill(${a.markerFill}) 應 === stroke(${a.stroke})`));
+    r.forEach((a, i) => { assert(a.markerFill === a.stroke, `箭頭 ${i} marker fill(${a.markerFill}) 應 === stroke(${a.stroke})`); });
     const colors = r.map(a => a.stroke).sort();
     assert(colors[0] === '#0066FF' && colors[1] === '#111111', `兩箭頭應為藍/黑兩色，實際 ${JSON.stringify(colors)}`);
   });
@@ -784,7 +784,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
       return { out, allPE, allVisible, markerBadge, hlBadge, order, pencilToolBtn, offBadge, actBadge, want };
     });
     console.log('     kbd badges:', JSON.stringify(r.out), 'order:', JSON.stringify(r.order));
-    Object.entries(r.want).forEach(([tool, n]) => assert(r.out[tool] === n, `${tool} 徽章應為 ${n}，實際 ${r.out[tool]}`));
+    Object.entries(r.want).forEach(([tool, n]) => { assert(r.out[tool] === n, `${tool} 徽章應為 ${n}，實際 ${r.out[tool]}`); });
     assert(r.out.pen === '7', `pen 筆刷徽章應為 7，實際 ${r.out.pen}`);
     assert(r.allVisible && r.allPE, `徽章應可見且 pointer-events:none（visible=${r.allVisible} pe=${r.allPE}）`);
     assert(!r.markerBadge && !r.hlBadge, 'marker/highlighter 不應有徽章');
@@ -1497,7 +1497,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.hasCard && r.cardExcluded === true, '開著的對話卡（小視窗）不應入鏡');
     await page.evaluate(() => { // 收尾：關面板（recordOpen 若留 true，之後 render 會重開抽屜蓋住 rec-tab）+ 移除對話卡 + 還原 draw 模式 + 清狀態
       window.__drawTest.api.toggleRecordPanel(); // 我開過一次 → 這次關回
-      document.querySelectorAll('.pc-note-card').forEach(n => n.remove());
+      document.querySelectorAll('.pc-note-card').forEach(n => { n.remove(); });
       window.__drawTest.api.setMode('draw');
       window.__drawTest.api.clear();
     });
@@ -1821,7 +1821,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
     console.log('     single-dialog:', JSON.stringify(r));
     assert(r.afterA === 1, `開 A 後應有 1 張對話卡，實際 ${r.afterA}`);
     assert(r.count === 1 && r.onlyB, `開 B 後應只剩 B 一張卡（舊卡自動關），實際 ${JSON.stringify(r)}`);
-    await page.evaluate(() => { document.querySelectorAll('.pc-note-card').forEach(n => n.remove()); window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+    await page.evaluate(() => { document.querySelectorAll('.pc-note-card').forEach(n => { n.remove(); }); window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
   });
 
   await test('spotlight：開某則 note 卡 → 該 mark 取得 is-spotlight（大範圍暗罩聚光）', async () => {
@@ -1836,7 +1836,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
     console.log('     spotlight:', JSON.stringify({ spot: r.spot, hasBackdrop: /9999px/.test(r.shadow) }));
     assert(r.spot, '開卡的 note mark 應有 is-spotlight');
     assert(/9999px/.test(r.shadow), 'is-spotlight 應套用大範圍暗罩 box-shadow（9999px spread）');
-    await page.evaluate(() => { document.querySelectorAll('.pc-note-card').forEach(n => n.remove()); window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+    await page.evaluate(() => { document.querySelectorAll('.pc-note-card').forEach(n => { n.remove(); }); window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
   });
 
   await test('註記輸入鍵盤：Enter → 存進標注紀錄佇列、關閉輸入卡（非直接送 AI）', async () => {

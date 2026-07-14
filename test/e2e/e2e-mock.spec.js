@@ -229,7 +229,7 @@ const seedComment = (over = {}) => ({ type: 'positional', screenId: 's1', x: 50,
     await mp.evaluate(() => document.querySelector('.pc-popover .pc-reaction-chip')?.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })));
     assert(lpShown, '手機長按 chip 應顯示名單 popover');
     // 收掉名單，再測短按 tap → toggle 且不開名單
-    await mp.evaluate(() => document.querySelectorAll('.pc-reaction-users').forEach(p => p.remove()));
+    await mp.evaluate(() => document.querySelectorAll('.pc-reaction-users').forEach(p => { p.remove(); }));
     const before = await mp.evaluate(c => (window.__fb.__docs().find(d => d.id === c)?.reactions?.['👍'] || []).length, cid);
     await mp.evaluate(() => {
       const chip = document.querySelector('.pc-popover .pc-reaction-chip');

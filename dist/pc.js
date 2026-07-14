@@ -1,4 +1,4 @@
-/* pc.js 38c35a4 2026-07-14T07:02:35Z */
+/* pc.js 7e553d1 2026-07-14T08:08:17Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -1748,7 +1748,7 @@ function invertCommand(objects, cmd) {
   if (cmd.type === 'deleteMany') {
     const next = objects.slice();
     cmd.items.slice().sort((a, b) => a.index - b.index) // 由小到大插回 → 原索引正確
-      .forEach(it => next.splice(Math.min(it.index, next.length), 0, it.obj));
+      .forEach(it => { next.splice(Math.min(it.index, next.length), 0, it.obj); });
     return next;
   }
   return objects;
@@ -1905,7 +1905,7 @@ function compactTombstones(tombstones, now = Date.now(), maxAgeMs = TOMBSTONE_MA
 // ── DOM helpers（draw 前綴避免 bundle 時與 index.js 同名 top-level 衝突）────────
 function drawSvgEl(tag, attrs = {}) {
   const n = document.createElementNS(SVG_NS, tag);
-  Object.entries(attrs).forEach(([k, v]) => n.setAttribute(k, String(v)));
+  Object.entries(attrs).forEach(([k, v]) => { n.setAttribute(k, String(v)); });
   return n;
 }
 function drawHtmlEl(tag, cls) {
@@ -2476,7 +2476,7 @@ function buildToolbar(state, actions, opts = {}) {
   bar.id = 'pc-draw-toolbar';
   // 1 select · 2 rect · 3 diamond · 4 ellipse · 5 arrow · 6 line · 7 [pen marker highlighter] · 8 text
   TOOLBAR_TOOL_ORDER.forEach(tool => {
-    if (tool === 'pencil') DRAW_BRUSHES.forEach(t => bar.appendChild(brushButton(t, actions))); // 7：筆刷群＝自由筆
+    if (tool === 'pencil') DRAW_BRUSHES.forEach(t => { bar.appendChild(brushButton(t, actions)); }); // 7：筆刷群＝自由筆
     else bar.appendChild(toolButton(tool, actions));
   });
   appendSep(bar);
@@ -2489,7 +2489,7 @@ function buildToolbar(state, actions, opts = {}) {
   appendSep(bar);
   bar.appendChild(actButton('delete', actions)); // 刪除（z-order 已移到右鍵選單）
   appendSep(bar);
-  ['undo', 'redo'].forEach(a => bar.appendChild(actButton(a, actions)));
+  ['undo', 'redo'].forEach(a => { bar.appendChild(actButton(a, actions)); });
   appendSep(bar);
   const send = drawHtmlEl('button', 'pc-draw-tool pc-draw-send');
   send.dataset.action = 'send';
@@ -2636,7 +2636,7 @@ function colorMenu(actions) {
   trigger.onclick = () => togglePopover(wrap);
   const pop = drawHtmlEl('div', 'pc-draw-popover');
   pop.dataset.menu = 'color';
-  DRAW_COLORS.forEach(c => pop.appendChild(swatchButton(c, actions)));
+  DRAW_COLORS.forEach(c => { pop.appendChild(swatchButton(c, actions)); });
   pop.appendChild(customSwatch(actions)); // 第 9 顆：自訂調色盤
   pop.appendChild(eyedropperButton(actions)); // 吸管取樣
   wrap.appendChild(trigger);
@@ -2679,7 +2679,7 @@ function widthMenu(actions) {
   trigger.onclick = () => togglePopover(wrap);
   const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-width');
   pop.dataset.menu = 'width';
-  DRAW_STROKE_WIDTHS.forEach(w => pop.appendChild(widthButton(w, actions)));
+  DRAW_STROKE_WIDTHS.forEach(w => { pop.appendChild(widthButton(w, actions)); });
   wrap.appendChild(trigger);
   wrap.appendChild(pop);
   return wrap;
@@ -2725,7 +2725,7 @@ function fontSizeMenu(actions) {
   trigger.onclick = () => togglePopover(wrap);
   const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-fontsize');
   pop.dataset.menu = 'fontsize';
-  DRAW_FONT_SIZES.forEach(sz => pop.appendChild(fontSizeButton(sz, actions)));
+  DRAW_FONT_SIZES.forEach(sz => { pop.appendChild(fontSizeButton(sz, actions)); });
   wrap.appendChild(trigger);
   wrap.appendChild(pop);
   return wrap;
@@ -2754,7 +2754,7 @@ function headsMenu(actions) {
   trigger.onclick = () => togglePopover(wrap);
   const pop = drawHtmlEl('div', 'pc-draw-popover pc-draw-popover-heads');
   pop.dataset.menu = 'heads';
-  DRAW_HEAD_MODES.forEach(m => pop.appendChild(headsButton(m, actions)));
+  DRAW_HEAD_MODES.forEach(m => { pop.appendChild(headsButton(m, actions)); });
   wrap.appendChild(trigger);
   wrap.appendChild(pop);
   return wrap;
@@ -3137,7 +3137,7 @@ function initDrawLayer(target, opts = {}) {
   // 取消勾選（不送 AI）的 note 直接不畫（與「畫的標注」一致：uncheck → 從畫布消失）。
   // 編號只對「已勾選」連續給 1..n，與送出的 p.notes 陣列順序一致 → 截圖角標可對照 JSON。
   function renderNotes() {
-    [...noteLayer.querySelectorAll('.pc-note-mark')].forEach(n => n.remove());
+    [...noteLayer.querySelectorAll('.pc-note-mark')].forEach(n => { n.remove(); });
     let n = 0;
     state.notes.forEach((c) => {
       if (!onCurrentScreen(c)) return; // 決策 A：不屬當前頁的註記不畫
@@ -3238,7 +3238,7 @@ function initDrawLayer(target, opts = {}) {
 
   // ── 對話卡（H：prompt 在上、AI 方案卡在下，整段貼著元件）──
   function closeAllNoteCards() {
-    noteLayer.querySelectorAll('.pc-note-card').forEach(n => n.remove());
+    noteLayer.querySelectorAll('.pc-note-card').forEach(n => { n.remove(); });
     pendingAnchor = null;
     focusNoteId = null;
   }
@@ -3343,7 +3343,7 @@ function initDrawLayer(target, opts = {}) {
     return el;
   }
   // 兩段式：放大成置中大面板（複雜圖文好讀）。
-  function closeNotePanel() { [...host.querySelectorAll('.pc-note-backdrop, .pc-note-panel')].forEach(n => n.remove()); }
+  function closeNotePanel() { [...host.querySelectorAll('.pc-note-backdrop, .pc-note-panel')].forEach(n => { n.remove(); }); }
   function openNotePanel(c, rep) {
     closeNotePanel();
     const back = drawHtmlEl('div', 'pc-note-backdrop'); back.onclick = closeNotePanel;
@@ -3567,10 +3567,10 @@ function initDrawLayer(target, opts = {}) {
       return;
     }
     list.appendChild(recordPreviewEl()); // 置頂：送給 AI 的畫面截圖預覽
-    rows.forEach(row => list.appendChild(recordRowEl(
+    rows.forEach(row => { list.appendChild(recordRowEl(
       row, isSelected(row.id), onRecordRowClick, !state.sendUnchecked[row.id], onToggleSendChecked,
       row.isNote ? removeNote : (row.isDecision ? removeDecision : null)
-    )));
+    )); });
     refreshRecordPreview();
   }
   // 標注紀錄頂部「送出畫面」縮圖：顯示 capturePng() 的結果（=送給 AI 的 PNG）。
@@ -3716,7 +3716,7 @@ function initDrawLayer(target, opts = {}) {
       const ea = o.endAnchors; if (!ea) return;
       ['from', 'to'].forEach(w => { if (ea[w] && ea[w].kind === 'el') sels.add(ea[w].selector); });
     });
-    noteSelectors().forEach(s => sels.add(s)); // 註記錨定的 DOM 元件也要監聽 scroll/resize
+    noteSelectors().forEach(s => { sels.add(s); }); // 註記錨定的 DOM 元件也要監聽 scroll/resize
     return sels;
   }
   function liveTick() {
@@ -3933,7 +3933,7 @@ function initDrawLayer(target, opts = {}) {
       if (cmd.type === 'create') syncSaveObj(cmd.obj);
       else if (cmd.type === 'update') syncSaveById(cmd.id);
       else if (cmd.type === 'reorder') (cmd.after || []).forEach(syncSaveById); // z 變更 → 重存
-      else if (cmd.type === 'deleteMany') (cmd.items || []).forEach(it => syncRemoveObj(it.obj));
+      else if (cmd.type === 'deleteMany') (cmd.items || []).forEach(it => { syncRemoveObj(it.obj); });
       else if (cmd.type === 'batch') (cmd.cmds || []).forEach(syncCommand);
     } catch (_) { /* 持久化失敗不影響本地繪圖 */ }
   }
@@ -4448,7 +4448,7 @@ function initDrawLayer(target, opts = {}) {
       clone.setAttribute('width', w);
       clone.setAttribute('height', h);
       clone.setAttribute('xmlns', SVG_NS);
-      clone.querySelectorAll('.pc-draw-selection, .pc-draw-marquee').forEach(n => n.remove()); // 不要選取框
+      clone.querySelectorAll('.pc-draw-selection, .pc-draw-marquee').forEach(n => { n.remove(); }); // 不要選取框
       // 只截「納入送出」的標注：移除未勾選物件的圖元，讓截圖與送出的 JSON 一致。
       clone.querySelectorAll('[data-id]').forEach(n => { if (state.sendUnchecked[n.getAttribute('data-id')]) n.remove(); });
       const xml = new XMLSerializer().serializeToString(clone);
@@ -4970,7 +4970,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = '38c35a4';
+export const PC_VERSION = '7e553d1';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';
@@ -5020,7 +5020,7 @@ function noteKey(tag, text) {
 function el(tag, cls, attrs = {}) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
-  Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
+  Object.entries(attrs).forEach(([k, v]) => { e.setAttribute(k, v); });
   return e;
 }
 
@@ -5648,7 +5648,7 @@ export async function initPrototypeComments(opts = {}) {
   // B5（#5 重設計）：顯示「誰按了某 emoji」純名單 popover。
   // 桌機 hover 觸發、手機長按觸發；toggle 自己的反應改由 chip 的 click/tap 處理（不放進此 popover）。
   function showReactionUsers(anchor, emoji, users, { dismissable = false } = {}) {
-    document.querySelectorAll('.pc-reaction-users').forEach(p => p.remove());
+    document.querySelectorAll('.pc-reaction-users').forEach(p => { p.remove(); });
     const pop = el('div', 'pc-reaction-users');
     const myUid = currentUser && currentUser.uid;
     users.forEach(u => {
@@ -5902,7 +5902,7 @@ export async function initPrototypeComments(opts = {}) {
     if (!overlay) { console.warn('[pc] renderAnnotations: overlay not found'); return; }
     refreshScrollEl();
 
-    overlay.querySelectorAll('.pc-annotation').forEach(p => p.remove());
+    overlay.querySelectorAll('.pc-annotation').forEach(p => { p.remove(); });
     const screenId = getScreenId();
     const positional = comments.filter(
       c => c.type === 'positional' && c.screenId === screenId && !c.parentId
@@ -6181,13 +6181,13 @@ export async function initPrototypeComments(opts = {}) {
     if (replies.length) {
       const inline = el('div', 'pc-panel-inline-thread');
       const ind = el('div', 'pc-note-replies');
-      replies.forEach(r => ind.appendChild(buildCommentItem(r, false, {
+      replies.forEach(r => { ind.appendChild(buildCommentItem(r, false, {
         onDelete: () => store.remove(r.id),
         onEdit:   b => store.update(r.id, { body: b, edited: true }),
         onReact:  rr => store.update(r.id, { reactions: rr }),
         // D1: replies 不可再回覆 — 不傳 onReply
         onUpdated: renderPanel,
-      })));
+      })); });
       inline.appendChild(ind);
       item.appendChild(inline);
     }

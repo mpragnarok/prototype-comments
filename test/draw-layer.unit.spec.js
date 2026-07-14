@@ -128,8 +128,8 @@ test('drawingToDoc: z-order 一併輸出（已戳 z 時）', () => {
 
 // ── 常數 sanity ──────────────────────────────────────────────────────────────
 test('模式/工具常數完整（含 P2 rect/line）', () => {
-  ['note', 'draw', 'off'].forEach(m => assert(DRAW_MODES.includes(m), m));
-  ['select', 'ellipse', 'arrow', 'pencil', 'text', 'rect', 'line'].forEach(t => assert(DRAW_TOOLS.includes(t), t));
+  ['note', 'draw', 'off'].forEach(m => { assert(DRAW_MODES.includes(m), m); });
+  ['select', 'ellipse', 'arrow', 'pencil', 'text', 'rect', 'line'].forEach(t => { assert(DRAW_TOOLS.includes(t), t); });
 });
 
 // ── P2 geomFromDrag（rect/line 拖曳幾何）────────────────────────────────────────
@@ -252,12 +252,12 @@ test('reorderIds: 不存在的 id → 原序回傳（新陣列）', () => {
 // ── 鍵盤快捷鍵：TOOL_SHORTCUTS / resolveShortcut ─────────────────────────────────
 test('TOOL_SHORTCUTS: 每個工具都可達（含數字+字母）', () => {
   const reachable = new Set(Object.values(TOOL_SHORTCUTS));
-  DRAW_TOOLS.forEach(t => assert(reachable.has(t), `工具 ${t} 應有快捷鍵`));
+  DRAW_TOOLS.forEach(t => { assert(reachable.has(t), `工具 ${t} 應有快捷鍵`); });
   assert(reachable.has('eyedropper'), 'eyedropper 應可達');
 });
 test('TOOL_SHORTCUTS: 期望的數字+字母對映（含 diamond 3/D）', () => {
   const expect = { 1: 'select', v: 'select', 2: 'rect', r: 'rect', 3: 'diamond', d: 'diamond', 4: 'ellipse', o: 'ellipse', 5: 'arrow', a: 'arrow', 6: 'line', l: 'line', 7: 'pencil', p: 'pencil', 8: 'text', t: 'text', i: 'eyedropper' };
-  Object.entries(expect).forEach(([k, v]) => eq(TOOL_SHORTCUTS[k], v, `key ${k}`));
+  Object.entries(expect).forEach(([k, v]) => { eq(TOOL_SHORTCUTS[k], v, `key ${k}`); });
 });
 test('TOOL_SHORTCUTS: 數字 1-8 連續對應工具列順序（無缺號）', () => {
   const byNum = { 1: 'select', 2: 'rect', 3: 'diamond', 4: 'ellipse', 5: 'arrow', 6: 'line', 7: 'pencil', 8: 'text' };
@@ -290,7 +290,7 @@ test('brushStyle: pen/marker 為填充、highlighter 半透明描邊', () => {
   assert(h.blend === 'multiply', 'highlighter 用 multiply');
 });
 test('brushStyle: 未知筆刷 → 退回 pen', () => eq(brushStyle('???'), brushStyle('pen')));
-test('DRAW_BRUSHES 常數齊全', () => ['pen', 'marker', 'highlighter'].forEach(t => assert(DRAW_BRUSHES.includes(t), t)));
+test('DRAW_BRUSHES 常數齊全', () => ['pen', 'marker', 'highlighter'].forEach(t => { assert(DRAW_BRUSHES.includes(t), t); }));
 test('serialize: 自由筆帶 brushType（style.brushType）', () => {
   const o = makeDrawObject({ id: 'p1', tool: 'pencil', geom: { points: [[1, 1], [2, 2]] }, style: { brushType: 'marker' } });
   eq(o.style.brushType, 'marker');
@@ -766,7 +766,7 @@ test('DRAW_FONT_SIZES: 匯出陣列，含 4 個正整數', () => {
   assert(DRAW_FONT_SIZES.every(n => typeof n === 'number' && n > 0), '每個選項應為正整數');
 });
 test('DRAW_FONT_SIZES: 包含 12/16/20/28', () => {
-  [12, 16, 20, 28].forEach(n => assert(DRAW_FONT_SIZES.includes(n), `應包含 ${n}`));
+  [12, 16, 20, 28].forEach(n => { assert(DRAW_FONT_SIZES.includes(n), `應包含 ${n}`); });
 });
 test('normalizeStyle: 無 fontSize → 回傳 DEFAULT_DRAW_STYLE.fontSize (16)', () => {
   const s = makeDrawObject({ tool: 'text', geom: { x: 0, y: 0 }, text: 'hi' }).style;
