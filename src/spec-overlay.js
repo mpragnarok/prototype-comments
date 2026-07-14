@@ -483,7 +483,7 @@ export function initSpecOverlay(opts = {}) {
     drawer.innerHTML = '';
     drawer.appendChild(buildHeader(spec));
     const list = el('div', 'spec-list');
-    spec.devNotes.forEach((n) => list.appendChild(buildNoteRow(n)));
+    spec.devNotes.forEach((n) => { list.appendChild(buildNoteRow(n)); });
     drawer.appendChild(list);
     const ft = el('div', 'spec-ft');
     ft.appendChild(el('div', 'spec-ft-hint',

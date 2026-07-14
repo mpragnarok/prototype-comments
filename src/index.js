@@ -67,7 +67,7 @@ function noteKey(tag, text) {
 function el(tag, cls, attrs = {}) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
-  Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
+  Object.entries(attrs).forEach(([k, v]) => { e.setAttribute(k, v); });
   return e;
 }
 
@@ -695,7 +695,7 @@ export async function initPrototypeComments(opts = {}) {
   // B5（#5 重設計）：顯示「誰按了某 emoji」純名單 popover。
   // 桌機 hover 觸發、手機長按觸發；toggle 自己的反應改由 chip 的 click/tap 處理（不放進此 popover）。
   function showReactionUsers(anchor, emoji, users, { dismissable = false } = {}) {
-    document.querySelectorAll('.pc-reaction-users').forEach(p => p.remove());
+    document.querySelectorAll('.pc-reaction-users').forEach(p => { p.remove(); });
     const pop = el('div', 'pc-reaction-users');
     const myUid = currentUser && currentUser.uid;
     users.forEach(u => {
@@ -949,7 +949,7 @@ export async function initPrototypeComments(opts = {}) {
     if (!overlay) { console.warn('[pc] renderAnnotations: overlay not found'); return; }
     refreshScrollEl();
 
-    overlay.querySelectorAll('.pc-annotation').forEach(p => p.remove());
+    overlay.querySelectorAll('.pc-annotation').forEach(p => { p.remove(); });
     const screenId = getScreenId();
     const positional = comments.filter(
       c => c.type === 'positional' && c.screenId === screenId && !c.parentId
@@ -1228,13 +1228,13 @@ export async function initPrototypeComments(opts = {}) {
     if (replies.length) {
       const inline = el('div', 'pc-panel-inline-thread');
       const ind = el('div', 'pc-note-replies');
-      replies.forEach(r => ind.appendChild(buildCommentItem(r, false, {
+      replies.forEach(r => { ind.appendChild(buildCommentItem(r, false, {
         onDelete: () => store.remove(r.id),
         onEdit:   b => store.update(r.id, { body: b, edited: true }),
         onReact:  rr => store.update(r.id, { reactions: rr }),
         // D1: replies 不可再回覆 — 不傳 onReply
         onUpdated: renderPanel,
-      })));
+      })); });
       inline.appendChild(ind);
       item.appendChild(inline);
     }
