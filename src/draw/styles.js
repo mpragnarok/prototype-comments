@@ -97,8 +97,9 @@ export const DRAW_STYLES = `
 .pc-note-card-head button { border: none; background: transparent; color: var(--pc-ink-3); font-size: 13px; cursor: pointer; padding: 0 2px; line-height: 1; }
 .pc-note-card-body { padding: 9px 11px 11px; }
 .pc-note-card textarea {
-  width: 100%; box-sizing: border-box; resize: vertical; min-height: 50px; border-radius: 8px 6px 9px 5px;
-  border: 1.5px solid var(--pc-ink); background: #fff; color: var(--pc-ink); padding: 6px 8px; font: inherit; font-size: 12.5px;
+  width: 100%; box-sizing: border-box; resize: none; min-height: 50px; max-height: 220px; overflow-y: auto;
+  border-radius: 8px 6px 9px 5px; border: 1.5px solid var(--pc-ink); background: #fff; color: var(--pc-ink);
+  padding: 6px 8px; font: inherit; font-size: 12.5px;
 }
 .pc-note-prompt-text { white-space: pre-wrap; word-break: break-word; background: #fff; color: var(--pc-ink);
   border: 1.5px solid var(--pc-ink); border-radius: 8px 6px 9px 5px; padding: 7px 9px; font-size: 12.5px; }
@@ -339,7 +340,8 @@ export const DRAW_STYLES = `
 .pc-draw-reply-rechoose { margin-top: 6px; padding: 3px 10px; border: 1px solid var(--pc-border); border-radius: 6px;
   background: #fff; color: var(--pc-ink-2); font-size: 12px; cursor: pointer; }
 .pc-draw-reply-rechoose:hover { border-color: var(--pc-accent); color: var(--pc-accent-strong); background: #f4fbfb; }
-.pc-draw-rec-text { color: var(--pc-slate); font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-draw-rec-text { color: var(--pc-slate); font-size: 12px; font-weight: 600; white-space: pre-wrap; word-break: break-word;
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .pc-draw-rec-sel { margin-top: 2px; color: var(--pc-accent-strong); font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-draw-rec-empty { color: var(--pc-muted); font-size: 12px; text-align: center; padding: 28px 12px; line-height: 1.6; }

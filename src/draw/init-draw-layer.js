@@ -402,7 +402,7 @@ export function initDrawLayer(target, opts = {}) {
   function renderCardInput(body, c, initial) {
     body.innerHTML = '';
     const ta = document.createElement('textarea');
-    ta.value = initial; ta.placeholder = '對這個元件說…（Enter 存紀錄 · ⌘Enter 送 AI）';
+    ta.value = initial; ta.placeholder = '對這個元件說…（Enter 存紀錄 · Shift+Enter 換行 · ⌘Enter 送 AI）';
     const row = drawHtmlEl('div', 'pc-note-row');
     const send = drawHtmlEl('button'); send.textContent = c.id ? '更新' : '存紀錄'; // 存進標注紀錄佇列（非直接送 AI）
     const cancel = drawHtmlEl('button', 'ghost'); cancel.textContent = '取消';
@@ -429,7 +429,14 @@ export function initDrawLayer(target, opts = {}) {
       else if (ev.key === 'Escape') { ev.preventDefault(); if (c.id) { const cur = body.closest('.pc-note-card'); if (cur) cur.remove(); openNoteCard(c); } else closeNoteCard(); }
       // Shift+Enter → 換行（不攔截，textarea 預設行為）
     });
+    autoGrowTextarea(ta); // 多行輸入自動長高（封頂 max-height，見 styles.js），初始跑一次吃已有內容（編輯既有多行 note）
+    ta.addEventListener('input', () => autoGrowTextarea(ta));
     ta.focus();
+  }
+  // note 編輯器自動長高：height 先 reset 再吃 scrollHeight，CSS max-height 封頂後交回 overflow-y 內部捲動。
+  function autoGrowTextarea(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = `${ta.scrollHeight}px`;
   }
   // 內嵌 AI 方案卡：重用 replyCardEl，拔掉絕對定位 → 塞進對話卡/面板。
   function replyCardInline(rep) {
