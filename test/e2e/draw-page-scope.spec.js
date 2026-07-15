@@ -113,8 +113,8 @@ const drawnCount = (page) => page.evaluate(() => document.querySelectorAll('#pc-
     await page.evaluate(() => { window.__drawTest.api.destroy(); localStorage.removeItem('pc-draw-local:bc'); });
   });
 
-  // ── ③ 送出後「已送」持久化，重整不再重現 ─────────────────────────────────────
-  await test('③ 送出後重整不重現：送出 → 清單 0 列 + 畫布隱藏；destroy 後同 projectId 重建仍隱藏、不畫回', async () => {
+  // ── ③ 送出即收納：畫布消失、紀錄仍在（已送徽章）；重整後狀態保持 ─────────────────
+  await test('③ 送出即收納：畫布消失但紀錄仍列出（已送徽章＋還原鈕）；destroy 後同 projectId 重建仍隱藏、紀錄仍在', async () => {
     await page.evaluate(() => {
       try { if (window.__drawTest.api) window.__drawTest.api.destroy(); } catch (_) {}
       localStorage.removeItem('pc-draw-local:sendpersist');
@@ -129,20 +129,75 @@ const drawnCount = (page) => page.evaluate(() => document.querySelectorAll('#pc-
       window.__drawTest.api.setExportEndpoint('http://x/api/draw');
     });
     await page.click('.pc-draw-rec-send-btn');
-    await page.waitForFunction(() => document.querySelectorAll('.pc-draw-rec-row').length === 0, { timeout: 3000 });
-    const afterSend = await page.evaluate(() => ({ rows: document.querySelectorAll('.pc-draw-rec-row').length, drawn: document.querySelectorAll('#pc-draw [data-id]').length }));
-    assert(afterSend.rows === 0 && afterSend.drawn === 0, `送出後清單應 0 列、畫布隱藏，實際 ${JSON.stringify(afterSend)}`);
+    // 送出後：畫布隱藏（drawn===0），但列仍在（收納，非 outbox 移除）
+    await page.waitForFunction(() => document.querySelectorAll('#pc-draw [data-id]').length === 0, { timeout: 3000 });
+    const afterSend = await page.evaluate(() => ({
+      rows: document.querySelectorAll('.pc-draw-rec-row').length,
+      drawn: document.querySelectorAll('#pc-draw [data-id]').length,
+      sentBadge: document.querySelectorAll('.pc-draw-rec-row .pc-draw-rec-status.is-sent').length,
+      restoreBtn: document.querySelectorAll('.pc-draw-rec-row .pc-draw-rec-restore').length,
+      hidden: window.__drawTest.api.getObjects()[0].hidden === true,
+    }));
+    assert(afterSend.drawn === 0, `送出後畫布應隱藏，實際 drawn=${afterSend.drawn}`);
+    assert(afterSend.rows === 1, `送出後標注應仍列在紀錄（收納），實際 rows=${afterSend.rows}`);
+    assert(afterSend.sentBadge === 1, `收納列應顯示「已送」徽章，實際 ${afterSend.sentBadge}`);
+    assert(afterSend.restoreBtn === 1, `收納列應有「還原到畫布」鈕，實際 ${afterSend.restoreBtn}`);
+    assert(afterSend.hidden === true, `物件應標記 hidden，實際 ${afterSend.hidden}`);
     // 模擬「重整 / 重新載入」：destroy 後同 projectId 重建（objects 從 localStorage 還原）
     await page.evaluate(() => { window.__drawTest.api.destroy(); window.__drawTest.api = window.__drawTest.init({ projectId: 'sendpersist' }); });
     const reinit = await page.evaluate(() => {
       const d = document.getElementById('pc-draw-rec-drawer'); if (!d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel();
-      return { rows: document.querySelectorAll('.pc-draw-rec-row').length, drawn: document.querySelectorAll('#pc-draw [data-id]').length, objs: window.__drawTest.api.getObjects().length };
+      return { rows: document.querySelectorAll('.pc-draw-rec-row').length, drawn: document.querySelectorAll('#pc-draw [data-id]').length, objs: window.__drawTest.api.getObjects().length, hidden: window.__drawTest.api.getObjects()[0].hidden === true };
     });
     console.log('     re-init after send:', JSON.stringify(reinit));
     assert(reinit.objs === 1, `物件應仍在（從 localStorage 還原），實際 ${reinit.objs}`);
-    assert(reinit.drawn === 0, `已送標注重建後不應又畫回畫布，實際 drawn=${reinit.drawn}`);
-    assert(reinit.rows === 0, `已送標注重建後不應又回清單，實際 rows=${reinit.rows}`);
+    assert(reinit.drawn === 0, `收納標注重建後不應又畫回畫布，實際 drawn=${reinit.drawn}`);
+    assert(reinit.rows === 1, `收納標注重建後應仍列在紀錄，實際 rows=${reinit.rows}`);
+    assert(reinit.hidden === true, `重建後 hidden 狀態應保持，實際 ${reinit.hidden}`);
     await page.evaluate(() => { window.__drawTest.api.destroy(); localStorage.removeItem('pc-draw-local:sendpersist'); localStorage.removeItem('pc-draw-sent:sendpersist'); });
+  });
+
+  // ── ④ 還原到畫布：單筆還原 → 畫布重現、保留已送徽章、不重複送；重整後仍顯示 ───────────
+  await test('④ 還原到畫布：送出收納 → 點還原 → 畫布重現＋仍標已送＋送出鈕不重複計數；重整後仍顯示', async () => {
+    await page.evaluate(() => {
+      try { if (window.__drawTest.api) window.__drawTest.api.destroy(); } catch (_) {}
+      localStorage.removeItem('pc-draw-local:restore');
+      localStorage.removeItem('pc-draw-sent:restore');
+      window.__drawTest.api = window.__drawTest.init({ projectId: 'restore' });
+      window.__drawTest.api.setTool('rect');
+    });
+    await dragDraw(page, 150, 110, 250, 190);
+    await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (!d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
+    await page.evaluate(() => {
+      window.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, n: 1, listening: true }) });
+      window.__drawTest.api.setExportEndpoint('http://x/api/draw');
+    });
+    await page.click('.pc-draw-rec-send-btn');
+    await page.waitForFunction(() => document.querySelectorAll('#pc-draw [data-id]').length === 0, { timeout: 3000 });
+    // 點「還原到畫布」
+    await page.click('.pc-draw-rec-restore');
+    await page.waitForFunction(() => document.querySelectorAll('#pc-draw [data-id]').length === 1, { timeout: 3000 });
+    const afterRestore = await page.evaluate(() => ({
+      drawn: document.querySelectorAll('#pc-draw [data-id]').length,
+      rows: document.querySelectorAll('.pc-draw-rec-row').length,
+      sentBadge: document.querySelectorAll('.pc-draw-rec-row .pc-draw-rec-status.is-sent').length,
+      restoreBtn: document.querySelectorAll('.pc-draw-rec-row .pc-draw-rec-restore').length,
+      hidden: window.__drawTest.api.getObjects()[0].hidden === true,
+      sendBtn: (document.querySelector('.pc-draw-rec-send-btn') || {}).textContent || '',
+    }));
+    assert(afterRestore.drawn === 1, `還原後畫布應重現該標注，實際 drawn=${afterRestore.drawn}`);
+    assert(afterRestore.rows === 1, `還原後紀錄仍列該標注，實際 rows=${afterRestore.rows}`);
+    assert(afterRestore.sentBadge === 1, `還原後仍保留「已送」徽章，實際 ${afterRestore.sentBadge}`);
+    assert(afterRestore.restoreBtn === 0, `還原後不再顯示還原鈕（已在畫布），實際 ${afterRestore.restoreBtn}`);
+    assert(afterRestore.hidden === false, `還原後 hidden 應清除，實際 ${afterRestore.hidden}`);
+    assert(!/送給 AI（1）/.test(afterRestore.sendBtn), `還原（已送未改）不應被重複計入送出，送出鈕文字=${afterRestore.sendBtn}`);
+    // 重整：destroy 後同 projectId 重建 → 還原狀態（可見）保持
+    await page.evaluate(() => { window.__drawTest.api.destroy(); window.__drawTest.api = window.__drawTest.init({ projectId: 'restore' }); });
+    const reinit = await page.evaluate(() => ({ drawn: document.querySelectorAll('#pc-draw [data-id]').length, hidden: window.__drawTest.api.getObjects()[0].hidden === true }));
+    console.log('     re-init after restore:', JSON.stringify(reinit));
+    assert(reinit.drawn === 1, `重整後還原的標注應仍顯示，實際 drawn=${reinit.drawn}`);
+    assert(reinit.hidden === false, `重整後 hidden 應維持清除，實際 ${reinit.hidden}`);
+    await page.evaluate(() => { window.__drawTest.api.destroy(); localStorage.removeItem('pc-draw-local:restore'); localStorage.removeItem('pc-draw-sent:restore'); });
   });
 
   // ── ② Enter 只存進標注紀錄、不送 AI ──────────────────────────────────────────

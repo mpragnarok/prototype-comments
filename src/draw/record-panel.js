@@ -42,7 +42,7 @@ export function buildRecordDrawer(onClose) {
   return drawer;
 }
 // 一筆標注 → 面板 row（工具圖示 + 色票 + 文字 + selector）。點擊 → onClick(id)。
-export function recordRowEl(row, selected, onClick, checked, onToggle, onRemove) {
+export function recordRowEl(row, selected, onClick, checked, onToggle, onRemove, onRestore) {
   const el = drawHtmlEl('div', 'pc-draw-rec-row' + (selected ? ' selected' : '') + (row.grouped ? ' is-grouped' : ''));
   el.dataset.id = row.id;
   el.setAttribute('role', 'button'); el.setAttribute('tabindex', '0');
@@ -80,6 +80,12 @@ export function recordRowEl(row, selected, onClick, checked, onToggle, onRemove)
   const badge = drawHtmlEl('span', 'pc-draw-rec-status ' + (row.sent ? 'is-sent' : 'is-unsent'));
   badge.textContent = row.sent ? '✓ 已送' : '● 未送';
   el.appendChild(badge);
+  if (onRestore) { // 收納中的標注 → 「還原到畫布」單筆重現（保留已送徽章、不重複送）
+    const rs = drawHtmlEl('button', 'pc-draw-rec-restore'); rs.textContent = '↩ 還原到畫布';
+    rs.title = '還原到畫布'; rs.setAttribute('aria-label', '還原到畫布');
+    rs.onclick = e => { e.stopPropagation(); onRestore(row.id); };
+    el.appendChild(rs);
+  }
   if (onRemove) { // 從佇列移除（目前用於「決定」列）
     const rm = drawHtmlEl('button', 'pc-draw-rec-remove'); rm.textContent = '✕';
     rm.title = '從佇列移除'; rm.setAttribute('aria-label', '從佇列移除');

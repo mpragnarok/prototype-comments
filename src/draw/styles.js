@@ -315,6 +315,8 @@ export const DRAW_STYLES = `
 .pc-draw-reply-close:hover { color: var(--pc-ink-2); }
 .pc-draw-rec-remove { flex: none; border: none; background: transparent; color: #b0bcc8; font-size: 12px; line-height: 1; cursor: pointer; padding: 2px 4px; }
 .pc-draw-rec-remove:hover { color: var(--pc-danger-hover); }
+.pc-draw-rec-restore { flex: none; border: 1px solid var(--pc-accent); background: rgba(var(--pc-accent-rgb), .06); color: var(--pc-accent-strong); font-size: 11px; font-weight: 600; line-height: 1; cursor: pointer; padding: 3px 7px; border-radius: 6px; white-space: nowrap; }
+.pc-draw-rec-restore:hover { background: rgba(var(--pc-accent-rgb), .14); }
 .pc-draw-reply-text { margin-bottom: 8px; white-space: pre-wrap; }
 .pc-draw-reply-opts { display: flex; flex-wrap: wrap; gap: 6px; }
 .pc-draw-reply-opts.is-rich { flex-direction: column; flex-wrap: nowrap; gap: 8px; }
