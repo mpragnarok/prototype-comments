@@ -1,4 +1,4 @@
-/* pc.js 317989f 2026-07-15T11:02:29Z */
+/* pc.js d441167 2026-07-15T11:25:04Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -3151,23 +3151,38 @@ function initDrawLayer(target, opts = {}) {
   // ── 渲染留言標記（只動 .pc-note-mark；開著的卡跟著元件重新定位）──
   // 取消勾選（不送 AI）的 note 直接不畫（與「畫的標注」一致：uncheck → 從畫布消失）。
   // 編號只對「已勾選」連續給 1..n，與送出的 p.notes 陣列順序一致 → 截圖角標可對照 JSON。
+  let _notesPinSig = null; // 上次實際建出的 pin 集合簽章（id＋編號＋解析後像素框）
   function renderNotes() {
-    [...noteLayer.querySelectorAll('.pc-note-mark')].forEach(n => { n.remove(); });
     let n = 0;
+    const pins = [];
     state.notes.forEach((c) => {
       if (!onCurrentScreen(c)) return; // 決策 A：不屬當前頁的註記不畫
       if (state.sendUnchecked[c.id]) return;
-      noteLayer.appendChild(notePin(c, ++n));
+      pins.push({ c, n: ++n, box: resolveNoteBox(c) });
     });
+    // 狀態 diff：pin 集合無變化 → 不重建 DOM。
+    // 頁面上任何 class/style 變動都會經 draw-boot 的 MutationObserver 觸發 api.refresh()→render()，
+    // 若每次都整批 remove/re-append pin，真人 mousedown/mouseup 會跨到重建邊界、click 蒸發（點不開卡）。
+    const sig = pins.map(p => `${p.c.id}#${p.n}@${pinBoxSig(p.box, p.c)}`).join('|');
+    if (sig !== _notesPinSig) {
+      _notesPinSig = sig;
+      [...noteLayer.querySelectorAll('.pc-note-mark')].forEach(el => { el.remove(); });
+      pins.forEach(p => noteLayer.appendChild(notePin(p.c, p.n, p.box)));
+    }
     repositionNoteCard();
+  }
+  // pin 位置簽章：有解析框用像素框、無框退化成點座標 → 元件移動/捲動時 sig 變、才重建。
+  function pinBoxSig(box, c) {
+    if (box) { const b = pctToPxBox(box); return `${b.x},${b.y},${b.w},${b.h}`; }
+    const xy = noteXY(resolveNotePct(c));
+    return `pt:${xy.x},${xy.y}`;
   }
   // 一則 note → 持續實線外框（貼齊元件範圍、零間隙）+ 左上角落圓 badge（編號）。
   // badge 騎在框「角」外側（不落在框內緣）→ 不覆蓋元件內容；外框 pointer-events:none，
   // 只有 badge 可點開卡。圓形小（21px）放不下 icon，只留數字 → 靠外框本身區分「這是 note」。
-  function notePin(c, n) {
+  function notePin(c, n, box = resolveNoteBox(c)) {
     const mark = drawHtmlEl('div', 'pc-note-mark' + (c.objId != null ? ' is-obj' : ''));
     mark.dataset.noteId = c.id;
-    const box = resolveNoteBox(c);
     if (box) {
       const b = pctToPxBox(box);
       mark.style.left = b.x + 'px'; mark.style.top = b.y + 'px';
@@ -3180,7 +3195,7 @@ function initDrawLayer(target, opts = {}) {
     const tab = drawHtmlEl('button', 'pc-note-tab');
     tab.textContent = String(n);
     tab.title = c.text;
-    tab.onclick = (e) => { e.stopPropagation(); openNoteCard(c); };
+    // 點擊由 noteLayer 的委派 handler 處理（以 data-note-id 對應）→ pin 重建也點得到；此處不掛 onclick。
     mark.appendChild(tab);
     return mark;
   }
@@ -3379,8 +3394,17 @@ function initDrawLayer(target, opts = {}) {
   noteLayer.addEventListener('pointermove', onNoteHover);
   noteLayer.addEventListener('pointerleave', clearHover);
   noteLayer.addEventListener('click', (e) => {
+    // pin badge 點擊：事件委派掛在穩定容器 noteLayer，以 data-note-id 對應目標 → pin 每次 render 重建也吃得到點擊
+    //（真人 mousedown/mouseup 若跨到 pin 重建邊界，click 落在共同祖先 noteLayer，而非已被抽換的 button）。
+    const markEl = e.target.closest && e.target.closest('.pc-note-mark');
+    if (markEl) {
+      e.stopPropagation();
+      const note = state.notes.find(nt => String(nt.id) === markEl.dataset.noteId);
+      if (note) openNoteCard(note);
+      return;
+    }
+    if (e.target.closest && e.target.closest('.pc-note-card')) return; // 點在卡片內 → 各自 handler 處理
     if (state.mode !== 'note') return;
-    if (e.target.closest && e.target.closest('.pc-note-mark, .pc-note-card')) return; // 點在標記/卡 → 各自 handler 處理
     const tg = pickTarget(e.clientX, e.clientY);
     if (!tg) return;
     // 點到「已有註記的目標」（同 sel / 同自繪 objId）→ 開該註記聚焦編輯，不再誤建新。
@@ -3537,6 +3561,7 @@ function initDrawLayer(target, opts = {}) {
   if (opts.feedbackBox) ensureFeedbackBox();
 
   // 依目前 objects/selectedIds 重畫面板（render() 每次變動都會喚起 → 即時更新）。
+  let _recRowSig = null; // 上次實際建出的列集合簽章 → 無變化不重建列 DOM
   function renderRecordPanel() {
     recordTab.classList.toggle('show', !state.recordOpen);
     recordDrawer.classList.toggle('open', state.recordOpen);
@@ -3594,6 +3619,13 @@ function initDrawLayer(target, opts = {}) {
     }
     const list = recordDrawer.querySelector('.pc-draw-rec-list');
     if (!list) return;
+    // 狀態 diff：列內容/選取/勾選/已送 皆未變 → 不重建列 DOM（同 pin：避免 refresh 風暴每 tick 整批重繪
+    // 讓還原鈕/勾選框的真人 click 蒸發）。截圖預覽仍在（refreshRecordPreview 就地更新，不受影響）。
+    const rowSig = rows.map(r => [r.id, r.text, r.selector, r.color, r.icon, r.grouped ? 1 : 0, r.sent ? 1 : 0,
+      r.archived ? 1 : 0, isSelected(r.id) ? 1 : 0, state.sendUnchecked[r.id] ? 0 : 1,
+      r.isNote ? 'N' : (r.isDecision ? 'D' : 'A')].join(':')).join('|');
+    if (rowSig === _recRowSig) { if (rows.length) refreshRecordPreview(); return; }
+    _recRowSig = rowSig;
     list.innerHTML = '';
     if (!rows.length) {
       const empty = drawHtmlEl('div', 'pc-draw-rec-empty');
@@ -5009,7 +5041,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = '317989f';
+export const PC_VERSION = 'd441167';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';

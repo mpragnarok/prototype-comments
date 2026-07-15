@@ -246,6 +246,61 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.pins === 1 && r.bubbleGone, '送出後應留 1 個 pin 且輸入框關閉');
   });
 
+  await test('留言 pin 點擊：真實滑鼠點 badge → 開卡；且 refresh 風暴下 pin 不重建、仍點得開（委派＋狀態 diff）', async () => {
+    // 建一則錨定在 #price-card 的 note（pin 為覆在元件上的框＋角落 badge）
+    await page.evaluate(() => {
+      const api = window.__drawTest.api;
+      api.clear();
+      api.setMode('note');
+      api.addNote('點我要開卡', { sel: '#price-card', relX: 0.5, relY: 0.5, label: 'div' });
+    });
+    await page.waitForSelector('.pc-note-mark .pc-note-tab', { timeout: 2000 });
+    const badge = await page.evaluate(() => {
+      const t = document.querySelector('.pc-note-mark .pc-note-tab');
+      const r = t.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    });
+    // ① 真實滑鼠 click（非 dispatchEvent）點 badge → 內容卡開啟
+    await page.mouse.click(badge.x, badge.y);
+    await page.waitForSelector('.pc-note-card', { timeout: 2000 });
+    const opened1 = await page.evaluate(() => {
+      const card = document.querySelector('.pc-note-card');
+      const ok = !!card && /點我要開卡/.test(card.textContent);
+      card && card.remove(); // 收掉，準備風暴測試
+      return ok;
+    });
+    assert(opened1, '真實滑鼠點 pin badge 應開啟內容卡');
+    // ② 起 refresh 風暴（模擬 draw-boot MutationObserver 每 tick 觸發 api.refresh()）→ 標記 pin 節點
+    await page.evaluate(() => {
+      document.querySelector('.pc-note-mark').__probe = 'keep';
+      window.__stormId = setInterval(() => window.__drawTest.api.refresh(), 40);
+    });
+    await page.waitForTimeout(2000);
+    const stable = await page.evaluate(() => {
+      const m = document.querySelector('.pc-note-mark');
+      return { probe: m && m.__probe === 'keep', pins: document.querySelectorAll('.pc-note-mark').length };
+    });
+    assert(stable.pins === 1 && stable.probe, `狀態 diff：無變化的 refresh 不應重建 pin（節點應保持同一個），實際 ${JSON.stringify(stable)}`);
+    // ③ 風暴持續中，真實滑鼠再點一次 pin → 仍開得了卡（等 2 秒後再點）
+    const badge2 = await page.evaluate(() => {
+      const t = document.querySelector('.pc-note-mark .pc-note-tab');
+      const r = t.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    });
+    await page.mouse.click(badge2.x, badge2.y);
+    await page.waitForSelector('.pc-note-card', { timeout: 2000 });
+    const opened2 = await page.evaluate(() => {
+      clearInterval(window.__stormId);
+      const card = document.querySelector('.pc-note-card');
+      const ok = !!card && /點我要開卡/.test(card.textContent);
+      card && card.remove();
+      return ok;
+    });
+    console.log('     pin-click under storm:', JSON.stringify({ opened1, stable, opened2 }));
+    assert(opened2, '持續 refresh 下真實滑鼠點 pin 仍應開卡（事件委派掛穩定容器）');
+    await page.evaluate(() => { window.__drawTest.api.setMode('draw'); window.__drawTest.api.clear(); });
+  });
+
   await test('工具列 ✕ → 回 off 模式（放行 app 點擊）', async () => {
     await page.evaluate(() => window.__drawTest.api.setMode('draw'));
     await page.click('.pc-draw-tool[data-tool="off"]');
