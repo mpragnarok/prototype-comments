@@ -1,4 +1,4 @@
-/* pc.js d441167 2026-07-15T11:25:04Z */
+/* pc.js 559e079 2026-07-15T13:29:15Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -2020,8 +2020,9 @@ const DRAW_STYLES = `
 .pc-note-card-head button { border: none; background: transparent; color: var(--pc-ink-3); font-size: 13px; cursor: pointer; padding: 0 2px; line-height: 1; }
 .pc-note-card-body { padding: 9px 11px 11px; }
 .pc-note-card textarea {
-  width: 100%; box-sizing: border-box; resize: vertical; min-height: 50px; border-radius: 8px 6px 9px 5px;
-  border: 1.5px solid var(--pc-ink); background: #fff; color: var(--pc-ink); padding: 6px 8px; font: inherit; font-size: 12.5px;
+  width: 100%; box-sizing: border-box; resize: none; min-height: 50px; max-height: 220px; overflow-y: auto;
+  border-radius: 8px 6px 9px 5px; border: 1.5px solid var(--pc-ink); background: #fff; color: var(--pc-ink);
+  padding: 6px 8px; font: inherit; font-size: 12.5px;
 }
 .pc-note-prompt-text { white-space: pre-wrap; word-break: break-word; background: #fff; color: var(--pc-ink);
   border: 1.5px solid var(--pc-ink); border-radius: 8px 6px 9px 5px; padding: 7px 9px; font-size: 12.5px; }
@@ -2262,7 +2263,8 @@ const DRAW_STYLES = `
 .pc-draw-reply-rechoose { margin-top: 6px; padding: 3px 10px; border: 1px solid var(--pc-border); border-radius: 6px;
   background: #fff; color: var(--pc-ink-2); font-size: 12px; cursor: pointer; }
 .pc-draw-reply-rechoose:hover { border-color: var(--pc-accent); color: var(--pc-accent-strong); background: #f4fbfb; }
-.pc-draw-rec-text { color: var(--pc-slate); font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-draw-rec-text { color: var(--pc-slate); font-size: 12px; font-weight: 600; white-space: pre-wrap; word-break: break-word;
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .pc-draw-rec-sel { margin-top: 2px; color: var(--pc-accent-strong); font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-draw-rec-empty { color: var(--pc-muted); font-size: 12px; text-align: center; padding: 28px 12px; line-height: 1.6; }
@@ -3336,7 +3338,7 @@ function initDrawLayer(target, opts = {}) {
   function renderCardInput(body, c, initial) {
     body.innerHTML = '';
     const ta = document.createElement('textarea');
-    ta.value = initial; ta.placeholder = '對這個元件說…（Enter 存紀錄 · ⌘Enter 送 AI）';
+    ta.value = initial; ta.placeholder = '對這個元件說…（Enter 存紀錄 · Shift+Enter 換行 · ⌘Enter 送 AI）';
     const row = drawHtmlEl('div', 'pc-note-row');
     const send = drawHtmlEl('button'); send.textContent = c.id ? '更新' : '存紀錄'; // 存進標注紀錄佇列（非直接送 AI）
     const cancel = drawHtmlEl('button', 'ghost'); cancel.textContent = '取消';
@@ -3363,7 +3365,14 @@ function initDrawLayer(target, opts = {}) {
       else if (ev.key === 'Escape') { ev.preventDefault(); if (c.id) { const cur = body.closest('.pc-note-card'); if (cur) cur.remove(); openNoteCard(c); } else closeNoteCard(); }
       // Shift+Enter → 換行（不攔截，textarea 預設行為）
     });
+    autoGrowTextarea(ta); // 多行輸入自動長高（封頂 max-height，見 styles.js），初始跑一次吃已有內容（編輯既有多行 note）
+    ta.addEventListener('input', () => autoGrowTextarea(ta));
     ta.focus();
+  }
+  // note 編輯器自動長高：height 先 reset 再吃 scrollHeight，CSS max-height 封頂後交回 overflow-y 內部捲動。
+  function autoGrowTextarea(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = `${ta.scrollHeight}px`;
   }
   // 內嵌 AI 方案卡：重用 replyCardEl，拔掉絕對定位 → 塞進對話卡/面板。
   function replyCardInline(rep) {
@@ -5041,7 +5050,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = 'd441167';
+export const PC_VERSION = '559e079';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';
