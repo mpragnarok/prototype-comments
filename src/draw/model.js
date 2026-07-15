@@ -153,12 +153,14 @@ export function bumpIdSeq(ids) {
 
 // 組裝一個 DrawObject（plan §4.2 子集：id/tool/geom/style[/text]）。
 // z 由繪圖層在 commit 時依 DOM 順序戳上（stampZ），純函式不負責。
-export function makeDrawObject({ id, tool, geom, style, text, imageRef, endAnchors, screenId } = {}) {
+export function makeDrawObject({ id, tool, geom, style, text, imageRef, endAnchors, screenId, hidden, archivedAt } = {}) {
   const obj = { id: id || nextDrawId(), tool, geom, style: normalizeStyle(style) };
   if (text != null) obj.text = text;
   if (imageRef != null) obj.imageRef = imageRef; // image 物件的 dataURL（P3）/ 本機路徑（P4）
   if (endAnchors != null) obj.endAnchors = endAnchors; // arrow/line 端點 element/object 硬鎖
   if (screenId != null) obj.screenId = screenId; // 決策 A：標注所屬頁面/screen（未傳＝全域，向後相容全畫）
+  if (hidden) obj.hidden = true; // 送出後「收納」：從畫布隱藏、仍留標注紀錄（可還原）
+  if (archivedAt != null) obj.archivedAt = archivedAt; // 收納時間戳（ms）
   return obj;
 }
 
@@ -173,6 +175,8 @@ export function serializeDrawObject(obj) {
   if (obj.groupId != null) out.groupId = obj.groupId;
   if (obj.endAnchors != null) out.endAnchors = obj.endAnchors; // 端點硬鎖（有才帶）
   if (obj.screenId != null) out.screenId = obj.screenId;       // 頁面/screen 歸屬（有才帶）
+  if (obj.hidden) out.hidden = true;                           // 送出後收納：畫布隱藏狀態（可還原）
+  if (obj.archivedAt != null) out.archivedAt = obj.archivedAt; // 收納時間戳
   return out;
 }
 
@@ -186,7 +190,7 @@ export function serializeObjectsForLocal(objects) {
 export function hydrateObjectsFromLocal(docs) {
   if (!Array.isArray(docs)) return [];
   return docs.map(doc => {
-    const obj = makeDrawObject({ id: doc.id, tool: doc.tool, geom: doc.geom, style: doc.style, text: doc.text, screenId: doc.screenId });
+    const obj = makeDrawObject({ id: doc.id, tool: doc.tool, geom: doc.geom, style: doc.style, text: doc.text, screenId: doc.screenId, hidden: doc.hidden, archivedAt: doc.archivedAt });
     if (doc.label != null) obj.label = doc.label;
     if (doc.anchor != null) obj.anchor = doc.anchor;
     if (doc.endAnchors != null) obj.endAnchors = doc.endAnchors;
@@ -208,6 +212,8 @@ export function drawingToDoc(obj) {
   if (obj.groupId != null) doc.groupId = obj.groupId;              // 群組 id
   if (obj.endAnchors != null) doc.endAnchors = obj.endAnchors;     // 端點硬鎖（有才帶）
   if (obj.screenId != null) doc.screenId = obj.screenId;          // 頁面/screen 歸屬（有才帶）
+  if (obj.hidden) doc.hidden = true;                              // 送出後收納：畫布隱藏狀態（可還原，經同一 PUT 通道存檔）
+  if (obj.archivedAt != null) doc.archivedAt = obj.archivedAt;    // 收納時間戳
   return doc; // 注意：不含 imageRef / dataURL（PNG 永不進 Firestore）
 }
 

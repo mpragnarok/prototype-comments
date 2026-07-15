@@ -217,23 +217,38 @@ export function initDrawLayer(target, opts = {}) {
   // ── 渲染留言標記（只動 .pc-note-mark；開著的卡跟著元件重新定位）──
   // 取消勾選（不送 AI）的 note 直接不畫（與「畫的標注」一致：uncheck → 從畫布消失）。
   // 編號只對「已勾選」連續給 1..n，與送出的 p.notes 陣列順序一致 → 截圖角標可對照 JSON。
+  let _notesPinSig = null; // 上次實際建出的 pin 集合簽章（id＋編號＋解析後像素框）
   function renderNotes() {
-    [...noteLayer.querySelectorAll('.pc-note-mark')].forEach(n => { n.remove(); });
     let n = 0;
+    const pins = [];
     state.notes.forEach((c) => {
       if (!onCurrentScreen(c)) return; // 決策 A：不屬當前頁的註記不畫
       if (state.sendUnchecked[c.id]) return;
-      noteLayer.appendChild(notePin(c, ++n));
+      pins.push({ c, n: ++n, box: resolveNoteBox(c) });
     });
+    // 狀態 diff：pin 集合無變化 → 不重建 DOM。
+    // 頁面上任何 class/style 變動都會經 draw-boot 的 MutationObserver 觸發 api.refresh()→render()，
+    // 若每次都整批 remove/re-append pin，真人 mousedown/mouseup 會跨到重建邊界、click 蒸發（點不開卡）。
+    const sig = pins.map(p => `${p.c.id}#${p.n}@${pinBoxSig(p.box, p.c)}`).join('|');
+    if (sig !== _notesPinSig) {
+      _notesPinSig = sig;
+      [...noteLayer.querySelectorAll('.pc-note-mark')].forEach(el => { el.remove(); });
+      pins.forEach(p => noteLayer.appendChild(notePin(p.c, p.n, p.box)));
+    }
     repositionNoteCard();
+  }
+  // pin 位置簽章：有解析框用像素框、無框退化成點座標 → 元件移動/捲動時 sig 變、才重建。
+  function pinBoxSig(box, c) {
+    if (box) { const b = pctToPxBox(box); return `${b.x},${b.y},${b.w},${b.h}`; }
+    const xy = noteXY(resolveNotePct(c));
+    return `pt:${xy.x},${xy.y}`;
   }
   // 一則 note → 持續實線外框（貼齊元件範圍、零間隙）+ 左上角落圓 badge（編號）。
   // badge 騎在框「角」外側（不落在框內緣）→ 不覆蓋元件內容；外框 pointer-events:none，
   // 只有 badge 可點開卡。圓形小（21px）放不下 icon，只留數字 → 靠外框本身區分「這是 note」。
-  function notePin(c, n) {
+  function notePin(c, n, box = resolveNoteBox(c)) {
     const mark = drawHtmlEl('div', 'pc-note-mark' + (c.objId != null ? ' is-obj' : ''));
     mark.dataset.noteId = c.id;
-    const box = resolveNoteBox(c);
     if (box) {
       const b = pctToPxBox(box);
       mark.style.left = b.x + 'px'; mark.style.top = b.y + 'px';
@@ -246,7 +261,7 @@ export function initDrawLayer(target, opts = {}) {
     const tab = drawHtmlEl('button', 'pc-note-tab');
     tab.textContent = String(n);
     tab.title = c.text;
-    tab.onclick = (e) => { e.stopPropagation(); openNoteCard(c); };
+    // 點擊由 noteLayer 的委派 handler 處理（以 data-note-id 對應）→ pin 重建也點得到；此處不掛 onclick。
     mark.appendChild(tab);
     return mark;
   }
@@ -445,8 +460,17 @@ export function initDrawLayer(target, opts = {}) {
   noteLayer.addEventListener('pointermove', onNoteHover);
   noteLayer.addEventListener('pointerleave', clearHover);
   noteLayer.addEventListener('click', (e) => {
+    // pin badge 點擊：事件委派掛在穩定容器 noteLayer，以 data-note-id 對應目標 → pin 每次 render 重建也吃得到點擊
+    //（真人 mousedown/mouseup 若跨到 pin 重建邊界，click 落在共同祖先 noteLayer，而非已被抽換的 button）。
+    const markEl = e.target.closest && e.target.closest('.pc-note-mark');
+    if (markEl) {
+      e.stopPropagation();
+      const note = state.notes.find(nt => String(nt.id) === markEl.dataset.noteId);
+      if (note) openNoteCard(note);
+      return;
+    }
+    if (e.target.closest && e.target.closest('.pc-note-card')) return; // 點在卡片內 → 各自 handler 處理
     if (state.mode !== 'note') return;
-    if (e.target.closest && e.target.closest('.pc-note-mark, .pc-note-card')) return; // 點在標記/卡 → 各自 handler 處理
     const tg = pickTarget(e.clientX, e.clientY);
     if (!tg) return;
     // 點到「已有註記的目標」（同 sel / 同自繪 objId）→ 開該註記聚焦編輯，不再誤建新。
@@ -497,6 +521,22 @@ export function initDrawLayer(target, opts = {}) {
   };
   const removeDecision = (id) => { state.decisions = state.decisions.filter(d => d.id !== id); delete state.sendUnchecked[id]; delete state.sentSigs[id]; renderRecordPanel(); };
   const removeNote = (id) => deleteNote(id); // deleteNote 已含 renderRecordPanel（畫布+紀錄面板都同步）
+  // ── 送出「收納」：已送出的標注標記 hidden → 從畫布消失、仍留標注紀錄（可還原）。
+  //   經 syncSaveObj（drawStore PUT）＋ persistLocalSave 落盤 → 重整/重訂閱後畫布維持隱藏。
+  function archiveObjects(objs) {
+    let changed = false;
+    objs.forEach(o => { if (o && !o.hidden) { o.hidden = true; o.archivedAt = Date.now(); syncSaveObj(o); changed = true; } });
+    if (changed) persistLocalSave();
+  }
+  // 標注紀錄「還原到畫布」（單筆）：清 hidden → 重新顯示。保留 sentSigs（已送徽章不變，
+  //   且 checkedObjects 的 !isSent 去重讓已送未改者不會被重複送）。同經 PUT 通道落盤 → 重整保持。
+  function restoreObject(id) {
+    const o = findById(state.objects, id);
+    if (!o || !o.hidden) return;
+    delete o.hidden; delete o.archivedAt;
+    syncSaveObj(o); persistLocalSave();
+    render();
+  }
   const drawerAllBox = recordDrawer.querySelector('.pc-draw-rec-all');
   if (drawerAllBox) drawerAllBox.onchange = () => {
     state.sendUnchecked = {};
@@ -566,6 +606,7 @@ export function initDrawLayer(target, opts = {}) {
     objs.forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
     decs.forEach(d => { state.sentSigs[d.id] = decisionSig(d); });
     notes.forEach(nn => { state.sentSigs[nn.id] = noteSig(nn); });
+    archiveObjects(objs); // 送出即收納：從畫布消失、留在標注紀錄（可還原）
     state.sentConfirmN = n;
     persistSentState(); // 修 bug：持久化「已送」→ 重整/重訂閱後不再把已送標註當未送畫回
     render(); // 隱藏已送標註（inflight 仍在 → renderFeedbackBox 不覆寫下方回執）
@@ -586,6 +627,7 @@ export function initDrawLayer(target, opts = {}) {
   if (opts.feedbackBox) ensureFeedbackBox();
 
   // 依目前 objects/selectedIds 重畫面板（render() 每次變動都會喚起 → 即時更新）。
+  let _recRowSig = null; // 上次實際建出的列集合簽章 → 無變化不重建列 DOM
   function renderRecordPanel() {
     recordTab.classList.toggle('show', !state.recordOpen);
     recordDrawer.classList.toggle('open', state.recordOpen);
@@ -602,31 +644,34 @@ export function initDrawLayer(target, opts = {}) {
       selector: n.sel || null, color: DRAW_UI_COLORS.selection,
       sent: state.sentSigs[n.id] === noteSig(n), isNote: true,
     }));
-    // outbox：已送給 AI（且未再改）的項目不再留在清單（畫布上的 note/標注仍在，也不會被重複送）。
-    const rows = annRows.concat(decRows).concat(noteRows).filter(r => !r.sent);
+    // 標注：送出後改採「收納」→ 已送標注仍留清單（archived，可「還原到畫布」）。
+    // 決策/註記：維持 outbox → 已送（且未再改）者離開清單。
+    const rows = annRows.concat(decRows.filter(r => !r.sent)).concat(noteRows.filter(r => !r.sent));
     // 群組視覺提示：標記屬於 ≥2 成員群組的列（勾選會整組連動，讓使用者預期得到）。
     const groupCount = {};
     rows.forEach(r => { if (r.groupId) groupCount[r.groupId] = (groupCount[r.groupId] || 0) + 1; });
     rows.forEach(r => { r.grouped = !!(r.groupId && groupCount[r.groupId] > 1); });
-    const checkedRows = rows.filter(r => !state.sendUnchecked[r.id]); // 納入送出的列
+    // 「待送」＝尚未送出的列（已送/收納者不納入送出計數與全選）。
+    const pendingRows = rows.filter(r => !r.sent);
+    const checkedRows = pendingRows.filter(r => !state.sendUnchecked[r.id]); // 納入送出的列
     const checkedCount = checkedRows.length;
     const count = recordDrawer.querySelector('.pc-draw-rec-count');
     if (count) count.textContent = String(rows.length);
-    // 全選框：全勾→checked、部分→indeterminate、空清單→disabled
+    // 全選框：反映「待送」列（全勾→checked、部分→indeterminate、無待送→disabled）。
     const allBox = recordDrawer.querySelector('.pc-draw-rec-all');
     if (allBox) {
-      allBox.checked = rows.length > 0 && checkedCount === rows.length;
-      allBox.indeterminate = checkedCount > 0 && checkedCount < rows.length;
-      allBox.disabled = rows.length === 0;
+      allBox.checked = pendingRows.length > 0 && checkedCount === pendingRows.length;
+      allBox.indeterminate = checkedCount > 0 && checkedCount < pendingRows.length;
+      allBox.disabled = pendingRows.length === 0;
     }
     // footer 送出鈕狀態機（outbox：已送項已離開清單，故 checkedCount>0 必為未送 → 可直接送）：
     //   有可送項 → 「送給 AI（N）」可送；剛送完、沒有新可送項 → 持久「✅ 已送出（N 筆）」確認
     //   （不退回「送給 AI（0）」假失敗態）；從沒送過也沒東西 → 「送給 AI（0）」。
     const sendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
     if (sendBtn) {
-      // 只有「真正清空」（清單空且沒有待確認的已送批次）才強制重設 in-flight；
-      // 送出後 outbox 清空清單時保留 in-flight → 「✅ 已送達／📥 已排佇列」即時回饋不被蓋掉。
-      if (!rows.length && !state.sentConfirmN) delete sendBtn.dataset.inflight;
+      // 只有「真正清空」（無待送列且沒有待確認的已送批次）才強制重設 in-flight；
+      // 送出後保留 in-flight → 「✅ 已送達／📥 已排佇列」即時回饋不被蓋掉。
+      if (!pendingRows.length && !state.sentConfirmN) delete sendBtn.dataset.inflight;
       if (!sendBtn.dataset.inflight) {
         sendBtn.classList.remove('pc-draw-rec-queued');
         if (checkedCount > 0) {
@@ -640,6 +685,13 @@ export function initDrawLayer(target, opts = {}) {
     }
     const list = recordDrawer.querySelector('.pc-draw-rec-list');
     if (!list) return;
+    // 狀態 diff：列內容/選取/勾選/已送 皆未變 → 不重建列 DOM（同 pin：避免 refresh 風暴每 tick 整批重繪
+    // 讓還原鈕/勾選框的真人 click 蒸發）。截圖預覽仍在（refreshRecordPreview 就地更新，不受影響）。
+    const rowSig = rows.map(r => [r.id, r.text, r.selector, r.color, r.icon, r.grouped ? 1 : 0, r.sent ? 1 : 0,
+      r.archived ? 1 : 0, isSelected(r.id) ? 1 : 0, state.sendUnchecked[r.id] ? 0 : 1,
+      r.isNote ? 'N' : (r.isDecision ? 'D' : 'A')].join(':')).join('|');
+    if (rowSig === _recRowSig) { if (rows.length) refreshRecordPreview(); return; }
+    _recRowSig = rowSig;
     list.innerHTML = '';
     if (!rows.length) {
       const empty = drawHtmlEl('div', 'pc-draw-rec-empty');
@@ -650,7 +702,9 @@ export function initDrawLayer(target, opts = {}) {
     list.appendChild(recordPreviewEl()); // 置頂：送給 AI 的畫面截圖預覽
     rows.forEach(row => { list.appendChild(recordRowEl(
       row, isSelected(row.id), onRecordRowClick, !state.sendUnchecked[row.id], onToggleSendChecked,
-      row.isNote ? removeNote : (row.isDecision ? removeDecision : null)
+      row.isNote ? removeNote : (row.isDecision ? removeDecision : null),
+      // 收納中的標注（已送、畫布隱藏）→ 提供「還原到畫布」單筆操作
+      (row.archived && !row.isNote && !row.isDecision) ? restoreObject : null
     )); });
     refreshRecordPreview();
   }
@@ -848,7 +902,7 @@ export function initDrawLayer(target, opts = {}) {
     [...state.objects, state.draft].forEach(o => {
       if (!o) return;
       if (o !== state.draft && !onCurrentScreen(o)) return; // 決策 A：不屬當前頁的標注不畫（不刪，換回頁還在）
-      if (o !== state.draft && isSent(o)) return; // 已送出 → 不畫在畫布（保留在標注紀錄）
+      if (o !== state.draft && o.hidden) return; // 送出後收納 → 不畫在畫布（保留在標注紀錄，可還原）
       if (o !== state.draft && state.sendUnchecked[o.id]) return; // 標注紀錄取消勾選 → 從畫布隱藏（也不進送出截圖）
       if (o.id === state.editingId) return;       // 正在編輯的文字 → 隱藏原件，只留輸入框（不重疊兩個）
       const vo = viewObject(o); // arrow/line anchor → 解析後端點渲染
@@ -941,7 +995,7 @@ export function initDrawLayer(target, opts = {}) {
     return toPxBox(geomBBox(o, resolveO), rect);
   }
   function renderSelection(rect) {
-    const objs = selectedObjects().filter(o => !isSent(o) && !state.sendUnchecked[o.id] && o.id !== state.editingId); // 已送出/取消勾選/編輯中者不畫選取框
+    const objs = selectedObjects().filter(o => !o.hidden && !state.sendUnchecked[o.id] && o.id !== state.editingId); // 收納/取消勾選/編輯中者不畫選取框
     if (!objs.length) return;
     const g = drawSvgEl('g', { class: 'pc-draw-selection' });
     objs.forEach(o => {
@@ -1083,7 +1137,7 @@ export function initDrawLayer(target, opts = {}) {
   }
   // Firestore doc（含 updatedAt 等 metadata）→ 乾淨 DrawObject（丟掉非向量欄位）。
   function rehydrateDrawing(doc) {
-    const obj = makeDrawObject({ id: doc.id, tool: doc.tool, geom: doc.geom, style: doc.style, text: doc.text, screenId: doc.screenId });
+    const obj = makeDrawObject({ id: doc.id, tool: doc.tool, geom: doc.geom, style: doc.style, text: doc.text, screenId: doc.screenId, hidden: doc.hidden, archivedAt: doc.archivedAt });
     if (doc.label != null) obj.label = doc.label;
     if (doc.anchor != null) obj.anchor = doc.anchor;
     if (doc.groupId != null) obj.groupId = doc.groupId;
@@ -1596,9 +1650,11 @@ export function initDrawLayer(target, opts = {}) {
       sendBtn.textContent = result.listening ? `✅ 已送達 AI（${n} 筆）` : `📥 已排佇列（${n} 筆，AI 未連線）`;
       sendBtn.classList.toggle('pc-draw-rec-queued', !result.listening);
       // 記下這批「實際送出（勾選）」的標注＋決定簽章 → 面板那幾列標「已送」（改動後簽章變、自動回「未送」）。
-      checkedObjects().forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
+      const sentObjs = checkedObjects(); // 先擷取（標記 sentSigs 後 isSent 會變真、checkedObjects 會清空）
+      sentObjs.forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
       checkedDecisions().forEach(d => { state.sentSigs[d.id] = decisionSig(d); });
       state.notes.filter(n => !state.sendUnchecked[n.id]).forEach(n => { state.sentSigs[n.id] = noteSig(n); });
+      archiveObjects(sentObjs); // 送出即收納：從畫布消失、留在標注紀錄（可還原）
       state.sentConfirmN = n; // outbox 清空清單後，footer 靠此維持「✅ 已送出（N 筆）」確認
       persistSentState(); // 修 bug：持久化「已送」→ 重整/重訂閱後不再把已送標注當未送畫回
       render(); // 立刻更新：畫布隱藏已送標注 + 各列「已送」標記（inflight 仍在 → 不蓋按鈕狀態文字）

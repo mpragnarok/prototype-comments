@@ -102,6 +102,7 @@ export function annotationRows(objects, sentSigs) {
       selector: o.anchor != null ? o.anchor : null,
       color: (o.style && o.style.color) || null,
       sent: !!(sentSigs && sentSigs[o.id] === annotationSig(o)),
+      archived: !!o.hidden, // 送出後收納中（畫布隱藏）→ 面板顯示「還原到畫布」
       groupId: o.groupId || null,
     };
   });
