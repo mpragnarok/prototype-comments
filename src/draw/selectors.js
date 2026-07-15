@@ -86,7 +86,16 @@ export function decisionSig(d) {
   return JSON.stringify({ replyId: d.replyId, optionId: d.optionId, optionLabel: d.optionLabel });
 }
 export function noteSig(n) {
-  return JSON.stringify({ text: n.text, sel: n.sel, objId: n.objId });
+  return JSON.stringify({ text: n.text, sel: n.sel, objId: n.objId, range: n.range });
+}
+// 程式碼範圍註記的顯示標籤：`path:startLine–endLine`（單行退化成 `path:line`）。
+// en-dash（–, U+2013）與 GitHub 行號範圍一致。純函式，供標注紀錄列與卡片標題共用。
+export function rangeLabel(range) {
+  if (!range || range.path == null) return null;
+  const { path, startLine, endLine } = range;
+  return endLine != null && endLine !== startLine
+    ? `${path}:${startLine}–${endLine}`
+    : `${path}:${startLine}`;
 }
 // sentSigs＝{objId: 上次成功送出時的簽章}；row.sent＝目前簽章與已送簽章相符（送出後沒再改）。
 export function annotationRows(objects, sentSigs) {

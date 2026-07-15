@@ -22,7 +22,7 @@ import {
 } from './geometry.js';
 import {
   cssSelectorFor, buildExport, commentViewGeom, annotationSig, decisionSig, noteSig,
-  annotationRows,
+  annotationRows, rangeLabel,
 } from './selectors.js';
 import {
   reorderMany, applyStylePatch, eyedropperSupported, applyCommand, invertCommand, makeUndoStack,
@@ -166,9 +166,18 @@ export function initDrawLayer(target, opts = {}) {
   // 解析留言錨定元件的「整塊範圍」（寬-% bbox）。供持續外框用；fallback（僅 x/y）時回 null。
   function resolveNoteBox(c) {
     let r = null;
-    if (c.sel) r = getRectPct(c.sel);
+    if (c.range && c.endSel && c.sel) r = unionRectPct(c.sel, c.endSel); // 程式碼範圍：起訖行聯集外框
+    else if (c.sel) r = getRectPct(c.sel);
     else if (c.objId != null) { const t = findById(state.objects, c.objId); if (t) r = geomBBox(t, resolveO); }
     return r && r.w != null ? r : null;
+  }
+  // 範圍註記外框＝起始行 + 結束行兩個錨點元素的聯集 bbox（跨多行實線框，隨捲動/縮放跟著貼）。
+  function unionRectPct(startSel, endSel) {
+    const a = getRectPct(startSel), b = getRectPct(endSel);
+    if (!a || a.w == null) return (b && b.w != null) ? b : null;
+    if (!b || b.w == null) return a;
+    const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+    return { x, y, w: Math.max(a.x + a.w, b.x + b.w) - x, h: Math.max(a.y + a.h, b.y + b.h) - y };
   }
   // 放/改一則留言。anchor＝{sel,objId,relX,relY,x,y,label}；id 有值 → 只更新文字。
   function noteToDoc(c) {
@@ -180,6 +189,8 @@ export function initDrawLayer(target, opts = {}) {
     if (c.x != null) doc.x = c.x;
     if (c.y != null) doc.y = c.y;
     if (c.label != null) doc.label = c.label;
+    if (c.range != null) doc.range = c.range;   // 程式碼範圍註記：{path,startLine,endLine,side,code}
+    if (c.endSel != null) doc.endSel = c.endSel; // 範圍結束行錨點（起訖聯集外框用）
     if (c.screenId != null) doc.screenId = c.screenId; // 決策 A：頁面/screen 歸屬（有才帶）
     return doc;
   }
@@ -196,7 +207,7 @@ export function initDrawLayer(target, opts = {}) {
     }
     renderNotes();
     renderRecordPanel(); // 加/改 note 後同步標注紀錄面板（新列 + 全選框 checked/indeterminate 狀態）
-    if (drawStore) { try { existing ? drawStore.save({ id: c.id, kind: 'note', text: t }) : drawStore.save(noteToDoc(c)); } catch (_) { } }
+    if (drawStore) { try { drawStore.save(noteToDoc(c)); } catch (_) { } } // 全欄位回寫（同一 PUT 通道）：編輯文字時不掉 sel/range 錨點
     persistLocalSave();
     return c;
   }
@@ -648,7 +659,8 @@ export function initDrawLayer(target, opts = {}) {
     const noteRows = state.notes.filter(onCurrentScreen).map((n) => ({
       id: n.id, tool: 'comment', icon: 'comment',
       text: '【註記】' + (n.label ? n.label + ' → ' : '') + n.text,
-      selector: n.sel || null, color: DRAW_UI_COLORS.selection,
+      selector: n.range ? rangeLabel(n.range) : (n.sel || null), // 範圍註記顯示 path:12–18；否則沿用元件 selector
+      color: DRAW_UI_COLORS.selection,
       sent: state.sentSigs[n.id] === noteSig(n), isNote: true,
     }));
     // 標注：送出後改採「收納」→ 已送標注仍留清單（archived，可「還原到畫布」）。
@@ -1126,6 +1138,8 @@ export function initDrawLayer(target, opts = {}) {
         state.notes.push({ id: doc.id, kind: 'note', text: doc.text,
           sel: doc.sel || null, objId: doc.objId != null ? doc.objId : null,
           relX: doc.relX, relY: doc.relY, x: doc.x, y: doc.y, label: doc.label || '',
+          ...(doc.range != null ? { range: doc.range } : {}),   // 程式碼範圍註記還原
+          ...(doc.endSel != null ? { endSel: doc.endSel } : {}),
           ...(doc.screenId != null ? { screenId: doc.screenId } : {}) });
         changed = true;
       } else if (doc.geom) {
@@ -1519,6 +1533,7 @@ export function initDrawLayer(target, opts = {}) {
       id: n.id, text: n.text, label: n.label || '',
       selector: n.sel || null, objId: n.objId != null ? n.objId : null,
       x: n.x, y: n.y,
+      ...(n.range != null ? { range: n.range } : {}), // 程式碼範圍：{path,startLine,endLine,side,code}→ AI 拿到完整脈絡
     }));
     return p;
   }
@@ -2008,6 +2023,17 @@ export function initDrawLayer(target, opts = {}) {
     getNotes: () => state.notes.slice(),                 // 註記清單（poll / 測試用）
     // 放一則註記（測試 / 程式化）：addNote(text, {sel|objId, relX,relY, x,y, label}) 或舊式 addNote(text, x, y)。
     addNote: (text, a, b) => saveNote(text, (a && typeof a === 'object') ? a : { x: a, y: b }),
+    // 程式化開「程式碼範圍註記」泡泡（live-markup review 頁的 gutter 選取互動呼叫此入口）。
+    // anchor = { sel(起始行錨), endSel(結束行錨), range:{path,startLine,endLine,side,code}, label?, x?, y? }。
+    // 進 note 模式（註記層吃指標→卡片可輸入/存），再開空白卡；使用者輸入後經 saveNote 帶 range 持久化。
+    openRangeNote: (anchor) => {
+      if (!anchor || !anchor.range) return null;
+      setMode('note');
+      const label = anchor.label || rangeLabel(anchor.range) || '程式碼範圍';
+      openNoteCard({ sel: anchor.sel || null, endSel: anchor.endSel || null, range: anchor.range,
+        relX: 0, relY: 0, x: anchor.x, y: anchor.y, label });
+      return { ok: true };
+    },
     deleteNote,
     getTombstones: () => ({ ...state.tombstones }), // 目前墓碑集合 {id: deletedAt}（測試 / 檢視用）
     // compact：清掉早於 maxAgeMs（預設 30 天）的墓碑並回寫。只清本地墓碑索引；

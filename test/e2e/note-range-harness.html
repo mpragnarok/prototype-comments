@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<!--
+  note-range-harness.html — 驗證「程式碼範圍註記」的 pc.js 契約端（pc-note-range）。
+  live-markup review 頁的 gutter 選取互動（skills 側）選完一段行後呼叫
+  window.__api.openRangeNote({ sel, endSel, range:{path,startLine,endLine,side,code}, label })。
+  本 harness 提供一份 diff 風的行清單（每行帶 id=F0L<n> + .ln 行號欄 + .lc 程式碼），
+  讓 e2e 直接驗證：開卡 → 存 → getNotes()[].range → 標注紀錄列 path:N–M → buildExport() 帶 range+code。
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>note-range harness</title>
+<style>
+  html, body { margin: 0; font-family: ui-monospace, Menlo, monospace; }
+  .file-body { max-width: 700px; margin: 40px auto; font-size: 13px; line-height: 1.6; }
+  .dl { display: flex; align-items: flex-start; white-space: pre; }
+  .ln { flex: 0 0 44px; text-align: right; padding: 0 8px; color: #999; user-select: none; background: #fbfbfb; }
+  .lc { flex: 1; padding: 0 8px; }
+</style>
+</head>
+<body>
+<div class="file-body" id="file-0">
+  <div class="dl" id="F0L10" data-file-idx="0" data-line="10" data-side="new"><span class="ln ln-new">10</span><code class="lc">function greet(name) {</code></div>
+  <div class="dl" id="F0L11" data-file-idx="0" data-line="11" data-side="new"><span class="ln ln-new">11</span><code class="lc">  const msg = 'hi ' + name;</code></div>
+  <div class="dl" id="F0L12" data-file-idx="0" data-line="12" data-side="new"><span class="ln ln-new">12</span><code class="lc">  console.log(msg);</code></div>
+  <div class="dl" id="F0L13" data-file-idx="0" data-line="13" data-side="new"><span class="ln ln-new">13</span><code class="lc">  return msg;</code></div>
+  <div class="dl" id="F0L14" data-file-idx="0" data-line="14" data-side="new"><span class="ln ln-new">14</span><code class="lc">}</code></div>
+</div>
+
+<script type="module">
+  import { initDrawLayer } from '/src/draw-layer.js';
+  window.__ready = false;
+  window.__api = initDrawLayer(document.body, { mode: 'off', projectId: 'note-range-repro' });
+  window.__ready = true;
+</script>
+</body>
+</html>
