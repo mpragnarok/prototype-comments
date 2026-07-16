@@ -1,4 +1,4 @@
-/* pc.js c0b5cec 2026-07-15T14:43:07Z */
+/* pc.js 68c98f5 2026-07-15T23:45:54Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -3015,6 +3015,12 @@ function initDrawLayer(target, opts = {}) {
     const w = svg.clientWidth || host.clientWidth || r.width;
     return { left: r.left, top: r.top, width: w, height: w };
   }
+  // CSS #pc-draw{height:100%} 只吃到 host 的內容高（見 draw/styles.js）：內容比視窗短的頁面，
+  // 下方視窗空白區蓋不到 svg → 無法在那裡畫標注。inline style 蓋過 CSS，取「視窗高、文件高」大者，
+  // 短頁至少蓋滿視窗、長頁蓋滿全文件；render() 已掛在 init/resize/內容變化(refresh) 各路徑，隨之更新。
+  function syncSvgHeight() {
+    svg.style.height = Math.max(document.documentElement.scrollHeight, window.innerHeight) + 'px';
+  }
   // AI 方案卡層：錨定在標注旁的回覆卡（不依賴 lavish，走自家 reply 通道）。容器不吃指標、卡片才吃。
   const replyLayer = drawHtmlEl('div', 'pc-draw-reply-layer');
   host.appendChild(replyLayer);
@@ -3856,6 +3862,7 @@ function initDrawLayer(target, opts = {}) {
 
   function render() {
     stampZ();
+    syncSvgHeight();
     while (svg.childNodes.length > 1) svg.removeChild(svg.lastChild); // 保留 <defs>
     const rect = coordRect();
     // [fix5] stable badge 序號：以 state.objects 中 comment 的插入順序為準（不受 render 過濾影響）
@@ -5085,7 +5092,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = 'c0b5cec';
+export const PC_VERSION = '68c98f5';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';

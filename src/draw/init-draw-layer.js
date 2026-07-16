@@ -70,6 +70,12 @@ export function initDrawLayer(target, opts = {}) {
     const w = svg.clientWidth || host.clientWidth || r.width;
     return { left: r.left, top: r.top, width: w, height: w };
   }
+  // CSS #pc-draw{height:100%} 只吃到 host 的內容高（見 draw/styles.js）：內容比視窗短的頁面，
+  // 下方視窗空白區蓋不到 svg → 無法在那裡畫標注。inline style 蓋過 CSS，取「視窗高、文件高」大者，
+  // 短頁至少蓋滿視窗、長頁蓋滿全文件；render() 已掛在 init/resize/內容變化(refresh) 各路徑，隨之更新。
+  function syncSvgHeight() {
+    svg.style.height = Math.max(document.documentElement.scrollHeight, window.innerHeight) + 'px';
+  }
   // AI 方案卡層：錨定在標注旁的回覆卡（不依賴 lavish，走自家 reply 通道）。容器不吃指標、卡片才吃。
   const replyLayer = drawHtmlEl('div', 'pc-draw-reply-layer');
   host.appendChild(replyLayer);
@@ -911,6 +917,7 @@ export function initDrawLayer(target, opts = {}) {
 
   function render() {
     stampZ();
+    syncSvgHeight();
     while (svg.childNodes.length > 1) svg.removeChild(svg.lastChild); // 保留 <defs>
     const rect = coordRect();
     // [fix5] stable badge 序號：以 state.objects 中 comment 的插入順序為準（不受 render 過濾影響）

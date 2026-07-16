@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<!--
+  draw-svg-height-harness.html — e2e 載入頁，測「短頁 + 視窗較長」時 #pc-draw svg 高度 bug。
+  故意不給 body 一個容器 div，讓 initDrawLayer() 掛在 document.body 上（走 prod 常見用法：
+  沒傳 target → resolveTarget 預設 document.body）。內容只有一小塊，遠比 viewport 矮，
+  藉此重現「下方視窗空白區蓋不到 svg」的原 bug 場景。
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>draw svg height e2e harness</title>
+<style>
+  html, body { margin: 0; }
+  #content { width: 100%; height: 80px; background: #f3f4f6; }
+</style>
+</head>
+<body>
+<div id="content">短內容（遠矮於視窗）</div>
+
+<script type="module">
+  import { initDrawLayer } from '/src/draw-layer.js';
+
+  window.__drawTest = {
+    initDrawLayer,
+    init: (overrides = {}) => initDrawLayer(undefined, overrides), // 不傳 target → 掛 document.body
+    ready: true,
+  };
+</script>
+</body>
+</html>
