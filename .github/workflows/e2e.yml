@@ -23,6 +23,12 @@ jobs:
 
       - run: npx playwright install chromium --with-deps
 
+      # 硬 gate：dist/pc.js 是手動 build.py 產物、不是 CI 自動 build，merge 改 src 的 PR 卻忘了
+      # 重跑 build.py 會讓 CDN 附掛消費者（jubo-line-badminton-check-in-system 等）悄悄吃到舊行為。
+      # 跑純 python3+node，無需瀏覽器，擋在 e2e 之前先失敗。
+      - name: dist/pc.js build sync
+        run: npm run test:dist-sync
+
       # e2e 是硬 gate：純行為 / computed style 斷言，跨平台一致（Firebase 用 in-memory mock，無網路）。
       - name: e2e (mock firebase)
         run: npm run test:e2e
