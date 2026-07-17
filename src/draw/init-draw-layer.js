@@ -1508,6 +1508,15 @@ export function initDrawLayer(target, opts = {}) {
     if (d && isDrawn(d)) { captureAnchor(d); runCommand({ type: 'create', obj: d }); }
     else render();
   }
+  // Esc 取消進行中的繪製：不落地成物件（與 commitDraft 的差異），供 onKey 呼叫。
+  function cancelDraft() {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    drag = null;
+    state.draft = null;
+    snapHighlight = null;
+    render();
+  }
 
   // ── P4：selector 擷取 + 截圖 + 結構化匯出 + 送給 AI ─────────────────────────────
   const ANCHOR_TOOLS = ['ellipse', 'diamond', 'rect', 'arrow', 'line']; // 指向底層元件的標注才擷取
@@ -1900,9 +1909,16 @@ export function initDrawLayer(target, opts = {}) {
         return;
       }
     }
-    // 以下操作只在繪圖模式有意義（Esc 關選單、undo/redo、群組、刪除）。
+    // Esc：右鍵選單 > 進行中的繪製 > 收合工具列，三選一按優先序處理（工具列已收合則沒事可做）。
+    // 收合沿用既有 ✕ 收合機制（collapseToolbar），FAB 可展開回來 —— 不在 draw 模式也生效（note 模式工具列仍顯示）。
+    if (e.key === 'Escape' && !state.collapsed) {
+      if (contextMenu.classList.contains('open')) { closeContextMenu(); return; }
+      if (drag && state.draft) { cancelDraft(); return; }
+      collapseToolbar();
+      return;
+    }
+    // 以下操作只在繪圖模式有意義（undo/redo、群組、刪除）。
     if (state.mode !== 'draw') return;
-    if (e.key === 'Escape') { closeContextMenu(); return; } // 關右鍵選單
     if (meta && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
       if (e.shiftKey) doRedo(); else doUndo();
