@@ -1,4 +1,4 @@
-/* pc.js 68c98f5 2026-07-15T23:45:54Z */
+/* pc.js b975740 2026-07-17T16:08:12Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -3107,6 +3107,7 @@ function initDrawLayer(target, opts = {}) {
   let pendingAnchor = null;  // 新卡尚未存檔前的錨點
   let focusNoteId = null;
   let hoverBox = null;       // hover 高亮框 DOM
+  let activeNoteEditor = null; // 目前輸入 popover 的 { ta, c, isEdit }；view 卡或未開卡時為 null（點外面自動存檔用）
 
   // 解析留言錨點 → pin 點（svg % 座標）。有 sel/objId 解得到 → 跟著元件；否則 fallback x/y。
   function resolveNotePct(c) {
@@ -3297,8 +3298,13 @@ function initDrawLayer(target, opts = {}) {
   // ── 對話卡（H：prompt 在上、AI 方案卡在下，整段貼著元件）──
   function closeAllNoteCards() {
     noteLayer.querySelectorAll('.pc-note-card').forEach(n => { n.remove(); });
+    // 關卡同時清掉 spotlight/dim 高亮（原本只清 focusNoteId 變數、沒清 DOM class → ✕ 關閉/點外面關閉後
+    // 標記仍殘留高亮）。她的原話：「高亮時，應該點旁邊就要可以取消高亮」。
+    noteLayer.querySelectorAll('.pc-note-mark').forEach(m => { m.classList.remove('is-spotlight', 'is-dim'); });
     pendingAnchor = null;
     focusNoteId = null;
+    activeNoteEditor = null;
+    unbindNoteOutsideClose();
   }
   function closeNoteCard() { closeAllNoteCards(); }
   function setFocusNote(id) {
@@ -3335,13 +3341,39 @@ function initDrawLayer(target, opts = {}) {
     const xy = noteXY(resolveNotePct(arg)); card.style.left = xy.x + 'px'; card.style.top = xy.y + 'px';
     const head = drawHtmlEl('div', 'pc-note-card-head');
     const tgt = drawHtmlEl('span', 'pc-n-target'); tgt.textContent = (arg.objId != null ? '◆ ' : '▢ ') + (arg.label || '元件');
-    const x = drawHtmlEl('button'); x.textContent = '✕'; x.title = '關閉'; x.onclick = () => { card.remove(); renderNotes(); };
+    const x = drawHtmlEl('button'); x.textContent = '✕'; x.title = '關閉'; x.onclick = () => { closeAllNoteCards(); renderNotes(); };
     head.append(tgt, x); card.appendChild(head);
     const body = drawHtmlEl('div', 'pc-note-card-body'); card.appendChild(body);
     if (!isNew && arg.text) renderCardView(body, arg); else renderCardInput(body, arg, '');
     noteLayer.appendChild(card);
     setFocusNote(noteId);
     const ta = card.querySelector('textarea'); if (ta) ta.focus();
+    bindNoteOutsideClose(); // 開卡即掛「點外面」監聽，關卡（closeAllNoteCards）時自動解除
+  }
+  // ── 點卡外關閉（三態）：view 卡 → 直接關＋清高亮；input popover 空白 → 直接關（不留空紀錄）；
+  //   input popover 有字 → 視同按「存紀錄」自動存檔後再關（存檔已含 renderNotes/renderRecordPanel，
+  //   內容必進紀錄面板）。她的原話：「如果有打字的話，應該要自動儲存下來」。
+  //   用 pointerdown + capture（與右鍵選單 onDocPointer 同套路），下一輪 tick 才掛上，
+  //   避免開卡當下那個 pointer 事件立刻把自己關掉。不呼叫 preventDefault/stopPropagation，
+  //   讓同一次點擊原有行為（選新元素、開始畫圖、開另一則 note）照常往下走，不被吞掉。
+  function onNoteOutsidePointer(e) {
+    const card = noteLayer.querySelector('.pc-note-card');
+    if (!card) { unbindNoteOutsideClose(); return; }
+    if (card.contains(e.target)) return; // 點在卡片本身 → 交回卡內各自 handler，不處理
+    if (activeNoteEditor) {
+      const { ta, c, isEdit } = activeNoteEditor;
+      const text = ta.value.trim();
+      if (text) saveNote(ta.value, isEdit ? null : pendingAnchor, c.id || null); // 有內容 → 自動存檔
+      // 空白 → 不存（不留空紀錄）；不論是否存檔，點外面一律直接關閉（不像 Cancel 鈕會重開 view 卡）。
+    }
+    closeAllNoteCards();
+  }
+  function bindNoteOutsideClose() {
+    document.removeEventListener('pointerdown', onNoteOutsidePointer, true);
+    setTimeout(() => document.addEventListener('pointerdown', onNoteOutsidePointer, true), 0);
+  }
+  function unbindNoteOutsideClose() {
+    document.removeEventListener('pointerdown', onNoteOutsidePointer, true);
   }
   // 已存狀態：prompt 泡泡 + 編輯/刪除 + （若有對應 AI 方案卡）內嵌方案卡 + 放大閱讀。
   function renderCardView(body, c) {
@@ -3394,6 +3426,7 @@ function initDrawLayer(target, opts = {}) {
     autoGrowTextarea(ta); // 多行輸入自動長高（封頂 max-height，見 styles.js），初始跑一次吃已有內容（編輯既有多行 note）
     ta.addEventListener('input', () => autoGrowTextarea(ta));
     ta.focus();
+    activeNoteEditor = { ta, c, isEdit }; // 供 onNoteOutsidePointer 讀取，判斷點外面時是否要自動存檔
   }
   // note 編輯器自動長高：height 先 reset 再吃 scrollHeight，CSS max-height 封頂後交回 overflow-y 內部捲動。
   function autoGrowTextarea(ta) {
@@ -4453,6 +4486,15 @@ function initDrawLayer(target, opts = {}) {
     if (d && isDrawn(d)) { captureAnchor(d); runCommand({ type: 'create', obj: d }); }
     else render();
   }
+  // Esc 取消進行中的繪製：不落地成物件（與 commitDraft 的差異），供 onKey 呼叫。
+  function cancelDraft() {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    drag = null;
+    state.draft = null;
+    snapHighlight = null;
+    render();
+  }
 
   // ── P4：selector 擷取 + 截圖 + 結構化匯出 + 送給 AI ─────────────────────────────
   const ANCHOR_TOOLS = ['ellipse', 'diamond', 'rect', 'arrow', 'line']; // 指向底層元件的標注才擷取
@@ -4845,9 +4887,16 @@ function initDrawLayer(target, opts = {}) {
         return;
       }
     }
-    // 以下操作只在繪圖模式有意義（Esc 關選單、undo/redo、群組、刪除）。
+    // Esc：右鍵選單 > 進行中的繪製 > 收合工具列，三選一按優先序處理（工具列已收合則沒事可做）。
+    // 收合沿用既有 ✕ 收合機制（collapseToolbar），FAB 可展開回來 —— 不在 draw 模式也生效（note 模式工具列仍顯示）。
+    if (e.key === 'Escape' && !state.collapsed) {
+      if (contextMenu.classList.contains('open')) { closeContextMenu(); return; }
+      if (drag && state.draft) { cancelDraft(); return; }
+      collapseToolbar();
+      return;
+    }
+    // 以下操作只在繪圖模式有意義（undo/redo、群組、刪除）。
     if (state.mode !== 'draw') return;
-    if (e.key === 'Escape') { closeContextMenu(); return; } // 關右鍵選單
     if (meta && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
       if (e.shiftKey) doRedo(); else doUndo();
@@ -5029,6 +5078,7 @@ function initDrawLayer(target, opts = {}) {
       window.removeEventListener('paste', onPaste);
       if (typeof unsubDraw === 'function') { try { unsubDraw(); } catch (_) { /* ignore */ } }
       closeContextMenu();
+      unbindNoteOutsideClose(); // noteLayer 已隨上面 remove() 銷毀，document 監聽仍需手動解除，避免殘留
     },
   };
 }
@@ -5092,7 +5142,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = '68c98f5';
+export const PC_VERSION = 'b975740';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';
