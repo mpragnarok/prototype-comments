@@ -333,6 +333,47 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(!expanded.barHidden && !expanded.fabShown && expanded.mode === 'draw', '點 FAB 應展開工具列、隱藏 FAB、回繪圖模式');
   });
 
+  await test('Esc：進行中的繪製先取消（不落地成物件），工具列不因此收合', async () => {
+    await page.evaluate(() => { window.__drawTest.api.setMode('draw'); window.__drawTest.api.setTool('rect'); window.__drawTest.api.clear(); });
+    await page.mouse.move(120, 120);
+    await page.mouse.down();
+    await page.mouse.move(200, 200); // 拖曳中：產生 draft，尚未放開滑鼠
+    const midDrag = await page.evaluate(() => ({
+      draftRects: document.querySelectorAll('#pc-draw > rect').length,
+      objs: window.__drawTest.api.getObjects().length,
+    }));
+    await page.keyboard.press('Escape'); // 取消進行中的繪製
+    const afterEsc = await page.evaluate(() => ({
+      draftRects: document.querySelectorAll('#pc-draw > rect').length,
+      objs: window.__drawTest.api.getObjects().length,
+      barHidden: document.getElementById('pc-draw-toolbar').classList.contains('pc-draw-collapsed'),
+      mode: window.__drawTest.api.getMode(),
+    }));
+    await page.mouse.up(); // 滑鼠鬆開（drag 監聽已被 cancelDraft 移除，應無副作用）
+    console.log('     cancel-draft-first:', JSON.stringify({ midDrag, afterEsc }));
+    assert(midDrag.draftRects === 1 && midDrag.objs === 0, '拖曳中應有 1 個 draft <rect>、尚未進 getObjects()');
+    assert(afterEsc.draftRects === 0 && afterEsc.objs === 0, 'Esc 應清掉 draft、且不落地成物件');
+    assert(!afterEsc.barHidden && afterEsc.mode === 'draw', '第一次 Esc 只取消繪製，工具列不應收合');
+  });
+
+  await test('Esc：無進行中繪製時收合工具列（沿用既有 FAB 收合/展開機制）', async () => {
+    await page.evaluate(() => window.__drawTest.api.setMode('draw'));
+    await page.keyboard.press('Escape');
+    const collapsed = await page.evaluate(() => ({
+      barHidden: document.getElementById('pc-draw-toolbar').classList.contains('pc-draw-collapsed'),
+      fabShown: document.querySelector('.pc-draw-fab').classList.contains('show'),
+      mode: window.__drawTest.api.getMode(),
+    }));
+    await page.click('.pc-draw-fab'); // 展開回來，不留副作用給後續測試
+    const expanded = await page.evaluate(() => ({
+      barHidden: document.getElementById('pc-draw-toolbar').classList.contains('pc-draw-collapsed'),
+      mode: window.__drawTest.api.getMode(),
+    }));
+    console.log('     esc-collapse:', JSON.stringify({ collapsed, expanded }));
+    assert(collapsed.barHidden && collapsed.fabShown && collapsed.mode === 'off', 'Esc 應收合工具列、顯示 FAB、回 off 模式');
+    assert(!expanded.barHidden && expanded.mode === 'draw', '點 FAB 應能展開回來（沒被鎖死）');
+  });
+
   // ── P2：物件操作（select/move/resize/z-order/delete/undo-redo）+ rect/line + 顏色筆粗 ──
   console.log('\ndraw-layer e2e — P2 物件操作:');
 
