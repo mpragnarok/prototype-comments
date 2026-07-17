@@ -7,6 +7,7 @@
     "test:render": "open test/render-test.html",
     "test:unit": "node test/draw-layer.unit.spec.js",
     "test:cdn": "node test/draw-overlay.cdn.spec.js",
+    "test:dist-sync": "node test/dist-build-sync.spec.js",
     "test:e2e": "node test/e2e/e2e-mock.spec.js",
     "test:e2e:draw": "node test/e2e/draw-layer.spec.js",
     "test:e2e:pagescope": "node test/e2e/draw-page-scope.spec.js",
@@ -20,7 +21,7 @@
     "test:visual": "node test/visual/visual-shot.js",
     "test:visual:update": "node test/visual/visual-shot.js --update",
     "lint": "biome lint .",
-    "test:all": "npm run test:unit && npm run test:cdn && npm run test:e2e && npm run test:e2e:draw && npm run test:e2e:pagescope && npm run test:e2e:feedback && npm run test:e2e:note && npm run test:e2e:notedel && npm run test:e2e:notemultiline && npm run test:e2e:noterange && npm run test:e2e:spec && npm run test:e2e:comments && npm run test:visual",
+    "test:all": "npm run test:unit && npm run test:cdn && npm run test:dist-sync && npm run test:e2e && npm run test:e2e:draw && npm run test:e2e:pagescope && npm run test:e2e:feedback && npm run test:e2e:note && npm run test:e2e:notedel && npm run test:e2e:notemultiline && npm run test:e2e:noterange && npm run test:e2e:spec && npm run test:e2e:comments && npm run test:visual",
     "test": "npm run test:e2e && npm run test:visual"
   },
   "devDependencies": {
