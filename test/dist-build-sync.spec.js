@@ -33,8 +33,8 @@ sys.stdout.write(build.stamp(result, sha, built_utc))
 // （sha/時間隨每次 build 變動），比對前先正規化掉，只留「build.py 從 src 產出的程式碼本體」。
 function normalize(text) {
   return text
-    .replace(/^\/\* pc\.js [0-9a-f]+ [^*]* \*\/\n/, '')
-    .replace(/PC_VERSION = '[0-9a-f]+'/, "PC_VERSION = 'X'");
+    .replace(/^\/\* pc\.js (?:[0-9a-f]+|unknown) [^*]* \*\/\n/, '')
+    .replace(/PC_VERSION = '(?:[0-9a-f]+|unknown)'/, "PC_VERSION = 'X'");
 }
 
 let pass = 0, fail = 0;
