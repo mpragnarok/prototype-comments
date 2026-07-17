@@ -4,7 +4,7 @@
  */
 
 // ── 常數 ────────────────────────────────────────────────────────────────────
-export const DRAW_MODES = ['note', 'draw', 'off'];
+export const DRAW_MODES = ['note', 'draw', 'move', 'off']; // move＝元件拖曳模式（拖真實 DOM 元件到想要的位置）
 export const DRAW_TOOLS = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'pencil', 'text'];
 export const DEFAULT_DRAW_STYLE = { color: '#E5484D', strokeWidth: 2, fill: 'none', fontSize: 16 };
 // Excalidraw/Figma 風格預設色（8 色）＋ picker 另附 <input type=color> 自訂任意 hex。
@@ -62,6 +62,7 @@ export const ICON_PATHS = {
   help: 'M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z', // help_outline（使用說明）
   comment: 'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z', // chat_bubble_outline（留言模式）
   note: 'M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z', // note（便利貼角標）
+  move: 'M10 9h4V6h3l-5-5-5 5h3v3zm-1 1H6V7l-5 5 5 5v-3h3v-4zm14 2l-5-5v3h-3v4h3v3l5-5zm-9 3h-4v3H8l5 5 5-5h-3v-3z', // open_with（四向箭頭＝元件拖曳）
 };
 
 // 一個 Material 圖示 → inline SVG 字串（currentColor → 跟著 active/hover 文字色變化）。

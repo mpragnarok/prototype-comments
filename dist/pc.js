@@ -1,4 +1,4 @@
-/* pc.js b975740 2026-07-17T16:08:12Z */
+/* pc.js 2f70b4f 2026-07-18T01:04:30Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -937,7 +937,7 @@ function createNoteModule({
  */
 
 // ── 常數 ────────────────────────────────────────────────────────────────────
-const DRAW_MODES = ['note', 'draw', 'off'];
+const DRAW_MODES = ['note', 'draw', 'move', 'off']; // move＝元件拖曳模式（拖真實 DOM 元件到想要的位置）
 const DRAW_TOOLS = ['select', 'rect', 'diamond', 'ellipse', 'arrow', 'line', 'pencil', 'text'];
 const DEFAULT_DRAW_STYLE = { color: '#E5484D', strokeWidth: 2, fill: 'none', fontSize: 16 };
 // Excalidraw/Figma 風格預設色（8 色）＋ picker 另附 <input type=color> 自訂任意 hex。
@@ -995,6 +995,7 @@ const ICON_PATHS = {
   help: 'M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z', // help_outline（使用說明）
   comment: 'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z', // chat_bubble_outline（留言模式）
   note: 'M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z', // note（便利貼角標）
+  move: 'M10 9h4V6h3l-5-5-5 5h3v3zm-1 1H6V7l-5 5 5 5v-3h3v-4zm14 2l-5-5v3h-3v4h3v3l5-5zm-9 3h-4v3H8l5 5 5-5h-3v-3z', // open_with（四向箭頭＝元件拖曳）
 };
 
 // 一個 Material 圖示 → inline SVG 字串（currentColor → 跟著 active/hover 文字色變化）。
@@ -1620,6 +1621,10 @@ function decisionSig(d) {
 function noteSig(n) {
   return JSON.stringify({ text: n.text, sel: n.sel, objId: n.objId, range: n.range });
 }
+// 元件位移紀錄簽章：改拖曳量（dx/dy）或換元件（sel）→ 簽章變 → 視為未送（與 annotationSig 同語意）。
+function moveSig(m) {
+  return JSON.stringify({ sel: m.sel, dx: m.dx, dy: m.dy });
+}
 // 程式碼範圍註記的顯示標籤：`path:startLine–endLine`（單行退化成 `path:line`）。
 // en-dash（–, U+2013）與 GitHub 行號範圍一致。純函式，供標注紀錄列與卡片標題共用。
 function rangeLabel(range) {
@@ -1982,6 +1987,17 @@ const DRAW_STYLES = `
 #pc-draw { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 220; pointer-events: none; }
 #pc-draw.pc-draw-active { pointer-events: auto; cursor: crosshair; }
 #pc-draw.pc-draw-select { cursor: default; }
+/* ── 元件拖曳層（move 模式：抓真實 DOM 元件拖到想要的位置，位移落成可讀回的紀錄）──
+   啟用時整層吃指標抓取；hover 高亮候選元件，拖曳中元件本體加 grabbing outline。 */
+.pc-move-layer { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 226; pointer-events: none; }
+.pc-move-layer.pc-move-active { pointer-events: auto; cursor: grab; }
+.pc-move-layer.pc-move-active:active { cursor: grabbing; }
+.pc-move-hl { position: absolute; pointer-events: none; box-sizing: border-box; border-radius: 6px; z-index: 1;
+  outline: 2px dashed var(--pc-accent); outline-offset: 1px; background: rgba(var(--pc-accent-rgb), .06); }
+.pc-move-hl-label { position: absolute; top: -20px; left: 0; background: var(--pc-accent); color: #fff;
+  font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 5px; white-space: nowrap; }
+/* 拖曳中的真實元件：加輪廓 + 半透明，讓使用者看得出「正在被搬的是這一顆」。ghost 觀感靠 opacity。 */
+.pc-move-dragging { outline: 2px solid var(--pc-accent) !important; outline-offset: 2px; opacity: .85 !important; cursor: grabbing !important; }
 /* ── 元件註記層（note 模式：hover 框元件 → 點選 → 對元件下 prompt，AI 回方案卡）── */
 .pc-note-layer { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 225; pointer-events: none; }
 .pc-note-layer.pc-note-active { pointer-events: auto; cursor: crosshair; }
@@ -2054,7 +2070,9 @@ const DRAW_STYLES = `
 .pc-draw-selection rect[data-handle] { cursor: nwse-resize; }
 .pc-draw-toolbar {
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
-  z-index: 2147483600; display: flex; align-items: center; gap: 4px;
+  z-index: 2147483600; display: flex; align-items: center; justify-content: center; gap: 4px;
+  /* 窄視窗（工具鈕多於一排放不下）→ 換行成多排置中，不溢出視窗（否則最右側鈕跑到畫面外點不到）。 */
+  flex-wrap: wrap; max-width: calc(100vw - 16px);
   background: var(--pc-surface-dark); padding: 6px; border-radius: 12px;
   box-shadow: 0 6px 24px rgba(0,0,0,.35); font-family: system-ui, -apple-system, sans-serif;
 }
@@ -2501,6 +2519,7 @@ function buildToolbar(state, actions, opts = {}) {
   });
   appendSep(bar);
   bar.appendChild(noteButton(actions)); // 註記模式切換（畫圖層放行 → 底下 pc.js 釘選留言接手）
+  bar.appendChild(moveButton(actions)); // 元件拖曳模式切換（拖真實 DOM 元件到想要的位置）
   appendSep(bar);
   bar.appendChild(colorMenu(actions));
   bar.appendChild(widthMenu(actions));
@@ -2544,10 +2563,10 @@ const DRAW_HELP_URL = 'https://github.com/mpragnarok/prototype-comments#readme';
 function openDrawHelp(opts = {}) {
   if (document.getElementById('pc-draw-help-modal')) return;
   const url = opts.helpUrl || DRAW_HELP_URL;
-  const toolRows = [...TOOLBAR_TOOL_ORDER, 'eyedropper', 'comment']
+  const toolRows = [...TOOLBAR_TOOL_ORDER, 'eyedropper', 'comment', 'move']
     .map(t => {
-      const name = t === 'eyedropper' ? '取色（吸管）' : t === 'comment' ? '註記模式' : (TOOL_LABELS_ZH[t] || t);
-      const key = t === 'eyedropper' ? 'I' : t === 'comment' ? 'C' : shortcutBadge(t);
+      const name = t === 'eyedropper' ? '取色（吸管）' : t === 'comment' ? '註記模式' : t === 'move' ? '元件拖曳模式' : (TOOL_LABELS_ZH[t] || t);
+      const key = t === 'eyedropper' ? 'I' : t === 'comment' ? 'C' : t === 'move' ? 'M' : shortcutBadge(t);
       return `<div class="pc-draw-help-row"><span>${name}</span><kbd>${key}</kbd></div>`;
     }).join('');
   const modal = drawHtmlEl('div', 'pc-draw-help-modal');
@@ -2604,6 +2623,17 @@ function noteButton(actions) {
   b.setAttribute('aria-label', '註記模式');
   b.innerHTML = icon('comment') + '<span class="pc-draw-kbd" aria-hidden="true">C</span>';
   b.onclick = () => actions.toggleNote();
+  return b;
+}
+// 元件拖曳模式切換鈕：非繪圖工具，用 data-mode（不被 setTool 的 data-tool 邏輯清掉）。
+// 點擊在 draw ⇌ move 間切；move 時拖曳層吃指標，讓使用者把頁面上的真實元件拖到想要的位置。
+function moveButton(actions) {
+  const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-move');
+  b.dataset.mode = 'move';
+  b.title = '元件拖曳模式 (M)';
+  b.setAttribute('aria-label', '元件拖曳模式');
+  b.innerHTML = icon('move') + '<span class="pc-draw-kbd" aria-hidden="true">M</span>';
+  b.onclick = () => actions.toggleMove();
   return b;
 }
 function actButton(action, actions) {
@@ -2796,6 +2826,8 @@ function syncToolbar(bar, state, history) {
   });
   const commentBtn = bar.querySelector('.pc-draw-note');
   if (commentBtn) commentBtn.classList.toggle('active', state.mode === 'note'); // 註記模式 → 高亮
+  const moveBtn = bar.querySelector('.pc-draw-move');
+  if (moveBtn) moveBtn.classList.toggle('active', state.mode === 'move'); // 元件拖曳模式 → 高亮
   const color = (DEFAULT_DRAW_STYLE.color || '').toLowerCase();
   const dot = bar.querySelector('.pc-draw-cur-color');
   if (dot) dot.style.background = DEFAULT_DRAW_STYLE.color;
@@ -3028,6 +3060,10 @@ function initDrawLayer(target, opts = {}) {
   const noteLayer = drawHtmlEl('div', 'pc-note-layer');
   noteLayer.id = 'pc-note-layer';
   host.appendChild(noteLayer);
+  // 元件拖曳層（move 模式）：與 #pc-draw 同 box；啟用時吃指標抓取真實 DOM 元件拖曳。放最上層（z 226）確保先於其他層收到指標。
+  const moveLayer = drawHtmlEl('div', 'pc-move-layer');
+  moveLayer.id = 'pc-move-layer';
+  host.appendChild(moveLayer);
 
   const state = {
     mode: opts.mode && DRAW_MODES.includes(opts.mode) ? opts.mode : 'off',
@@ -3048,6 +3084,7 @@ function initDrawLayer(target, opts = {}) {
     editingId: null,   // 正在以輸入框編輯的文字物件 id（render 時隱藏原件，避免重疊兩個框）
     collapsed: false,  // 工具列是否收合成右下 FAB（按 ✕ 收合；點 FAB / 按工具快捷鍵展開）
     notes: [],      // 註記 pin（{id, kind:'note', text, x, y}；x/y 為 % 座標，同繪圖座標系）
+    moves: [],      // 元件位移紀錄（{id, kind:'move', sel, dx, dy, rect, label, screenId?}）：move 模式把真實 DOM 元件拖到想要位置，落成可讀回資料
     tombstones: {}, // 墓碑 {id: deletedAt(ms)}：刪除不移除紀錄、改記墓碑 → 舊快照回寫無法復活已刪項
   };
   const history = makeUndoStack();
@@ -3094,6 +3131,7 @@ function initDrawLayer(target, opts = {}) {
       _storage.setItem(localKey, JSON.stringify({
         objects: filterTombstoned(serializeObjectsForLocal(state.objects), tombstones),
         notes: filterTombstoned(state.notes, tombstones),
+        moves: filterTombstoned(state.moves, tombstones), // 元件位移：與 objects/notes 同等級本機持久（重載重放）
         tombstones,
       }));
     } catch (_) { }
@@ -3482,7 +3520,7 @@ function initDrawLayer(target, opts = {}) {
     const rel = relWithin(tg);
     openNoteCard({ sel: tg.sel, objId: tg.objId, relX: rel.relX, relY: rel.relY, x: tg.pt.x, y: tg.pt.y, label: tg.label });
   });
-  const actions = { setMode, setTool, setBrush, setColor, setStrokeWidth, setFontSize, setHeads, act, eyedropper: openEyedropper, closeContext: closeContextMenu, send: () => sendToAgent(), openRecord: () => { state.recordOpen = true; renderRecordPanel(); }, collapse: () => collapseToolbar(), toggleNote: () => toggleNote() };
+  const actions = { setMode, setTool, setBrush, setColor, setStrokeWidth, setFontSize, setHeads, act, eyedropper: openEyedropper, closeContext: closeContextMenu, send: () => sendToAgent(), openRecord: () => { state.recordOpen = true; renderRecordPanel(); }, collapse: () => collapseToolbar(), toggleNote: () => toggleNote(), toggleMove: () => toggleMove() };
   const toolbar = buildToolbar(state, actions, opts);
   document.body.appendChild(toolbar);
   // 收合 FAB：off（放行）模式時工具列收起、改顯右下小圓鈕；點它展開工具列並進繪圖模式。
@@ -3565,7 +3603,8 @@ function initDrawLayer(target, opts = {}) {
   }
   function removeFeedbackBox() { if (feedbackBox) { feedbackBox.remove(); feedbackBox = null; } }
   const uncheckedUnsentNotes = () => state.notes.filter(n => !state.sendUnchecked[n.id] && state.sentSigs[n.id] !== noteSig(n));
-  function feedbackCount() { return checkedObjects().length + checkedDecisions().length + uncheckedUnsentNotes().length; }
+  const uncheckedUnsentMoves = () => state.moves.filter(m => !state.sendUnchecked[m.id] && state.sentSigs[m.id] !== moveSig(m));
+  function feedbackCount() { return checkedObjects().length + checkedDecisions().length + uncheckedUnsentNotes().length + uncheckedUnsentMoves().length; }
   function renderFeedbackBox() {
     if (!feedbackBox || feedbackBox.dataset.inflight) return; // 送出中/回執顯示中 → 不覆寫
     const n = feedbackCount();
@@ -3584,8 +3623,8 @@ function initDrawLayer(target, opts = {}) {
   }
   async function handleFeedbackSend() {
     if (!feedbackBox || feedbackBox.dataset.inflight) return;
-    const objs = checkedObjects(), decs = checkedDecisions(), notes = uncheckedUnsentNotes();
-    const n = objs.length + decs.length + notes.length;
+    const objs = checkedObjects(), decs = checkedDecisions(), notes = uncheckedUnsentNotes(), moves = uncheckedUnsentMoves();
+    const n = objs.length + decs.length + notes.length + moves.length;
     if (!n) return; // 全沒東西 → 不送
     feedbackBox.dataset.inflight = '1';
     feedbackBox.disabled = true;
@@ -3608,6 +3647,7 @@ function initDrawLayer(target, opts = {}) {
     objs.forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
     decs.forEach(d => { state.sentSigs[d.id] = decisionSig(d); });
     notes.forEach(nn => { state.sentSigs[nn.id] = noteSig(nn); });
+    moves.forEach(mm => { state.sentSigs[mm.id] = moveSig(mm); }); // 位移已由 drawStore 落盤 → 標記已送（離開未送清單，元件維持位移）
     archiveObjects(objs); // 送出即收納：從畫布消失、留在標注紀錄（可還原）
     state.sentConfirmN = n;
     persistSentState(); // 修 bug：持久化「已送」→ 重整/重訂閱後不再把已送標註當未送畫回
@@ -3615,6 +3655,7 @@ function initDrawLayer(target, opts = {}) {
     const parts = [];
     if (decs.length) parts.push('決策 ' + decs.length);
     if (objs.length + notes.length) parts.push('標註 ' + (objs.length + notes.length));
+    if (moves.length) parts.push('位移 ' + moves.length);
     feedbackBox.textContent = `✅ 已送出 ${n} 筆` + (parts.length ? `（${parts.join(' · ')}）` : '');
     feedbackBox.classList.remove('is-empty');
     feedbackBox.classList.add('is-sent');
@@ -3647,9 +3688,15 @@ function initDrawLayer(target, opts = {}) {
       color: DRAW_UI_COLORS.selection,
       sent: state.sentSigs[n.id] === noteSig(n), isNote: true,
     }));
+    const moveRows = state.moves.filter(onCurrentScreen).map((m) => ({
+      id: m.id, tool: 'comment', icon: 'move',
+      text: '【移動】' + (m.label || '元件') + ' → ' + moveDeltaLabel(m.dx, m.dy),
+      selector: m.sel || null, color: DRAW_UI_COLORS.selection,
+      sent: state.sentSigs[m.id] === moveSig(m), isMove: true,
+    }));
     // 標注：送出後改採「收納」→ 已送標注仍留清單（archived，可「還原到畫布」）。
-    // 決策/註記：維持 outbox → 已送（且未再改）者離開清單。
-    const rows = annRows.concat(decRows.filter(r => !r.sent)).concat(noteRows.filter(r => !r.sent));
+    // 決策/註記/位移：維持 outbox → 已送（且未再改）者離開清單。
+    const rows = annRows.concat(decRows.filter(r => !r.sent)).concat(noteRows.filter(r => !r.sent)).concat(moveRows.filter(r => !r.sent));
     // 群組視覺提示：標記屬於 ≥2 成員群組的列（勾選會整組連動，讓使用者預期得到）。
     const groupCount = {};
     rows.forEach(r => { if (r.groupId) groupCount[r.groupId] = (groupCount[r.groupId] || 0) + 1; });
@@ -3692,7 +3739,7 @@ function initDrawLayer(target, opts = {}) {
     // 讓還原鈕/勾選框的真人 click 蒸發）。截圖預覽仍在（refreshRecordPreview 就地更新，不受影響）。
     const rowSig = rows.map(r => [r.id, r.text, r.selector, r.color, r.icon, r.grouped ? 1 : 0, r.sent ? 1 : 0,
       r.archived ? 1 : 0, isSelected(r.id) ? 1 : 0, state.sendUnchecked[r.id] ? 0 : 1,
-      r.isNote ? 'N' : (r.isDecision ? 'D' : 'A')].join(':')).join('|');
+      r.isNote ? 'N' : (r.isDecision ? 'D' : (r.isMove ? 'M' : 'A'))].join(':')).join('|');
     if (rowSig === _recRowSig) { if (rows.length) refreshRecordPreview(); return; }
     _recRowSig = rowSig;
     list.innerHTML = '';
@@ -3705,7 +3752,7 @@ function initDrawLayer(target, opts = {}) {
     list.appendChild(recordPreviewEl()); // 置頂：送給 AI 的畫面截圖預覽
     rows.forEach(row => { list.appendChild(recordRowEl(
       row, isSelected(row.id), onRecordRowClick, !state.sendUnchecked[row.id], onToggleSendChecked,
-      row.isNote ? removeNote : (row.isDecision ? removeDecision : null),
+      row.isNote ? removeNote : (row.isDecision ? removeDecision : (row.isMove ? removeMove : null)),
       // 收納中的標注（已送、畫布隱藏）→ 提供「還原到畫布」單筆操作
       (row.archived && !row.isNote && !row.isDecision) ? restoreObject : null
     )); });
@@ -3748,6 +3795,8 @@ function initDrawLayer(target, opts = {}) {
   function onRecordRowClick(id) {
     const note = state.notes.find(n => n.id === id);
     if (note) { setFocusNote(id); openNoteCard(note); return; }
+    const mv = state.moves.find(m => m.id === id);
+    if (mv) { const el = querySelectorSafe(mv.sel); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
     selectOnly(id);
     render();
     scrollObjectIntoView(id);
@@ -3760,6 +3809,173 @@ function initDrawLayer(target, opts = {}) {
     if (offscreen && node.scrollIntoView) node.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
+  // ── 元件拖曳模式（move）：抓真實 DOM 元件拖到想要位置，位移落成可讀回的紀錄 ──────────
+  //   錨定沿用既有「標注跟元素走」機制：cssSelectorFor(el) → sel（querySelector round-trip），
+  //   位移以 CSS transform: translate(dx,dy) 套用（不破壞原 layout flow）。紀錄 {id,sel,dx,dy,rect,label}
+  //   進既有標注資料流（record panel/送出/本機+團隊持久/墓碑），換頁/重載經 render→renderMoves 重放。
+  let moveHoverBox = null;          // move 模式 hover 候選元件的高亮框 DOM
+  let draggingMoveSel = null;       // 拖曳中的元件 selector（renderMoves 不覆蓋它的即時 transform）
+  const moveOrigTransform = new Map(); // sel → 套位移前的原始 inline transform（還原用；不污染 DOM 屬性）
+  function querySelectorSafe(sel) { try { return sel ? document.querySelector(sel) : null; } catch (_) { return null; } }
+  // el 的 bounding rect 換算成 overlay 層（inset:0 over host）的 px 座標（left/top 相對 svg 左上）。
+  function hostPxRect(el) {
+    const er = el.getBoundingClientRect();
+    const hr = svg.getBoundingClientRect();
+    return { x: er.left - hr.left, y: er.top - hr.top, w: er.width, h: er.height };
+  }
+  // overlay 自身（各層/工具列/選單/FAB/回饋匣）→ 不可拖，避免拖到自己的 chrome。
+  function moveOverlayOwns(el) {
+    return svg.contains(el) || toolbar.contains(el) || noteLayer.contains(el) || moveLayer.contains(el)
+      || replyLayer.contains(el) || recordDrawer.contains(el) || recordTab.contains(el)
+      || (contextMenu && contextMenu.contains(el)) || el.id === 'pc-draw-fab'
+      || (feedbackBox && feedbackBox.contains(el));
+  }
+  function isMovableEl(el) {
+    if (!el || el === document.body || el === document.documentElement) return false;
+    if (moveOverlayOwns(el)) return false;
+    const r = el.getBoundingClientRect();
+    return r.width >= 8 && r.height >= 8; // 有意義的區塊層級（濾掉 text-node 級碎片）
+  }
+  // inline 元素（如 button 內的 span）→ 爬到最近的非 inline 祖先，避免拖到文字碎片而非整個區塊。
+  function climbToMovable(el) {
+    let cur = el;
+    while (cur && cur !== document.body && cur.parentElement) {
+      const disp = (typeof getComputedStyle === 'function') ? getComputedStyle(cur).display : 'block';
+      if (disp !== 'inline') break;
+      cur = cur.parentElement;
+    }
+    return cur;
+  }
+  // 暫時關 moveLayer 指標 → 取得底層真實 app 元件，再爬到合理可拖區塊。
+  function pickMovableEl(clientX, clientY) {
+    const prev = moveLayer.style.pointerEvents; moveLayer.style.pointerEvents = 'none';
+    let el = elementUnderPoint(clientX, clientY);
+    moveLayer.style.pointerEvents = prev;
+    el = climbToMovable(el);
+    return isMovableEl(el) ? el : null;
+  }
+  // 套/清位移 transform：只在值真的變了才寫（避免外部 draw-boot MutationObserver 觀察 style 變動 → refresh → 再寫 的死迴圈）。
+  function composeMoveTransform(orig, dx, dy) { return (orig ? orig + ' ' : '') + `translate(${dx}px, ${dy}px)`; }
+  function applyMoveTo(el, sel, dx, dy) {
+    if (!moveOrigTransform.has(sel)) moveOrigTransform.set(sel, el.style.transform || '');
+    const want = composeMoveTransform(moveOrigTransform.get(sel), dx, dy);
+    if (el.style.transform !== want) el.style.transform = want;
+  }
+  function resetMoveOf(sel, el) {
+    if (el && moveOrigTransform.has(sel)) { const o = moveOrigTransform.get(sel); if (el.style.transform !== o) el.style.transform = o; }
+    else if (el && el.style.transform) el.style.transform = '';
+    moveOrigTransform.delete(sel);
+  }
+  // 重放/收斂位移：把當前頁的位移紀錄套到對應元件，並清掉已移除/不屬本頁者。冪等（值不變不寫）。
+  function renderMoves() {
+    const want = new Map();
+    state.moves.forEach(m => { if (onCurrentScreen(m)) want.set(m.sel, m); });
+    [...moveOrigTransform.keys()].forEach(sel => {
+      if (!want.has(sel) && sel !== draggingMoveSel) resetMoveOf(sel, querySelectorSafe(sel));
+    });
+    want.forEach((m, sel) => {
+      if (sel === draggingMoveSel) return; // 拖曳中的元件交給拖曳 handler，勿覆蓋即時 transform
+      const el = querySelectorSafe(sel);
+      if (el) applyMoveTo(el, sel, m.dx, m.dy);
+    });
+  }
+  function clearMoveHover() { if (moveHoverBox) { moveHoverBox.remove(); moveHoverBox = null; } }
+  function onMoveHover(e) {
+    if (state.mode !== 'move' || draggingMoveSel) { return; }
+    const el = pickMovableEl(e.clientX, e.clientY);
+    if (!el) { clearMoveHover(); return; }
+    if (!moveHoverBox) {
+      moveHoverBox = drawHtmlEl('div', 'pc-move-hl');
+      moveHoverBox.appendChild(drawHtmlEl('div', 'pc-move-hl-label'));
+      moveLayer.appendChild(moveHoverBox);
+    }
+    const b = hostPxRect(el);
+    moveHoverBox.style.left = b.x + 'px'; moveHoverBox.style.top = b.y + 'px';
+    moveHoverBox.style.width = b.w + 'px'; moveHoverBox.style.height = b.h + 'px';
+    moveHoverBox.firstChild.textContent = '拖曳 ' + domLabel(el);
+  }
+  function onMoveDown(e) {
+    if (state.mode !== 'move') return;
+    const el = pickMovableEl(e.clientX, e.clientY);
+    if (!el) return;
+    const sel = cssSelectorFor(el);
+    if (!sel) return;
+    e.preventDefault();
+    startElementDrag(e, el, sel);
+  }
+  function startElementDrag(e, el, sel) {
+    clearMoveHover();
+    const existing = state.moves.find(m => m.sel === sel);
+    const baseDx = existing ? existing.dx : 0, baseDy = existing ? existing.dy : 0;
+    const startX = e.clientX, startY = e.clientY;
+    const rect0 = (existing && existing.rect) ? existing.rect : hostPxRect(el); // 原始（未位移）rect
+    draggingMoveSel = sel;
+    el.classList.add('pc-move-dragging');
+    let moved = false, lastDx = baseDx, lastDy = baseDy;
+    const onMv = ev => {
+      lastDx = baseDx + (ev.clientX - startX); lastDy = baseDy + (ev.clientY - startY);
+      applyMoveTo(el, sel, lastDx, lastDy);
+      moved = true;
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMv);
+      window.removeEventListener('pointerup', onUp);
+      el.classList.remove('pc-move-dragging');
+      draggingMoveSel = null;
+      if (moved) commitMove(sel, lastDx, lastDy, rect0, domLabel(el), el);
+      else render();
+    };
+    window.addEventListener('pointermove', onMv);
+    window.addEventListener('pointerup', onUp);
+  }
+  // 提交一筆位移（依 sel upsert；拖回原點＝視為還原）。走既有 command 外的獨立紀錄，但共用持久化/送出/墓碑。
+  function commitMove(sel, dx, dy, rect, label, el) {
+    dx = Math.round(dx); dy = Math.round(dy);
+    const existing = state.moves.find(m => m.sel === sel);
+    if (dx === 0 && dy === 0) { existing ? removeMove(existing.id) : (resetMoveOf(sel, el), render()); return; }
+    if (existing) { existing.dx = dx; existing.dy = dy; delete state.sentSigs[existing.id]; }
+    else {
+      const m = { id: nextDrawId(), kind: 'move', sel, dx, dy, rect, label };
+      if (typeof opts.getScreenId === 'function') m.screenId = currentScreenId();
+      state.moves.push(m);
+    }
+    syncMove(existing || state.moves[state.moves.length - 1]);
+    persistLocalSave();
+    render();
+  }
+  // 刪除單筆位移紀錄 → 元件回原位（還原 transform）＋記墓碑（團隊/多分頁不被舊快照復活）。
+  function removeMove(id) {
+    const m = state.moves.find(x => x.id === id);
+    if (!m) return;
+    resetMoveOf(m.sel, querySelectorSafe(m.sel));
+    state.moves = state.moves.filter(x => x.id !== id);
+    state.tombstones[id] = Date.now();
+    delete state.sendUnchecked[id]; delete state.sentSigs[id];
+    if (drawStore) { try { syncTombstone(id); } catch (_) { } }
+    persistLocalSave();
+    render();
+  }
+  // 位移量 → 友善中文標籤（記錄面板列與送出 payload 對照用）。
+  function moveDeltaLabel(dx, dy) {
+    const parts = [];
+    if (dx) parts.push((dx > 0 ? '右 ' : '左 ') + Math.abs(dx));
+    if (dy) parts.push((dy > 0 ? '下 ' : '上 ') + Math.abs(dy));
+    return (parts.join(' · ') || '無位移') + '（px）';
+  }
+  // 位移 → drawStore 文件（團隊模式）。純向量欄位，與 noteToDoc/drawingToDoc 同分區資料流。
+  function moveToDoc(m) {
+    const doc = { id: m.id, kind: 'move', sel: m.sel, dx: m.dx, dy: m.dy };
+    if (m.rect != null) doc.rect = m.rect;
+    if (m.label != null) doc.label = m.label;
+    if (m.screenId != null) doc.screenId = m.screenId;
+    return doc;
+  }
+  function syncMove(m) { if (drawStore && m) { try { Promise.resolve(drawStore.save(moveToDoc(m))).catch(() => { }); } catch (_) { } } }
+
+  moveLayer.addEventListener('pointermove', onMoveHover);
+  moveLayer.addEventListener('pointerleave', clearMoveHover);
+  moveLayer.addEventListener('pointerdown', onMoveDown);
+
   function applyMode() {
     const drawing = state.mode === 'draw';
     svg.classList.toggle('pc-draw-active', drawing);
@@ -3767,7 +3983,9 @@ function initDrawLayer(target, opts = {}) {
     toolbar.classList.toggle('pc-draw-collapsed', state.collapsed); // 收合 → 隱藏整條工具列
     fab.classList.toggle('show', state.collapsed);                  // 收合 → 顯示右下 FAB
     noteLayer.classList.toggle('pc-note-active', state.mode === 'note'); // note 模式 → 註記層吃指標選元件
+    moveLayer.classList.toggle('pc-move-active', state.mode === 'move'); // move 模式 → 拖曳層吃指標抓元件
     if (state.mode !== 'note') { closeAllNoteCards(); clearHover(); closeNotePanel(); } // 離開 note → 收掉卡/框/面板
+    if (state.mode !== 'move') clearMoveHover(); // 離開 move → 收掉候選高亮框
     syncToolbar(toolbar, state, history);
   }
   // 收合成 FAB（按 ✕）：同時回 off 放行 app 點擊。展開（點 FAB / 按工具鍵）：回繪圖模式。
@@ -3782,6 +4000,8 @@ function initDrawLayer(target, opts = {}) {
   // 留言模式切換：comment ⇌ draw。comment 時 SVG 放行（pointer-events:none），
   // 工具列仍在（state.collapsed 不變），讓底下 pc.js 釘選留言系統接手點擊。
   function toggleNote() { setMode(state.mode === 'note' ? 'draw' : 'note'); }
+  // 元件拖曳模式切換：move ⇌ draw。move 時拖曳層吃指標抓取真實 DOM 元件。
+  function toggleMove() { setMode(state.mode === 'move' ? 'draw' : 'move'); }
   function setTool(tool) {
     if (!DRAW_TOOLS.includes(tool)) return;
     state.tool = tool;
@@ -3928,6 +4148,7 @@ function initDrawLayer(target, opts = {}) {
     syncLiveLoop();       // Batch 4：有 anchor 才啟動 live reposition 監聽
     renderReplies();     // AI 方案卡：錨定貼在標注旁
     renderNotes();    // 元件註記 pin：隨元件 scroll/resize 重新定位
+    renderMoves();    // 元件位移：把位移紀錄重放到真實元件（換頁/重載/scroll 皆重放，冪等）
     renderFeedbackBox(); // 回饋匣（若啟用）：更新「📮 送出回饋（N）」計數
   }
 
@@ -4105,6 +4326,7 @@ function initDrawLayer(target, opts = {}) {
     if (!Array.isArray(remoteDocs) || !remoteDocs.length) return;
     const localNoteIds = new Set(state.notes.map(n => n.id));
     const localObjIds = new Set(state.objects.map(o => o.id));
+    const localMoveIds = new Set(state.moves.map(m => m.id));
     let changed = false;
     remoteDocs.forEach(doc => {
       if (!doc || doc.id == null) return;
@@ -4114,11 +4336,20 @@ function initDrawLayer(target, opts = {}) {
         if (!state.tombstones[doc.id] || at > state.tombstones[doc.id]) state.tombstones[doc.id] = at;
         if (localObjIds.has(doc.id)) { state.objects = state.objects.filter(o => o.id !== doc.id); changed = true; }
         if (localNoteIds.has(doc.id)) { state.notes = state.notes.filter(n => n.id !== doc.id); changed = true; }
+        if (localMoveIds.has(doc.id)) { const m = state.moves.find(x => x.id === doc.id); if (m) resetMoveOf(m.sel, querySelectorSafe(m.sel)); state.moves = state.moves.filter(x => x.id !== doc.id); changed = true; }
         return;
       }
       // 墓碑優先：已被墓碑標記的 id，遠端非刪 doc（含 stale client 的舊快照回寫）一律不復活。
       if (isTombstoned(state.tombstones, doc.id)) return;
-      if (doc.kind === 'note') {
+      if (doc.kind === 'move') {
+        // 元件位移 doc：只「新增/更新」缺的 id（teammate 拖的元件在本端也套上）。sel/dx/dy 齊全才吸收。
+        if (doc.sel == null || doc.dx == null || doc.dy == null) return;
+        const existing = state.moves.find(m => m.id === doc.id);
+        if (existing) { existing.dx = doc.dx; existing.dy = doc.dy; existing.sel = doc.sel; }
+        else state.moves.push({ id: doc.id, kind: 'move', sel: doc.sel, dx: doc.dx, dy: doc.dy,
+          rect: doc.rect, label: doc.label || '', ...(doc.screenId != null ? { screenId: doc.screenId } : {}) });
+        changed = true;
+      } else if (doc.kind === 'note') {
         if (localNoteIds.has(doc.id)) return;
         state.notes.push({ id: doc.id, kind: 'note', text: doc.text,
           sel: doc.sel || null, objId: doc.objId != null ? doc.objId : null,
@@ -4137,7 +4368,7 @@ function initDrawLayer(target, opts = {}) {
     });
     if (changed) {
       ensureSelectionValid(); // 墓碑移除的物件若在選取中 → 清掉 dangling selection
-      bumpIdSeq([...state.objects.map(o => o.id), ...state.objects.map(o => o.groupId).filter(Boolean), ...state.notes.map(n => n.id)]);
+      bumpIdSeq([...state.objects.map(o => o.id), ...state.objects.map(o => o.groupId).filter(Boolean), ...state.notes.map(n => n.id), ...state.moves.map(m => m.id)]);
       render();
     }
   }
@@ -4529,6 +4760,11 @@ function initDrawLayer(target, opts = {}) {
       x: n.x, y: n.y,
       ...(n.range != null ? { range: n.range } : {}), // 程式碼範圍：{path,startLine,endLine,side,code}→ AI 拿到完整脈絡
     }));
+    // 元件位移：AI/agent 讀回 {selector, dx, dy, rect} → 對照改 code/mockup（設計討論閉環）。
+    const checkedMv = uncheckedUnsentMoves();
+    if (checkedMv.length) p.moves = checkedMv.map(m => ({
+      id: m.id, selector: m.sel || null, dx: m.dx, dy: m.dy, rect: m.rect || null, label: m.label || '',
+    }));
     return p;
   }
   // html2canvas 載入：優先用既有 window.html2canvas；否則注入 UMD <script>（雙 CDN 後援）。
@@ -4566,7 +4802,9 @@ function initDrawLayer(target, opts = {}) {
       || el.id === 'pc-draw-rec-drawer' || el.id === 'pc-draw-context') return true;
     if (el.classList.contains('pc-draw-selection') || el.classList.contains('pc-draw-marquee')) return true; // 選取框/橡皮筋不入鏡（不改 state.selectedIds，避免與選取讀取競態）
     // 對話卡（開著的 note 輸入/彈窗）與 hover 高亮框都是 UI chrome → 不入鏡（保留框+角標本身）。
-    if (el.classList.contains('pc-note-card') || el.classList.contains('pc-note-hl')) return true;
+    // 元件拖曳層/候選高亮框也是 chrome（被拖的真實元件本體照常入鏡，位移即畫面）。
+    if (el.classList.contains('pc-note-card') || el.classList.contains('pc-note-hl')
+      || el.classList.contains('pc-move-layer') || el.classList.contains('pc-move-hl')) return true;
     const id = el.getAttribute && el.getAttribute('data-id');
     if (id && state.sendUnchecked[id]) return true; // 未勾選送出的標注不入鏡
     // note 標記用 data-note-id（非 data-id）；未勾選 → 整個 .pc-note-mark（框+角標）排除，與送出 JSON 一致。
@@ -4654,7 +4892,7 @@ function initDrawLayer(target, opts = {}) {
   async function handleDrawerSend() {
     const sendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
     if (!sendBtn || sendBtn.disabled || sendBtn.dataset.inflight) return;
-    const n = checkedObjects().length + checkedDecisions().length + state.notes.filter(x => !state.sendUnchecked[x.id]).length;
+    const n = checkedObjects().length + checkedDecisions().length + state.notes.filter(x => !state.sendUnchecked[x.id]).length + uncheckedUnsentMoves().length;
     if (!n) return; // 全沒勾 → 不送
     sendBtn.dataset.inflight = '1';
     sendBtn.disabled = true;
@@ -4670,6 +4908,7 @@ function initDrawLayer(target, opts = {}) {
       sentObjs.forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
       checkedDecisions().forEach(d => { state.sentSigs[d.id] = decisionSig(d); });
       state.notes.filter(n => !state.sendUnchecked[n.id]).forEach(n => { state.sentSigs[n.id] = noteSig(n); });
+      uncheckedUnsentMoves().forEach(m => { state.sentSigs[m.id] = moveSig(m); }); // 位移標記已送（元件維持位移，離開未送清單）
       archiveObjects(sentObjs); // 送出即收納：從畫布消失、留在標注紀錄（可還原）
       state.sentConfirmN = n; // outbox 清空清單後，footer 靠此維持「✅ 已送出（N 筆）」確認
       persistSentState(); // 修 bug：持久化「已送」→ 重整/重訂閱後不再把已送標注當未送畫回
@@ -4878,6 +5117,8 @@ function initDrawLayer(target, opts = {}) {
     if (!meta && !e.altKey) {
       // C：切換留言模式（用 e.code 對抗注音/IME；含修飾鍵時不攔，避免撞 Cmd+C 複製）。
       if (e.code === 'KeyC') { e.preventDefault(); toggleNote(); return; }
+      // M：切換元件拖曳模式（用 e.code 對抗注音/IME；含修飾鍵時不攔，避免撞 Cmd+M 最小化）。
+      if (e.code === 'KeyM') { e.preventDefault(); toggleMove(); return; }
       const action = resolveShortcut(e.key) || resolveShortcutByCode(e.code);
       if (action === 'eyedropper') { if (state.mode === 'draw') { e.preventDefault(); openEyedropper(); } return; } // 取色需先在繪圖模式
       if (action) {
@@ -4972,12 +5213,14 @@ function initDrawLayer(target, opts = {}) {
           // 載入即用墓碑過濾（雙保險：即使快照 objects/notes 混入已刪項也不還原）。
           state.objects = filterTombstoned(hydrateObjectsFromLocal(stored.objects || []), state.tombstones);
           state.notes = filterTombstoned(stored.notes || [], state.tombstones);
+          state.moves = filterTombstoned(stored.moves || [], state.tombstones); // 向後相容：舊快照無 moves → 空集
         }
         // 還原後推進 id 計數器，避免新物件 id 與還原物件碰撞（見 bumpIdSeq 註解）。
         bumpIdSeq([
           ...state.objects.map(o => o.id),
           ...state.objects.map(o => o.groupId).filter(Boolean),
           ...state.notes.map(n => n.id),
+          ...state.moves.map(m => m.id),
         ]);
       }
     } catch (_) { /* localStorage 失敗 / JSON 損毀 → 從空白開始 */ }
@@ -5022,6 +5265,9 @@ function initDrawLayer(target, opts = {}) {
     ingestReplies, // AI 方案卡：注入回覆（poll 收到或測試用）
     getReplies: () => state.replies.slice(),
     getNotes: () => state.notes.slice(),                 // 註記清單（poll / 測試用）
+    getMoves: () => state.moves.map(m => ({ ...m })),     // 元件位移紀錄（agent 讀回 {sel,dx,dy,rect} 對照改 code）
+    removeMove,                                          // 刪一筆位移 → 元件回原位（測試 / 程式化）
+    setMoveMode: (on) => setMode(on ? 'move' : 'draw'),  // 開/關元件拖曳模式（程式化）
     // 放一則註記（測試 / 程式化）：addNote(text, {sel|objId, relX,relY, x,y, label}) 或舊式 addNote(text, x, y)。
     addNote: (text, a, b) => saveNote(text, (a && typeof a === 'object') ? a : { x: a, y: b }),
     // 程式化開「程式碼範圍註記」泡泡（live-markup review 頁的 gutter 選取互動呼叫此入口）。
@@ -5064,12 +5310,13 @@ function initDrawLayer(target, opts = {}) {
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
     // 決策 A：外部（如 live-markup 換頁監聽）呼叫 → 依當前 getScreenId() 重畫，只顯示當前頁標注。
     refresh: () => render(),
-    clear: () => { state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sentConfirmN = 0; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; render(); persistLocalSave(); persistSentState(); },
+    clear: () => { [...moveOrigTransform.keys()].forEach(sel => resetMoveOf(sel, querySelectorSafe(sel))); state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sentConfirmN = 0; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; state.moves = []; render(); persistLocalSave(); persistSentState(); },
     destroy: () => {
       stopLive(); // Batch 4：拆掉 live reposition 監聽/rAF/ResizeObserver
       replyPolling = false; // 停掉 AI 方案卡輪詢
+      [...moveOrigTransform.keys()].forEach(sel => resetMoveOf(sel, querySelectorSafe(sel))); // 還原被拖過的真實元件 transform
       svg.remove(); toolbar.remove(); contextMenu.remove(); replyLayer.remove();
-      noteLayer.remove(); closeNotePanel(); // 留言層 + 放大面板/遮罩
+      noteLayer.remove(); moveLayer.remove(); closeNotePanel(); // 留言層 + 拖曳層 + 放大面板/遮罩
       recordTab.remove(); recordDrawer.remove();
       removeFeedbackBox();
       window.removeEventListener('resize', render);
@@ -5142,7 +5389,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = 'b975740';
+export const PC_VERSION = '2f70b4f';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';

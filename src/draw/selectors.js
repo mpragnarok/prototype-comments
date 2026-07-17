@@ -88,6 +88,10 @@ export function decisionSig(d) {
 export function noteSig(n) {
   return JSON.stringify({ text: n.text, sel: n.sel, objId: n.objId, range: n.range });
 }
+// 元件位移紀錄簽章：改拖曳量（dx/dy）或換元件（sel）→ 簽章變 → 視為未送（與 annotationSig 同語意）。
+export function moveSig(m) {
+  return JSON.stringify({ sel: m.sel, dx: m.dx, dy: m.dy });
+}
 // 程式碼範圍註記的顯示標籤：`path:startLine–endLine`（單行退化成 `path:line`）。
 // en-dash（–, U+2013）與 GitHub 行號範圍一致。純函式，供標注紀錄列與卡片標題共用。
 export function rangeLabel(range) {
