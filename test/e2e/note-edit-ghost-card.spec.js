@@ -10,9 +10,11 @@
 // openNoteCard({...新錨點}) 找不到既有的 data-note-id="new" 卡 → closeAllNoteCards() 把剛開的
 // 編輯卡整個關掉，換成一張空白幽靈 note（錨點還可能落在編輯鈕當下螢幕座標底下的任意元件上）。
 //
-// 修法：card 建立時掛一個 `card.addEventListener('click', e => e.stopPropagation())`，卡內任何
-// 點擊（不論按鈕自己怎麼改自己的 DOM）一律不外洩到 noteLayer；card/body/noteLayer 三者本身全程
-// 都還在 DOM 上、事件冒泡路徑於 dispatch 當下已鎖定，不受卡內子節點被摘掉影響。
+// 修法：noteLayer click handler 判斷「點在卡片內」改用 `e.composedPath()`（dispatch 當下就鎖定
+// 的冒泡路徑，事後 DOM 怎麼變動都不影響），取代原本的 `e.target.closest('.pc-note-card')`
+// （live parentNode 走法，卡內節點被摘掉就斷鏈失效）。只修真正壞掉的 guard，不擋卡內點擊往上
+// 冒泡到 document——避免連帶影響其他依賴 document 級 click 監聽的功能（如留言 popover 的
+// closeAllPopovers()）。
 //
 // 本檔斷言：note 模式下，開既有 note 的檢視卡 → 點「編輯」→ 應該還是同一則 note 的編輯卡
 // （data-note-id 不變、textarea 帶原文字），不應變成 data-note-id="new" 的空白卡、
