@@ -20,6 +20,7 @@ export function buildToolbar(state, actions, opts = {}) {
   });
   appendSep(bar);
   bar.appendChild(noteButton(actions)); // 註記模式切換（畫圖層放行 → 底下 pc.js 釘選留言接手）
+  bar.appendChild(moveButton(actions)); // 元件拖曳模式切換（拖真實 DOM 元件到想要的位置）
   appendSep(bar);
   bar.appendChild(colorMenu(actions));
   bar.appendChild(widthMenu(actions));
@@ -63,10 +64,10 @@ export const DRAW_HELP_URL = 'https://github.com/mpragnarok/prototype-comments#r
 export function openDrawHelp(opts = {}) {
   if (document.getElementById('pc-draw-help-modal')) return;
   const url = opts.helpUrl || DRAW_HELP_URL;
-  const toolRows = [...TOOLBAR_TOOL_ORDER, 'eyedropper', 'comment']
+  const toolRows = [...TOOLBAR_TOOL_ORDER, 'eyedropper', 'comment', 'move']
     .map(t => {
-      const name = t === 'eyedropper' ? '取色（吸管）' : t === 'comment' ? '註記模式' : (TOOL_LABELS_ZH[t] || t);
-      const key = t === 'eyedropper' ? 'I' : t === 'comment' ? 'C' : shortcutBadge(t);
+      const name = t === 'eyedropper' ? '取色（吸管）' : t === 'comment' ? '註記模式' : t === 'move' ? '元件拖曳模式' : (TOOL_LABELS_ZH[t] || t);
+      const key = t === 'eyedropper' ? 'I' : t === 'comment' ? 'C' : t === 'move' ? 'M' : shortcutBadge(t);
       return `<div class="pc-draw-help-row"><span>${name}</span><kbd>${key}</kbd></div>`;
     }).join('');
   const modal = drawHtmlEl('div', 'pc-draw-help-modal');
@@ -123,6 +124,17 @@ export function noteButton(actions) {
   b.setAttribute('aria-label', '註記模式');
   b.innerHTML = icon('comment') + '<span class="pc-draw-kbd" aria-hidden="true">C</span>';
   b.onclick = () => actions.toggleNote();
+  return b;
+}
+// 元件拖曳模式切換鈕：非繪圖工具，用 data-mode（不被 setTool 的 data-tool 邏輯清掉）。
+// 點擊在 draw ⇌ move 間切；move 時拖曳層吃指標，讓使用者把頁面上的真實元件拖到想要的位置。
+export function moveButton(actions) {
+  const b = drawHtmlEl('button', 'pc-draw-tool pc-draw-move');
+  b.dataset.mode = 'move';
+  b.title = '元件拖曳模式 (M)';
+  b.setAttribute('aria-label', '元件拖曳模式');
+  b.innerHTML = icon('move') + '<span class="pc-draw-kbd" aria-hidden="true">M</span>';
+  b.onclick = () => actions.toggleMove();
   return b;
 }
 export function actButton(action, actions) {
@@ -315,6 +327,8 @@ export function syncToolbar(bar, state, history) {
   });
   const commentBtn = bar.querySelector('.pc-draw-note');
   if (commentBtn) commentBtn.classList.toggle('active', state.mode === 'note'); // 註記模式 → 高亮
+  const moveBtn = bar.querySelector('.pc-draw-move');
+  if (moveBtn) moveBtn.classList.toggle('active', state.mode === 'move'); // 元件拖曳模式 → 高亮
   const color = (DEFAULT_DRAW_STYLE.color || '').toLowerCase();
   const dot = bar.querySelector('.pc-draw-cur-color');
   if (dot) dot.style.background = DEFAULT_DRAW_STYLE.color;

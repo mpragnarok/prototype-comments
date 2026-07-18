@@ -50,6 +50,17 @@ export const DRAW_STYLES = `
 #pc-draw { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 220; pointer-events: none; }
 #pc-draw.pc-draw-active { pointer-events: auto; cursor: crosshair; }
 #pc-draw.pc-draw-select { cursor: default; }
+/* ── 元件拖曳層（move 模式：抓真實 DOM 元件拖到想要的位置，位移落成可讀回的紀錄）──
+   啟用時整層吃指標抓取；hover 高亮候選元件，拖曳中元件本體加 grabbing outline。 */
+.pc-move-layer { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 226; pointer-events: none; }
+.pc-move-layer.pc-move-active { pointer-events: auto; cursor: grab; }
+.pc-move-layer.pc-move-active:active { cursor: grabbing; }
+.pc-move-hl { position: absolute; pointer-events: none; box-sizing: border-box; border-radius: 6px; z-index: 1;
+  outline: 2px dashed var(--pc-accent); outline-offset: 1px; background: rgba(var(--pc-accent-rgb), .06); }
+.pc-move-hl-label { position: absolute; top: -20px; left: 0; background: var(--pc-accent); color: #fff;
+  font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 5px; white-space: nowrap; }
+/* 拖曳中的真實元件：加輪廓 + 半透明，讓使用者看得出「正在被搬的是這一顆」。ghost 觀感靠 opacity。 */
+.pc-move-dragging { outline: 2px solid var(--pc-accent) !important; outline-offset: 2px; opacity: .85 !important; cursor: grabbing !important; }
 /* ── 元件註記層（note 模式：hover 框元件 → 點選 → 對元件下 prompt，AI 回方案卡）── */
 .pc-note-layer { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 225; pointer-events: none; }
 .pc-note-layer.pc-note-active { pointer-events: auto; cursor: crosshair; }
@@ -122,7 +133,9 @@ export const DRAW_STYLES = `
 .pc-draw-selection rect[data-handle] { cursor: nwse-resize; }
 .pc-draw-toolbar {
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
-  z-index: 2147483600; display: flex; align-items: center; gap: 4px;
+  z-index: 2147483600; display: flex; align-items: center; justify-content: center; gap: 4px;
+  /* 窄視窗（工具鈕多於一排放不下）→ 換行成多排置中，不溢出視窗（否則最右側鈕跑到畫面外點不到）。 */
+  flex-wrap: wrap; max-width: calc(100vw - 16px);
   background: var(--pc-surface-dark); padding: 6px; border-radius: 12px;
   box-shadow: 0 6px 24px rgba(0,0,0,.35); font-family: system-ui, -apple-system, sans-serif;
 }

@@ -20,10 +20,11 @@
     "test:e2e:noteeditghost": "node test/e2e/note-edit-ghost-card.spec.js",
     "test:e2e:spec": "node test/e2e/spec-overlay.spec.js",
     "test:e2e:comments": "node test/e2e-comments.spec.js",
+    "test:e2e:drag": "node test/e2e/element-drag.spec.js",
     "test:visual": "node test/visual/visual-shot.js",
     "test:visual:update": "node test/visual/visual-shot.js --update",
     "lint": "biome lint .",
-    "test:all": "npm run test:unit && npm run test:cdn && npm run test:dist-sync && npm run test:e2e && npm run test:e2e:draw && npm run test:e2e:pagescope && npm run test:e2e:feedback && npm run test:e2e:note && npm run test:e2e:notedel && npm run test:e2e:notemultiline && npm run test:e2e:noterange && npm run test:e2e:noteoutside && npm run test:e2e:noteeditghost && npm run test:e2e:spec && npm run test:e2e:comments && npm run test:visual",
+    "test:all": "npm run test:unit && npm run test:cdn && npm run test:dist-sync && npm run test:e2e && npm run test:e2e:draw && npm run test:e2e:pagescope && npm run test:e2e:feedback && npm run test:e2e:note && npm run test:e2e:notedel && npm run test:e2e:notemultiline && npm run test:e2e:noterange && npm run test:e2e:noteoutside && npm run test:e2e:noteeditghost && npm run test:e2e:spec && npm run test:e2e:comments && npm run test:e2e:drag && npm run test:visual",
     "test": "npm run test:e2e && npm run test:visual"
   },
   "devDependencies": {
