@@ -1,4 +1,4 @@
-/* pc.js 2f70b4f 2026-07-18T01:04:30Z */
+/* pc.js fc14494 2026-07-18T04:33:17Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -3509,7 +3509,13 @@ function initDrawLayer(target, opts = {}) {
       if (note) openNoteCard(note);
       return;
     }
-    if (e.target.closest && e.target.closest('.pc-note-card')) return; // 點在卡片內 → 各自 handler 處理
+    // 「點在卡片內」判斷改用 composedPath()（dispatch 當下就鎖定的冒泡路徑），不用 e.target.closest()：
+    // 編輯鈕的 onclick（renderCardInput）第一行 body.innerHTML='' 會在同一次 click 派送過程中，把
+    // 編輯鈕自己（與所在的 .pc-note-row）從 DOM 摘掉 → closest() 是 live parentNode 走法，走到一半
+    // 撞到 parentNode=null 就斷了、找不到 .pc-note-card，這道 guard 就失效，事件會落到下面「點畫布
+    // 空白建新卡」邏輯，把剛開的編輯卡整個關掉、換成一張空白幽靈 note。composedPath() 走的是事件
+    // 一開始就算好的固定路徑，不受卡內子節點事後被摘掉影響。
+    if (e.composedPath().some(n => n.classList && n.classList.contains('pc-note-card'))) return; // 點在卡片內 → 各自 handler 處理
     if (state.mode !== 'note') return;
     const tg = pickTarget(e.clientX, e.clientY);
     if (!tg) return;
@@ -5389,7 +5395,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = '2f70b4f';
+export const PC_VERSION = 'fc14494';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';
