@@ -149,6 +149,55 @@ export async function compressToDataUrl(file) {
   throw new Error('IMAGE_TOO_LARGE');
 }
 
+// ─── 留言者名字（跨 session 記住）───────────────────────────────────────────
+// 名字存在 localStorage：使用者打一次，之後每次留言都自動帶入。
+//
+// 這不是身分驗證，只是省去重複打字——真實使用者（長輩、客戶）常常一次留好幾則，
+// 每則都要重打名字會讓人乾脆不署名，回饋就變成「有人說某頁怪怪的」而失去可追問性。
+//
+// 存取一律包 try/catch：Safari 無痕模式的 localStorage 是「存在但一寫就丟例外」，
+// 不是回 null；沒包起來會讓整個面板在無痕視窗掛掉。記不住只是退回每次重打，
+// 不該連留言都不能送。
+/**
+ * 這則留言算在哪一頁。
+ *
+ * `page` 可以給字串，也可以給函式——函式會在**送出當下**才呼叫。
+ * 這對「網址不變、內容會變」的頁面是必要的：投影片 deck 一份 HTML 有二十幾張，
+ * SPA（Next.js client routing）也可能整段導覽都不重新載入。掛載當時算好的路徑
+ * 到了送出那一刻早就不是使用者正在看的東西，回饋會全部歸到同一頁、失去定位能力。
+ *
+ * 函式丟例外時退回 location.pathname：宿主頁的取值邏輯壞掉不該讓留言送不出去。
+ */
+function resolvePage(opts) {
+  if (typeof opts.page === 'function') {
+    try {
+      return String(opts.page() || '') || location.pathname;
+    } catch {
+      return location.pathname;
+    }
+  }
+  return opts.page || location.pathname;
+}
+
+const REPORTER_KEY = 'uf-reporter';
+
+function readReporter() {
+  try {
+    return localStorage.getItem(REPORTER_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function writeReporter(name) {
+  try {
+    if (name) localStorage.setItem(REPORTER_KEY, name);
+    else localStorage.removeItem(REPORTER_KEY);
+  } catch {
+    /* 記不住就算了，不影響送出 */
+  }
+}
+
 // ─── 留言面板 ────────────────────────────────────────────────────────────────
 function buildPanel(target, reporter) {
   const panel = el('div', 'uf-panel');
@@ -189,7 +238,8 @@ function showToast(message) {
 /**
  * @param {object}   opts
  * @param {string}   opts.projectId       Firestore namespace，一個產品一個 id
- * @param {string}  [opts.page]           留言歸屬的頁面路徑，預設 location.pathname
+ * @param {string|(() => string)} [opts.page] 留言歸屬的頁面路徑，預設 location.pathname。
+ *   給函式則在送出當下才求值——投影片 deck、SPA 這種「網址不變但內容會變」的頁面要用這種。
  * @param {object}  [opts.firebaseConfig] 預設共用 prototype-comments-27106
  * @param {string}  [opts.label]          浮動按鈕文字
  * @param {Function}[opts.onSent]         送出成功後的 callback
@@ -207,7 +257,7 @@ export async function initUserFeedback(opts = {}) {
 
   document.head.append(el('style', null, { textContent: STYLES }));
 
-  const state = { active: false, reporter: '', outline: null };
+  const state = { active: false, reporter: readReporter(), outline: null };
   const fab = el('button', 'uf-fab', { type: 'button', textContent: opts.label || '給回饋' });
   document.body.append(fab);
 
@@ -282,9 +332,10 @@ export async function initUserFeedback(opts = {}) {
     if (!note) return fail('請寫一下這裡怎麼了。');
     ui.send.disabled = true;
     state.reporter = ui.name.value.trim();
+    writeReporter(state.reporter);
     try {
       await fb.addDoc(notes(), {
-        page: opts.page || location.pathname,
+        page: resolvePage(opts),
         selector: target.selector,
         elementText: target.elementText,
         note: note.slice(0, 2000),

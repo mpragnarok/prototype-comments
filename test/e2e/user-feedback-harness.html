@@ -33,9 +33,14 @@
     return out;
   };
 
+  // ?pagefn=1 改用「函式形式的 page」，模擬投影片 deck／SPA：網址不變但當前頁會變。
+  // 測試會在掛載之後才改 window.__currentPage，用來驗證求值時機是送出當下、不是掛載當下。
+  const usePageFn = new URLSearchParams(location.search).has('pagefn');
+  window.__currentPage = '/harness/slide-1';
+
   window.__ready = initUserFeedback({
     projectId: 'harness',
-    page: '/harness/',
+    page: usePageFn ? () => window.__currentPage : '/harness/',
     _firebase: mockFb,
     onSent: () => { window.__sent = true; },
   });

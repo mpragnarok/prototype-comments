@@ -36,9 +36,9 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-async function openHarness(browser, base) {
+async function openHarness(browser, base, query = '') {
   const page = await browser.newPage();
-  await page.goto(`${base}${HARNESS}`);
+  await page.goto(`${base}${HARNESS}${query}`);
   await page.waitForFunction(() => document.querySelector('.uf-fab'));
   return page;
 }
@@ -125,6 +125,45 @@ async function main() {
     await page.waitForFunction(() => window.__docs().length === 1);
     const [doc] = await page.evaluate(() => window.__docs());
     assert(doc.reporter === '未署名', `實際：${doc.reporter}`);
+    await page.close();
+  });
+
+  await test('名字打一次就記住，重新整理後仍自動帶入', async () => {
+    // 用 reload 而不是另開 page：browser.newPage() 每次都是新的 browser context，
+    // localStorage 天生隔離，那樣測到的是 Playwright 的隔離行為、不是這個功能。
+    // reload 會清掉記憶體狀態但保留 localStorage，正好是要驗的那條路。
+    const page = await openHarness(browser, base);
+    await pickElement(page, '#host-btn');
+    await fillAndSend(page, { note: '第一次留言', name: '媽媽' });
+    await page.waitForSelector('.uf-toast');
+
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector('.uf-fab'));
+    await pickElement(page, '#host-btn');
+    const prefilled = await page.inputValue('.uf-input');
+    assert(prefilled === '媽媽', `名字應自動帶入，實際：「${prefilled}」`);
+
+    // 而且第二則不必重打名字，也要記到同一個人身上
+    await fillAndSend(page, { note: '第二次留言' });
+    await page.waitForFunction(() => window.__docs().length === 1);
+    const [doc] = await page.evaluate(() => window.__docs());
+    assert(doc.reporter === '媽媽', `第二則應沿用同一個名字，實際：${doc.reporter}`);
+    await page.close();
+  });
+
+  await test('page 給函式時，記的是送出當下那一頁而不是掛載當下', async () => {
+    // 投影片 deck 就是這個情境：一份 HTML、二十幾張投影片、網址不變。
+    // 若掛載時就把頁面算死，每則回饋都會歸到第一張，等於沒有定位能力。
+    const page = await openHarness(browser, base, '?pagefn=1');
+    await page.evaluate(() => { window.__currentPage = '/harness/slide-19'; });
+    await pickElement(page, '#host-btn');
+    await fillAndSend(page, { note: '第 19 張這裡怪怪的', name: '媽媽' });
+    await page.waitForFunction(() => window.__docs().length === 1);
+    const [doc] = await page.evaluate(() => window.__docs());
+    assert(
+      doc.page === '/harness/slide-19',
+      `應記成送出當下那一頁，實際：${doc.page}`,
+    );
     await page.close();
   });
 
