@@ -41,5 +41,42 @@ service cloud.firestore {
       allow delete: if isSignedIn() &&
         request.auth.uid == resource.data.authorUid;
     }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // 終端使用者回饋（src/user-feedback.js）。
+    //
+    // 與上面的設計審查留言是**兩種不同的東西**，刻意分開存：
+    //   comments      給同事，要登入，可協作 resolve，read 公開。
+    //   user-feedback 給產品的真實使用者（醫師、客戶），**免登入**——
+    //                 要他們先登入才留言，回饋率會掉。
+    //
+    // 免登入的代價由這三件事擋住，缺一不可：
+    //   1. 只能 create。read/update/delete 全關，連寫的人自己都讀不回來，
+    //      所以它不會變成一個公開留言板，也沒有爬取價值。
+    //   2. 欄位白名單 + 長度上限（圖片 700 KB，留在單文件 1 MiB 之內）。
+    //   3. 本機 bridge 用 Google 服務憑證讀取（繞過 rules），所以不必開 read。
+    //
+    // ⚠ 因此這個 collection **不得存放敏感或個人資料**。
+    // ⚠ 欄位白名單要與 src/user-feedback.js 的 send() 寫入欄位同步。
+    function hasValidFeedbackShape() {
+      let note = request.resource.data;
+      return note.keys().hasOnly([
+          'page', 'selector', 'elementText', 'note',
+          'image', 'reporter', 'createdAt', 'status'
+        ]) &&
+        note.status == 'new' &&
+        note.note is string && note.note.size() > 0 && note.note.size() <= 2000 &&
+        note.image is string && note.image.size() <= 700000 &&
+        note.page is string && note.page.size() <= 200 &&
+        note.selector is string && note.selector.size() <= 500 &&
+        note.elementText is string && note.elementText.size() <= 200 &&
+        note.reporter is string && note.reporter.size() <= 50 &&
+        note.createdAt is string && note.createdAt.size() <= 40;
+    }
+
+    match /user-feedback/{projectId}/notes/{noteId} {
+      allow create: if hasValidFeedbackShape();
+      allow read, update, delete: if false;
+    }
   }
 }

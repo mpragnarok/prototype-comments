@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>user-feedback harness</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px; }
+  .card { border: 1px solid #ccc; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+  button { min-height: 44px; padding: 0 16px; }
+</style>
+
+<!-- 宿主頁面的內容：測試要驗證「回饋模式開著時，點這些不會觸發它們原本的行為」 -->
+<div class="card">
+  <h2 id="section-title">四象限牙位表</h2>
+  <button id="host-btn" aria-label="14 右上第一小臼齒" onclick="window.__hostClicked = true">14</button>
+</div>
+<div class="card">
+  <p id="plain-text">沒有 aria-label 的一段文字</p>
+</div>
+
+<script type="module">
+  import { createMockFirebase } from '../mock-firebase.js';
+  import { initUserFeedback } from '../../src/user-feedback.js';
+
+  const mockFb = createMockFirebase({});
+  window.__mockFb = mockFb;
+  window.__hostClicked = false;
+
+  /** 讀回目前寫進 mock 的文件：mock 的 onSnapshot 會立即推一次當前狀態 */
+  window.__docs = () => {
+    let out = [];
+    const unsub = mockFb.onSnapshot(null, snap =>
+      out = snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    unsub();
+    return out;
+  };
+
+  window.__ready = initUserFeedback({
+    projectId: 'harness',
+    page: '/harness/',
+    _firebase: mockFb,
+    onSent: () => { window.__sent = true; },
+  });
+</script>
