@@ -22,7 +22,13 @@
 const FB_VER = '12.13.0';
 const FB_BASE = `https://www.gstatic.com/firebasejs/${FB_VER}`;
 
-/** 共用的留言專案。config 不是 secret（apiKey 只是 public identifier）。 */
+/**
+ * 共用的留言專案。config 不是 secret（apiKey 只是 public identifier）。
+ *
+ * 這是**示範用的預設值**：只有這個專案的擁有者跑得動 bridge、讀得到留言。
+ * 自架的人一定要傳自己的 `firebaseConfig`，否則使用者的話會落在別人家，
+ * 而且是靜默的——所以 appFor() 會在 console 提醒一次。
+ */
 const DEFAULT_CONFIG = {
   apiKey: 'AIzaSyCsJ8HK2Wo7FJSTxwdCk3cdnOBXThpTUPo',
   authDomain: 'prototype-comments-27106.firebaseapp.com',
@@ -82,6 +88,118 @@ async function loadFirebase() {
       import(`${FB_BASE}/firebase-firestore.js`),
     ]);
   return { initializeApp, getApps, getApp, getFirestore, collection, addDoc };
+}
+
+// ─── transport：使用者按下送出之後，那筆資料落在誰家 ──────────────────────────
+//
+//   firestore（預設）  免後端：一個 Firebase 專案 + 一份規則就收得到。代價是 Firestore
+//                      只是被動儲存，要靠本機 bridge 定時撈出來變成你的待辦。
+//   http               POST 到任意端點。已經有後端的人走這條——不需要 Firebase、不需要
+//                      gcloud、不需要 bridge，回饋直接進你家系統。
+//   supabase           http 的特例（PostgREST），順手把欄位轉成 SQL 慣例的 snake_case。
+//
+// 只有 firestore 會動態載入 Firebase SDK（約 200 KB）；另外兩種一個 fetch 就夠了。
+
+function postJson(url, headers) {
+  return async (body) => {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw new Error(`回饋端點回了 ${response.status}：${(await response.text()).slice(0, 200)}`);
+    }
+  };
+}
+
+function httpTransport({ url, headers }, projectId) {
+  if (!url) throw new Error('initUserFeedback: transport.type=http 需要 url');
+  const post = postJson(url, headers);
+  return { send: (payload) => post({ projectId, ...payload }) };
+}
+
+/** PostgREST 收的是 table 欄位名。別為了這支工具逼人去建 camelCase 欄位。 */
+function snakeRow(payload, projectId) {
+  return {
+    project_id: projectId,
+    page: payload.page,
+    selector: payload.selector,
+    element_text: payload.elementText,
+    note: payload.note,
+    image: payload.image,
+    reporter: payload.reporter,
+    created_at: payload.createdAt,
+    status: payload.status,
+  };
+}
+
+function supabaseTransport({ url, anonKey, table = 'user_feedback', headers }, projectId) {
+  if (!url || !anonKey) {
+    throw new Error('initUserFeedback: transport.type=supabase 需要 url 與 anonKey');
+  }
+  // 吃掉結尾**所有**斜線：貼設定時多打一個「/」會組出 //rest/v1/…，Supabase 直接 404
+  const post = postJson(`${url.replace(/\/+$/, '')}/rest/v1/${table}`, {
+    apikey: anonKey,
+    Authorization: `Bearer ${anonKey}`,
+    Prefer: 'return=minimal',
+    ...headers,
+  });
+  return { send: (payload) => post(snakeRow(payload, projectId)) };
+}
+
+async function firestoreTransport({ config }, opts) {
+  const fb = opts._firebase || (await loadFirebase());
+  const db = fb.getFirestore(appFor(fb, config));
+  const notes = () => fb.collection(db, 'user-feedback', opts.projectId, 'notes');
+  return { send: (payload) => fb.addDoc(notes(), payload) };
+}
+
+/** 不給 transport 就是 firestore + 舊的 firebaseConfig 參數——既有掛法一字不改照樣跑。 */
+function createTransport(opts) {
+  const transport = opts.transport || { type: 'firestore', config: opts.firebaseConfig };
+  if (transport.type === 'http') return httpTransport(transport, opts.projectId);
+  if (transport.type === 'supabase') return supabaseTransport(transport, opts.projectId);
+  if (transport.type === 'firestore') return firestoreTransport(transport, opts);
+  throw new Error(
+    `initUserFeedback: 不認得 transport.type「${transport.type}」，可用：firestore / http / supabase`,
+  );
+}
+
+/**
+ * app 名稱**帶上專案 id**。
+ *
+ * 用一個固定名字（'user-feedback'）的話，同一頁掛兩份、各自指定不同專案時，
+ * Firebase 不允許同名 app 換設定，第二份就只能沿用第一份——那些回饋會寫進
+ * 第一個專案，而送出的人看到的是「已送出，謝謝你的回饋」。這種錯沒有人查得到：
+ * 頁面沒報錯、面板正常關閉，只是第二個專案的擁有者永遠收不到東西。
+ * 一個專案一個 app 就沒有這個衝突，也不必再靠警告去彌補。
+ */
+function appNameFor(config) {
+  return `user-feedback:${config.projectId || 'unknown'}`;
+}
+
+/**
+ * 取得要寫入的 Firebase app。
+ *
+ * 一律用具名 app，兩個方向都不碰頁面的預設 app：
+ *   - 頁面上很可能已經有自己的預設 app（自家專案，或同頁掛了 pc.js 的共用專案）。
+ *     沿用它會讓傳進來的 config 被靜默忽略，使用者的回饋落到別人家去。
+ *   - 反過來，沒傳 config 時若沿用別人的預設 app，實際寫入的是**那個**專案，
+ *     下面那行提醒卻說寫進示範專案——診斷訊息說謊比沒有訊息更難查。
+ */
+function appFor(fb, config) {
+  if (!config) {
+    // 這是這支 script 後果最重的一種誤用：回饋全進別人家、你一則都收不到。
+    console.warn(
+      `[user-feedback] 未指定 firebaseConfig，留言會寫進共用示範專案 ${DEFAULT_CONFIG.projectId}，` +
+        '只有該專案擁有者收得到。要自己收回饋請傳入自己的 firebaseConfig' +
+        '（見 prototype-tools 的 user-feedback skill）。',
+    );
+  }
+  const wanted = config || DEFAULT_CONFIG;
+  const name = appNameFor(wanted);
+  return fb.getApps().find((app) => app.name === name) || fb.initializeApp(wanted, name);
 }
 
 function el(tag, className, props = {}) {
@@ -240,7 +358,13 @@ function showToast(message) {
  * @param {string}   opts.projectId       Firestore namespace，一個產品一個 id
  * @param {string|(() => string)} [opts.page] 留言歸屬的頁面路徑，預設 location.pathname。
  *   給函式則在送出當下才求值——投影片 deck、SPA 這種「網址不變但內容會變」的頁面要用這種。
- * @param {object}  [opts.firebaseConfig] 預設共用 prototype-comments-27106
+ * @param {object}  [opts.transport]      回饋寫去哪，不給就是 firestore：
+ *   `{ type:'firestore', config }`（免後端，要 Firebase 專案 + bridge）
+ *   `{ type:'http', url, headers }`（POST 到你家端點，不需要 Firebase 也不需要 bridge）
+ *   `{ type:'supabase', url, anonKey, table }`（PostgREST，欄位自動轉 snake_case）
+ * @param {object}  [opts.firebaseConfig] firestore 模式的專案設定（等同
+ *   `transport:{type:'firestore',config}`）。不給會落到共用示範專案
+ *   （prototype-comments-27106），只有該專案擁有者的 bridge 讀得到——自架必給。
  * @param {string}  [opts.label]          浮動按鈕文字
  * @param {Function}[opts.onSent]         送出成功後的 callback
  * @param {object}  [opts._firebase]      測試注入（同 pc.js 慣例，見 test/mock-firebase.js）
@@ -248,12 +372,7 @@ function showToast(message) {
 export async function initUserFeedback(opts = {}) {
   if (!opts.projectId) throw new Error('initUserFeedback: projectId is required');
 
-  const fb = opts._firebase || (await loadFirebase());
-  const app = fb.getApps().length
-    ? fb.getApp()
-    : fb.initializeApp(opts.firebaseConfig || DEFAULT_CONFIG);
-  const db = fb.getFirestore(app);
-  const notes = () => fb.collection(db, 'user-feedback', opts.projectId, 'notes');
+  const transport = await createTransport(opts);
 
   document.head.append(el('style', null, { textContent: STYLES }));
 
@@ -334,7 +453,7 @@ export async function initUserFeedback(opts = {}) {
     state.reporter = ui.name.value.trim();
     writeReporter(state.reporter);
     try {
-      await fb.addDoc(notes(), {
+      await transport.send({
         page: resolvePage(opts),
         selector: target.selector,
         elementText: target.elementText,
@@ -347,7 +466,9 @@ export async function initUserFeedback(opts = {}) {
       backdrop.remove();
       showToast('已送出，謝謝你的回饋');
       opts.onSent?.();
-    } catch {
+    } catch (error) {
+      // 使用者只需要知道再按一次；掛的人需要知道是規則擋了還是端點 500，兩者都要給。
+      console.error('[user-feedback] 送出失敗', error);
       ui.send.disabled = false;
       fail('送出失敗，可能是網路不穩，再按一次試試。');
     }

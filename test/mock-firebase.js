@@ -17,6 +17,7 @@ export function createMockFirebase(initial = {}) {
     snapListeners: new Set(), // onSnapshot callbacks
     authListeners: new Set(), // onAuthStateChanged callbacks
     user: initial.user || null,
+    apps: [],                 // { name, options } — 見下方 app 區塊
   };
   (initial.comments || []).forEach(c => {
     const id = c.id || `m${++idSeq}`;
@@ -33,9 +34,25 @@ export function createMockFirebase(initial = {}) {
 
   return {
     // ─ app ─
-    getApps: () => [],
-    getApp: () => ({}),
-    initializeApp: () => ({}),
+    // 真的維護一份 app 註冊表（而不是永遠回空）：user-feedback 用**具名** app 來避開
+    // 頁面既有的預設 app，沒有 name / options 的話那條路徑在測試裡完全無法驗證，
+    // 「傳了 firebaseConfig 卻被別人的 app 蓋掉」這種 bug 就永遠擋不下來。
+    getApps: () => [...state.apps],
+    getApp: (name = '[DEFAULT]') => {
+      const found = state.apps.find(a => a.name === name);
+      if (!found) throw new Error(`No Firebase App '${name}' has been created`);
+      return found;
+    },
+    initializeApp: (options = {}, name = '[DEFAULT]') => {
+      // 真 SDK 對同名重複初始化會拋 app/duplicate-app。mock 若放行，
+      // 「忘了先查有沒有existing app」這種 bug 會在測試裡全綠、只有線上炸。
+      if (state.apps.some(a => a.name === name)) {
+        throw new Error(`Firebase: Firebase App named '${name}' already exists (app/duplicate-app)`);
+      }
+      const app = { name, options };
+      state.apps.push(app);
+      return app;
+    },
     getFirestore: () => ({}),
     getAuth: () => ({}),
     GoogleAuthProvider: function GoogleAuthProvider() {},

@@ -177,6 +177,118 @@ async function main() {
     await page.close();
   });
 
+  // ── transport：已經有後端的人不該被逼著開 Firebase ────────────────────────
+  // 這三條顧的是「分享出去」那條路：http／supabase 模式下完全不碰 Firebase、
+  // 也不需要本機 bridge，回饋直接進對方系統。
+
+  await test('transport=http 時 POST 到指定端點，不寫 Firestore', async () => {
+    const page = await openHarness(browser, base, '?transport=http');
+    await pickElement(page, '#host-btn');
+    await fillAndSend(page, { note: '走自己的端點', name: 'Jenny' });
+    await page.waitForFunction(() => window.__requests.length === 1);
+
+    const [req] = await page.evaluate(() => window.__requests);
+    assert(req.url === 'https://example.test/feedback', `端點錯：${req.url}`);
+    assert(req.headers['X-Token'] === 'abc', '自訂 header 應該原封不動帶上');
+    assert(req.body.projectId === 'harness', `body 要帶 projectId：${req.body.projectId}`);
+    assert(req.body.note === '走自己的端點', `留言內容錯：${req.body.note}`);
+    assert(req.body.status === 'new', 'status 仍是 new');
+    assert(
+      (await page.evaluate(() => window.__docs())).length === 0,
+      'http 模式不該寫進 Firestore',
+    );
+    await page.close();
+  });
+
+  await test('transport=supabase 時打 PostgREST，欄位轉成 snake_case', async () => {
+    const page = await openHarness(browser, base, '?transport=supabase');
+    await pickElement(page, '#host-btn');
+    await fillAndSend(page, { note: '走 Supabase', name: 'Jenny' });
+    await page.waitForFunction(() => window.__requests.length === 1);
+
+    const [req] = await page.evaluate(() => window.__requests);
+    assert(
+      req.url === 'https://proj.supabase.co/rest/v1/user_feedback',
+      `PostgREST 路徑錯（結尾斜線要吃掉）：${req.url}`,
+    );
+    assert(req.headers.apikey === 'anon-key-123', 'apikey header 必要');
+    assert(req.headers.Authorization === 'Bearer anon-key-123', 'Authorization header 必要');
+    assert(req.body.project_id === 'harness', `project_id 錯：${req.body.project_id}`);
+    assert(
+      req.body.element_text === '14 右上第一小臼齒',
+      `element_text 錯：${req.body.element_text}`,
+    );
+    assert('created_at' in req.body, 'created_at 應存在（SQL 慣例 snake_case）');
+    assert(!('elementText' in req.body), 'camelCase 欄位不該送出去');
+    await page.close();
+  });
+
+  await test('端點回 500 時不吞掉，面板留著讓使用者重送', async () => {
+    const page = await openHarness(browser, base, '?transport=http&fail=1');
+    await pickElement(page, '#host-btn');
+    await fillAndSend(page, { note: '端點掛了' });
+    await page.waitForSelector('.uf-error');
+    assert(await page.$('.uf-panel'), '面板要留著，否則使用者剛打的字就沒了');
+    assert(!(await page.evaluate(() => window.__sent)), '沒送成功不該呼叫 onSent');
+    await page.close();
+  });
+
+  // ── Firebase app 隔離：兩個方向都不該碰到頁面自己的預設 app ────────────────
+  // 這兩條顧的是「回饋靜默寫進別人的專案」——最難自己看出來的一種壞法：
+  // 頁面沒報錯、面板顯示送出成功，只是那則留言你永遠收不到。
+
+  await test('傳了 firebaseConfig 時，不被頁面既有的 firebase app 蓋掉', async () => {
+    const page = await openHarness(browser, base, '?seedapp=1&fbconfig=1');
+    const apps = await page.evaluate(() => window.__apps());
+    const mine = apps.find(a => a.name === 'user-feedback:my-own-project');
+    assert(mine, `應另開具名 app，實際：${JSON.stringify(apps)}`);
+    assert(
+      mine.projectId === 'my-own-project',
+      `具名 app 要用我傳的專案，實際：${mine.projectId}`,
+    );
+    // 而且真的送得出去（沿用錯的 app 時這裡照樣會過，所以上面的斷言才是重點）
+    await pickElement(page, '#host-btn');
+    await fillAndSend(page, { note: '寫進我自己的專案' });
+    await page.waitForFunction(() => window.__docs().length === 1);
+    await page.close();
+  });
+
+  await test('沒傳 firebaseConfig 時開自己的具名 app，不沿用別人的預設 app', async () => {
+    // 沿用的話實際寫進「別人那個專案」，console 訊息卻宣稱寫進示範專案——
+    // 診斷訊息說謊比沒有訊息更難查。
+    const page = await openHarness(browser, base, '?seedapp=1');
+    const apps = await page.evaluate(() => window.__apps());
+    const mine = apps.find(a => a.name === 'user-feedback:prototype-comments-27106');
+    assert(mine, `即使沒傳 config 也該開具名 app，實際：${JSON.stringify(apps)}`);
+    assert(
+      mine.projectId === 'prototype-comments-27106',
+      `應落在示範專案（與 console 訊息一致），實際：${mine.projectId}`,
+    );
+    assert(
+      apps.some(a => a.name === '[DEFAULT]' && a.projectId === 'someone-else'),
+      '頁面原本的預設 app 應原封不動',
+    );
+    await page.close();
+  });
+
+  await test('同頁掛兩份、Firebase 專案不同時，各寫各的不互相污染', async () => {
+    // 用固定 app 名字的話，Firebase 不允許同名 app 換設定，第二份只能沿用第一份——
+    // 第二份收到的回饋會全部寫進第一個專案，而送出的人看到的是「已送出，謝謝你的回饋」。
+    // 這種錯沒有人查得到，所以 app 名字要帶專案 id，讓衝突根本不會發生。
+    const page = await openHarness(browser, base, '?fbconfig=1');
+    await page.evaluate(() => window.__initAgain({ projectId: 'another-project' }));
+    const names = (await page.evaluate(() => window.__apps())).map(a => a.name);
+    assert(
+      names.includes('user-feedback:my-own-project'),
+      `第一份的 app 應在，實際：${JSON.stringify(names)}`,
+    );
+    assert(
+      names.includes('user-feedback:another-project'),
+      `第二份應有自己的 app 而不是沿用第一份，實際：${JSON.stringify(names)}`,
+    );
+    await page.close();
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
