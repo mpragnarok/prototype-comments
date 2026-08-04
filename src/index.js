@@ -14,6 +14,7 @@ import { STYLES } from './styles.js';
 import { createStore } from './store.js';
 import { createNoteModule } from './note-comments.js';
 import { initDrawLayer, shouldEnableDraw } from './draw-layer.js';
+import { cssSelectorFor } from './draw/selectors.js';
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
@@ -98,6 +99,11 @@ export async function initPrototypeComments(opts = {}) {
     getMode         = () => 'design',
     designTarget    = '#phone',
     engNoteSelector = '.eng-note-row',
+    collectToTasks    = false,  // 這一份掛載收到的留言要不要被 user-feedback bridge 收成待辦。
+                                //   true → 每則留言寫入時帶 filedAt: null，bridge 才撈得到
+                                //   （Firestore 的 IS_NULL 不匹配「欄位不存在」，所以必須明寫）。
+                                //   預設 false：同事的設計審查留言不該自動變成某人的工作佇列，
+                                //   那是掛載時的決定，不是事後才過濾得掉的事。
     navigateTo        = null,   // (screenId: string) => void  — consumer provides
     authBarTarget     = null,   // CSS selector for a flex header to inject auth bar into
     authBarCorner     = 'right', // 浮動 auth bar 貼哪個底角：'right'(預設) | 'left'。bar 仍「浮底」，
@@ -368,10 +374,62 @@ export async function initPrototypeComments(opts = {}) {
       const x = parseFloat(((e.clientX - rect.left) / rect.width * 100).toFixed(2));
       const y = parseFloat(((e.clientY - rect.top + scrollTop) / rect.height * 100).toFixed(2));
       closeAllPopovers();
-      annotation.current = { x, y };
+      annotation.current = { x, y, ...anchorUnderPoint(e.clientX, e.clientY) };
       console.log('[pc] overlay click → annotation.current set to', annotation.current);
       showInputPopover(e.clientX, e.clientY, null);
     });
+  }
+
+  /**
+   * 留言 → pin 要畫的位置（overlay 內百分比）。
+   *
+   * 有座標就用座標。沒有座標但有 selector 時，從元件現在的位置反算——
+   * 從 user-feedback 遷移過來的留言只有 selector（那支工具從不存座標），
+   * 少了這條路它們搬過來就是「資料在、畫面上看不到」。
+   * selector 失效（元件已不存在）則不畫，而不是畫在錯的地方。
+   */
+  function pinPosition(c, overlay) {
+    if (c.x != null && c.y != null) return { x: c.x, y: c.y };
+    if (!c.selector) return null;
+    let target = null;
+    try { target = document.querySelector(c.selector); } catch { return null; } // 壞掉的 selector 會 throw
+    if (!target) return null;
+    const r = target.getBoundingClientRect();
+    const o = overlay.getBoundingClientRect();
+    if (!o.width || !o.height) return null;
+    const relX = c.relX != null ? c.relX : 50;   // 沒記相對位置就指元件中心
+    const relY = c.relY != null ? c.relY : 50;
+    return {
+      x: parseFloat((((r.left - o.left + (r.width * relX) / 100) / o.width) * 100).toFixed(2)),
+      y: parseFloat((((r.top - o.top + getScrollTop() + (r.height * relY) / 100) / o.height) * 100).toFixed(2)),
+    };
+  }
+
+  /**
+   * 點擊處底下的 app 元件 → CSS selector ＋ 元件內相對位置。
+   *
+   * 座標只說得出「畫面上的哪一點」，版面一改就失準；selector 說得出「哪個元件」，
+   * 改版後仍指得到。兩個都存，讀的人（agent／bridge）才不必從座標反推元素。
+   * 用 draw layer 現成的 cssSelectorFor：它產完會 querySelector 驗回得去，
+   * 且全站共用一套錨定邏輯，不會兩份實作各自漂移。
+   */
+  function anchorUnderPoint(clientX, clientY) {
+    const overlay = document.getElementById('pc-overlay');
+    const prev = overlay ? overlay.style.pointerEvents : null;
+    if (overlay) overlay.style.pointerEvents = 'none';   // 不關掉會只命中 overlay 自己
+    const target = document.elementFromPoint(clientX, clientY);
+    if (overlay) overlay.style.pointerEvents = prev || '';
+    if (!target || target === document.body || target === document.documentElement) return {};
+    if (target.closest('[class^="pc-"], [class*=" pc-"], [id^="pc-"]')) return {}; // 標注層自己的 UI 不算
+    const selector = cssSelectorFor(target);
+    if (!selector) return {};
+    const r = target.getBoundingClientRect();
+    if (!r.width || !r.height) return { selector };
+    return {
+      selector,
+      relX: parseFloat((((clientX - r.left) / r.width) * 100).toFixed(2)),
+      relY: parseFloat((((clientY - r.top) / r.height) * 100).toFixed(2)),
+    };
   }
 
   function setCommentMode(active) {
@@ -577,6 +635,15 @@ export async function initPrototypeComments(opts = {}) {
         authorPhoto: currentUser.photoURL || '',
         resolved: false,
       };
+
+      if (collectToTasks) data.filedAt = null;   // bridge 的待收訊號；見選項處的說明
+
+      // 錨定欄位只在有抓到底層元件時才寫——Firestore 不收 undefined。
+      const anchor = annotation.current;
+      if (anchor && anchor.selector) {
+        data.selector = anchor.selector;
+        if (anchor.relX != null) { data.relX = anchor.relX; data.relY = anchor.relY; }
+      }
 
       if (commentId) {
         const parent = comments.find(c => c.id === commentId);
@@ -951,10 +1018,13 @@ export async function initPrototypeComments(opts = {}) {
 
     overlay.querySelectorAll('.pc-annotation').forEach(p => { p.remove(); });
     const screenId = getScreenId();
-    const positional = comments.filter(
-      c => c.type === 'positional' && c.screenId === screenId && !c.parentId
-        && c.x != null && c.y != null
-    );
+    const positional = comments
+      .filter(c => c.type === 'positional' && c.screenId === screenId && !c.parentId)
+      .map(c => {
+        const at = pinPosition(c, overlay);
+        return at ? { ...c, x: at.x, y: at.y } : null;
+      })
+      .filter(Boolean);
     console.log('[pc] renderAnnotations screenId=', screenId, 'total comments=', comments.length, 'positional this screen=', positional.length);
 
     positional.forEach((c) => {
@@ -1089,6 +1159,8 @@ export async function initPrototypeComments(opts = {}) {
           authorName: currentUser.displayName || currentUser.email,
           authorPhoto: currentUser.photoURL || '',
           resolved: false,
+          // 回覆也是新訊息（使用者常在這裡補充「還有這個也怪怪的」），一樣要進待辦。
+          ...(collectToTasks ? { filedAt: null } : {}),
         });
         // #4：回覆後保持 popover 開著（像對話 thread），清空輸入方便連續回覆。
         // 不再 closeAllPopovers()——snapshot handler 會自動把新回覆刷進 thread，
