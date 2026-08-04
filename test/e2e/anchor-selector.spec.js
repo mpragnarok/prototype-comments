@@ -163,6 +163,54 @@ async function commentOn(page, selector, text) {
     assert(count === 0, `selector 失效時不該畫 pin，實際畫了 ${count} 顆`);
   });
 
+  await test('consumer 自己的 pc- 前綴 class 不會被當成工具列而失去錨定', async () => {
+    const page = await freshPage(browser);
+    await page.evaluate(() => {
+      const b = document.createElement('button');
+      b.id = 'consumer-btn';
+      b.className = 'pc-primary-btn';   // consumer 的命名空間剛好撞到
+      b.textContent = '送出訂單';
+      b.style.cssText = 'display:block;margin:16px;padding:12px 20px;';
+      document.getElementById('screen-s1').appendChild(b);
+    });
+    await commentOn(page, '#consumer-btn', '這顆按鈕的文案要改');
+    const doc = await page.evaluate(() => window.__fb.__docs().find(d => d.body === '這顆按鈕的文案要改'));
+    await page.close();
+    assert(doc.selector === '#consumer-btn',
+      `consumer 的 pc- class 不該被排除，selector 應為 #consumer-btn，實際 ${JSON.stringify(doc.selector)}`);
+  });
+
+  await test('回覆沒有座標的留言時，不編造 x:0,y:0 假座標', async () => {
+    const page = await browser.newPage({ viewport: { width: 375, height: 700 } });
+    await page.goto(`http://localhost:${PORT}/test/e2e/harness.html`);
+    await page.waitForFunction(() => window.__pcTest && window.__pcTest.ready);
+    await page.evaluate((user) => {
+      const migrated = {
+        id: 'm1', type: 'positional', screenId: 's1', body: '搬過來的留言',
+        authorUid: '', authorName: '舊留言', resolved: false, parentId: null,
+        selector: '#ship-fast', relX: 50, relY: 50,   // 沒有 x/y
+      };
+      const fb = window.__pcTest.createMockFirebase({ user, comments: [migrated] });
+      window.__fb = fb;
+      return window.__pcTest.init(fb);
+    }, USER);
+    await page.evaluate(() => window.__fb.__setUser({ uid: 'u1', email: 'a@e2e.local', displayName: '設計師 A' }));
+    await page.evaluate(() => document.dispatchEvent(new CustomEvent('pc:screen-change', { detail: {} })));
+    await page.waitForSelector('.pc-annotation', { timeout: 4000 });
+    await page.locator('.pc-annotation').first().click();
+    await page.waitForSelector('.pc-textarea', { timeout: 3000 });
+    await page.locator('.pc-textarea').fill('我也覺得');
+    await page.locator('.pc-btn-submit').click();
+    await page.waitForTimeout(250);
+    const reply = await page.evaluate(() => window.__fb.__docs().find(d => d.body === '我也覺得'));
+    await page.close();
+    assert(reply, '回覆沒存進去');
+    assert(reply.x === undefined && reply.y === undefined,
+      `parent 沒有座標時回覆不該編出座標，實際 x=${reply.x} y=${reply.y}`);
+    assert(reply.selector === '#ship-fast', '回覆應沿用 parent 的元件錨定');
+    assert(!('filedAt' in reply), '回覆不該自成一張待辦卡');
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
