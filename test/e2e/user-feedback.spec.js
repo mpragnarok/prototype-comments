@@ -240,7 +240,7 @@ async function main() {
   await test('傳了 firebaseConfig 時，不被頁面既有的 firebase app 蓋掉', async () => {
     const page = await openHarness(browser, base, '?seedapp=1&fbconfig=1');
     const apps = await page.evaluate(() => window.__apps());
-    const mine = apps.find(a => a.name === 'user-feedback');
+    const mine = apps.find(a => a.name === 'user-feedback:my-own-project');
     assert(mine, `應另開具名 app，實際：${JSON.stringify(apps)}`);
     assert(
       mine.projectId === 'my-own-project',
@@ -258,7 +258,7 @@ async function main() {
     // 診斷訊息說謊比沒有訊息更難查。
     const page = await openHarness(browser, base, '?seedapp=1');
     const apps = await page.evaluate(() => window.__apps());
-    const mine = apps.find(a => a.name === 'user-feedback');
+    const mine = apps.find(a => a.name === 'user-feedback:prototype-comments-27106');
     assert(mine, `即使沒傳 config 也該開具名 app，實際：${JSON.stringify(apps)}`);
     assert(
       mine.projectId === 'prototype-comments-27106',
@@ -271,16 +271,20 @@ async function main() {
     await page.close();
   });
 
-  await test('同頁掛第二份、Firebase 專案不同時會警告（先掛的說了算）', async () => {
-    // Firebase 不允許同名 app 換設定，所以第二份只能沿用第一份的專案——
-    // 靜默沿用的話，第二份收到的回饋會全部寫到第一份那個專案去。
+  await test('同頁掛兩份、Firebase 專案不同時，各寫各的不互相污染', async () => {
+    // 用固定 app 名字的話，Firebase 不允許同名 app 換設定，第二份只能沿用第一份——
+    // 第二份收到的回饋會全部寫進第一個專案，而送出的人看到的是「已送出，謝謝你的回饋」。
+    // 這種錯沒有人查得到，所以 app 名字要帶專案 id，讓衝突根本不會發生。
     const page = await openHarness(browser, base, '?fbconfig=1');
-    const warnings = [];
-    page.on('console', m => { if (m.type() === 'warning') warnings.push(m.text()); });
     await page.evaluate(() => window.__initAgain({ projectId: 'another-project' }));
+    const names = (await page.evaluate(() => window.__apps())).map(a => a.name);
     assert(
-      warnings.some(w => w.includes('another-project') && w.includes('my-own-project')),
-      `應警告兩個專案衝突，實際：${JSON.stringify(warnings)}`,
+      names.includes('user-feedback:my-own-project'),
+      `第一份的 app 應在，實際：${JSON.stringify(names)}`,
+    );
+    assert(
+      names.includes('user-feedback:another-project'),
+      `第二份應有自己的 app 而不是沿用第一份，實際：${JSON.stringify(names)}`,
     );
     await page.close();
   });

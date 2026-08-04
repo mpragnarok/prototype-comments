@@ -166,22 +166,31 @@ function createTransport(opts) {
   );
 }
 
-const APP_NAME = 'user-feedback';
+/**
+ * app 名稱**帶上專案 id**。
+ *
+ * 用一個固定名字（'user-feedback'）的話，同一頁掛兩份、各自指定不同專案時，
+ * Firebase 不允許同名 app 換設定，第二份就只能沿用第一份——那些回饋會寫進
+ * 第一個專案，而送出的人看到的是「已送出，謝謝你的回饋」。這種錯沒有人查得到：
+ * 頁面沒報錯、面板正常關閉，只是第二個專案的擁有者永遠收不到東西。
+ * 一個專案一個 app 就沒有這個衝突，也不必再靠警告去彌補。
+ */
+function appNameFor(config) {
+  return `user-feedback:${config.projectId || 'unknown'}`;
+}
 
 /**
  * 取得要寫入的 Firebase app。
  *
- * 一律用**具名** app，兩個方向都不碰頁面的預設 app：
+ * 一律用具名 app，兩個方向都不碰頁面的預設 app：
  *   - 頁面上很可能已經有自己的預設 app（自家專案，或同頁掛了 pc.js 的共用專案）。
  *     沿用它會讓傳進來的 config 被靜默忽略，使用者的回饋落到別人家去。
  *   - 反過來，沒傳 config 時若沿用別人的預設 app，實際寫入的是**那個**專案，
- *     下面那行提醒卻說寫進示範專案——診斷訊息比沒有訊息更糟。
- * 所以沒傳 config 就明確用示範專案開自己的 app，寫入位置與訊息永遠一致。
+ *     下面那行提醒卻說寫進示範專案——診斷訊息說謊比沒有訊息更難查。
  */
 function appFor(fb, config) {
   if (!config) {
-    // warn 不是 info：這是這支 script 後果最重的一種誤用（回饋全進別人家、你一則都收不到），
-    // 級別要比下面「同頁 config 衝突」高，不能反過來。
+    // 這是這支 script 後果最重的一種誤用：回饋全進別人家、你一則都收不到。
     console.warn(
       `[user-feedback] 未指定 firebaseConfig，留言會寫進共用示範專案 ${DEFAULT_CONFIG.projectId}，` +
         '只有該專案擁有者收得到。要自己收回饋請傳入自己的 firebaseConfig' +
@@ -189,18 +198,8 @@ function appFor(fb, config) {
     );
   }
   const wanted = config || DEFAULT_CONFIG;
-  const existing = fb.getApps().find((app) => app.name === APP_NAME);
-  if (!existing) return fb.initializeApp(wanted, APP_NAME);
-
-  // 同頁掛兩份、config 卻不同：Firebase 不允許同名 app 換設定，先掛的那個說了算。
-  // 靜默復用會讓第二份的回饋全部寫錯專案，所以至少要吵一聲。
-  if (existing.options?.projectId && existing.options.projectId !== wanted.projectId) {
-    console.warn(
-      `[user-feedback] 這一頁已經初始化過 ${existing.options.projectId}，` +
-        `本次指定的 ${wanted.projectId} 會被忽略——同一頁只能用一個 Firebase 專案。`,
-    );
-  }
-  return existing;
+  const name = appNameFor(wanted);
+  return fb.getApps().find((app) => app.name === name) || fb.initializeApp(wanted, name);
 }
 
 function el(tag, className, props = {}) {
