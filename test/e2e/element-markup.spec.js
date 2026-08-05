@@ -491,6 +491,38 @@ const seedMark = (over = {}) => ({
     assert(!shown, '點別處應該收起來');
   });
 
+  // 先前具名模式的按鈕跟匿名版一樣寫「給回饋」，「按下去會跳登入」只寫在 title 裡——
+  // 手機上看不到 tooltip，使用者的感受就是「沒有看到 Google 登入」。
+  await test('具名模式未登入時，按鈕自己說得出來要登入', async () => {
+    const page = await fresh(browser, { user: null, init: { auth: 'google' } });
+    const before = await page.evaluate(() => document.querySelector('.em-fab').textContent);
+    assert(/登入/.test(before), `未登入時按鈕要寫明要登入，實際「${before}」`);
+
+    await page.evaluate(() => window.__fb.__setUser({ uid: 'u1', email: 'm@t.local', displayName: 'Mina' }));
+    await page.waitForTimeout(300);
+    const after = await page.evaluate(() => ({
+      text: document.querySelector('.em-fab').textContent,
+      title: document.querySelector('.em-fab').title,
+      toast: document.querySelector('.em-toast')?.textContent,
+    }));
+    await page.close();
+    assert(!/登入/.test(after.text), `登入後就不該再寫要登入，實際「${after.text}」`);
+    assert(/Mina/.test(after.title), `登入後要看得出是誰，實際「${after.title}」`);
+    assert(after.toast && /Mina/.test(after.toast), `登入成功要說一聲，實際「${after.toast}」`);
+  });
+
+  await test('匿名模式的按鈕不提登入（因為根本不需要）', async () => {
+    const page = await fresh(browser, { user: null });
+    await page.waitForTimeout(300);
+    const r = await page.evaluate(() => ({
+      text: document.querySelector('.em-fab').textContent,
+      title: document.querySelector('.em-fab').title,
+    }));
+    await page.close();
+    assert(!/登入/.test(r.text), `匿名模式不該提登入，實際「${r.text}」`);
+    assert(/不需要登入/.test(r.title), `提示要說明不必登入，實際「${r.title}」`);
+  });
+
   await test('回覆／子留言不會被畫成獨立的框', async () => {
     const page = await fresh(browser, {
       seed: [seedMark({ id: 'a' }), seedMark({ id: 'r', parentId: 'a', body: '我也覺得' })],
