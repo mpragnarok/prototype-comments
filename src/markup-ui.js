@@ -194,20 +194,25 @@ function drawRow(mark, index, { onToggle, onFocus }) {
  */
 export function renderMarks(ui, marks, handlers) {
   document.querySelectorAll('.em-box').forEach(n => n.remove());
-  let drawn = 0;
-  marks.forEach((m, i) => { if (drawBox(m, i, handlers.onFocusId)) drawn += 1; });
+  // 只列「這一頁真的畫得出來」的標記。錨點失效的列在這裡沒有意義——
+  // 點了跳不過去，也對不上畫面上任何東西，只會讓人以為自己漏看了什麼。
+  // 資料沒有消失（agent 與 bridge 照樣讀得到），只是不在這個面板上。
+  const visible = [];
+  marks.forEach((m) => { if (drawBox(m, visible.length, handlers.onFocusId)) visible.push(m); });
 
-  ui.count.textContent = String(marks.length);
+  ui.count.textContent = String(visible.length);
   ui.list.innerHTML = '';
+  const missing = marks.length - visible.length;
+  // 「還沒有標記」只在真的一則都沒有時說。有 missing 卻說「還沒有標記」是自相矛盾的，
+  // 底下馬上又寫「另有 N 則」——看的人會以為工具壞了。
   if (!marks.length) {
-    ui.list.append(el('div', 'em-note', { textContent: '還沒有標記。按右下角的按鈕開始。' }));
-    return;
+    ui.list.append(el('div', 'em-note', { textContent: '這一頁還沒有標記。按右下角的按鈕開始。' }));
+  } else {
+    visible.forEach((m, i) => ui.list.append(drawRow(m, i, handlers)));
   }
-  marks.forEach((m, i) => ui.list.append(drawRow(m, i, handlers)));
-  const missing = marks.length - drawn;
   if (missing > 0) {
     ui.list.append(el('div', 'em-note', {
-      textContent: `另有 ${missing} 則的元素在這一頁找不到，所以沒有畫出來（頁面改版過就會這樣）。`,
+      textContent: `另有 ${missing} 則標在已經改掉的元件上，找不到位置所以沒列出來（內容還在，收回饋的人讀得到）。`,
     }));
   }
 }
