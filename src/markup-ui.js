@@ -1,5 +1,8 @@
 /**
- * markup-ui —— 「點選元素標記」的顯示層：框、標籤、標注紀錄抽屜、輸入卡。
+ * markup-ui —— `user-feedback-markup.js` 的顯示層：框、標籤、標注紀錄抽屜、輸入卡。
+ *
+ * 內部模組，不對外掛載，所以不跟著主檔改名。要用這套 UI 請 import
+ * `user-feedback-markup.js`，不要直接吃這支——它的介面隨時會變。
  *
  * 與資料來源解耦：這裡只認一個 mark 陣列與幾個 callback，不碰 Firebase。
  * 視覺語言刻意沿用 draw layer（accent #635a8f、右側抽屜、白底列項），
