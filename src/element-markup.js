@@ -322,9 +322,15 @@ export async function initElementMarkup(opts = {}) {
 
   function render() {
     renderMarks(ui, state.marks, handlers());
+    // 視窗顯示的那則若已經不在了（自己刪掉、或別人刪的），就收起來——
+    // 不然它會停在畫面上說著一則不存在的留言。檢查放在這裡而不是捲動事件裡，
+    // 因為刪除走的是 snapshot 更新，不是捲動。
+    const shownId = ui.pop.dataset.markId;
+    if (shownId && !state.marks.some(m => String(m.id) === shownId)) hideMarkPopover(ui);
   }
 
-  const reflow = () => { hideMarkPopover(ui); render(); };
+  // 捲動／改變視窗只要重畫框——popover 是 absolute 的，會自己跟著頁面走。
+  const reflow = () => render();
   addEventListener('resize', reflow);
   addEventListener('scroll', reflow, { passive: true });
   // 點到 popover 以外的地方就收起來——包含頁面本身與別的標記

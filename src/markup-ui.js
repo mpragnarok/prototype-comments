@@ -77,7 +77,7 @@ body.em-marking .em-shield{display:block}
   border:1px solid #e3e5ea;background:#fff;color:#1e1e1e}
 .em-input button.go{background:${ACCENT};color:#fff;border-color:${ACCENT}}
 .em-input button:disabled{opacity:.5;cursor:default}
-.em-pop{position:fixed;z-index:${Z + 1150};width:300px;max-width:92vw;background:#fff;border-radius:12px;
+.em-pop{position:absolute;z-index:${Z + 1150};width:300px;max-width:92vw;background:#fff;border-radius:12px;
   box-shadow:0 8px 32px rgba(0,0,0,.24);padding:13px;display:none;font:14px/1.55 system-ui,-apple-system,sans-serif}
 .em-pop.show{display:block}
 .em-pop .top{display:flex;align-items:center;gap:7px;font-size:11.5px;color:#6b7080;margin-bottom:6px}
@@ -324,6 +324,7 @@ export function renderMarks(ui, marks, handlers) {
 export function showMarkPopover(ui, mark, index, handlers, at) {
   const pop = ui.pop;
   pop.className = `em-pop show${mark.resolved ? ' done' : ''}`;
+  pop.dataset.markId = String(mark.id);
   pop.innerHTML = '';
   const head = el('div', 'top');
   head.append(
@@ -342,16 +343,23 @@ export function showMarkPopover(ui, mark, index, handlers, at) {
   pop.append(head, body);
   pop.append(rowActions(pop, mark, { ...handlers, isMine: handlers.isMine(mark) }));
 
-  // 先顯示再量尺寸，才知道會不會超出視窗
+  // 先顯示再量尺寸，才知道會不會超出畫面。
+  // 座標用 page（含捲動位移）而非 viewport：popover 是 absolute 的，跟著頁面走——
+  // 這樣捲動時它會黏在那個框旁邊，不必「一捲動就關掉」。
+  // （一捲就關看似省事，但手機的慣性捲動會在點下去的當下就把它關掉。）
   pop.style.left = '0px'; pop.style.top = '0px';
   const r = pop.getBoundingClientRect();
-  pop.style.left = `${Math.max(8, Math.min(at.x - r.width / 2, window.innerWidth - r.width - 8))}px`;
-  const above = at.y - r.height - 12;
-  pop.style.top = `${above > 8 ? above : Math.min(at.y + 16, window.innerHeight - r.height - 8)}px`;
+  const pageX = at.x + window.scrollX;
+  const pageY = at.y + window.scrollY;
+  const maxLeft = document.documentElement.scrollWidth - r.width - 8;
+  pop.style.left = `${Math.max(8, Math.min(pageX - r.width / 2, maxLeft))}px`;
+  const above = pageY - r.height - 12;
+  pop.style.top = `${above > window.scrollY + 8 ? above : pageY + 16}px`;
 }
 
 export function hideMarkPopover(ui) {
   ui.pop.classList.remove('show');
+  delete ui.pop.dataset.markId;
 }
 
 export function highlightMark(id) {

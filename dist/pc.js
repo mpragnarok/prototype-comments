@@ -1,4 +1,4 @@
-/* pc.js fd5329f 2026-08-05T02:43:39Z */
+/* pc.js 200dcf0 2026-08-05T02:52:25Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -5174,7 +5174,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = 'fd5329f';
+export const PC_VERSION = '200dcf0';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';
