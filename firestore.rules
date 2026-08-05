@@ -62,7 +62,9 @@ service cloud.firestore {
          request.resource.data.diff(resource.data).affectedKeys()
            .hasOnly(['resolved', 'resolvedBy', 'resolvedByUid', 'resolvedAt',
                      'reactions', 'decision', 'decisionNote']));
-      allow delete: if isSignedIn() &&
+      // 匿名也要能刪自己的：留言的人事後想撤回是很正常的事，而他不可能「登入」。
+      // 仍然只能刪自己的——uid 對不上就擋掉。
+      allow delete: if request.auth != null &&
         request.auth.uid == resource.data.authorUid;
     }
 
