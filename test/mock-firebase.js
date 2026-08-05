@@ -101,6 +101,14 @@ export function createMockFirebase(initial = {}) {
     signInWithPopup: async () => {
       state.user = initial.user || { uid: 'u1', email: 'test@e2e.local', displayName: 'E2E User' };
       emitAuth();
+      return { user: state.user };
+    },
+    // 匿名登入沒有 OAuth 流程，只是換一個 uid——在 LINE／FB 的內建瀏覽器裡也能用。
+    // 沒有 displayName／email 是重點：名字得由使用者自己填。
+    signInAnonymously: async () => {
+      state.user = { uid: `anon-${++idSeq}`, isAnonymous: true };
+      emitAuth();
+      return { user: state.user };
     },
     signOut: async () => { state.user = null; emitAuth(); },
 

@@ -98,16 +98,21 @@ export async function initElementMarkup(opts = {}) {
     onToggleMark: async () => {
       if (state.marking) return setMarking(false);
       ui.fab.disabled = true;
-      const user = await ensureUser();
+      const user = await ensureUser();   // 匿名時使用者無感，只是換一個 uid
       ui.fab.disabled = false;
       if (user) setMarking(true);
     },
     onOpenDrawer: (id) => openDrawer(id),
   });
 
-  // ── 登入 ────────────────────────────────────────────────────────────────────
-  // 要能看到別人標過什麼就必須能讀，能讀就得知道是誰標的——所以這條路要登入。
-  // 只在「要寫」的當下才擋，純瀏覽不必登入（rules 的 read 是公開的）。
+  // ── 身分 ────────────────────────────────────────────────────────────────────
+  // 預設**匿名**：signInAnonymously 只是跟 Firebase 換一個 uid，不走 OAuth，
+  // 所以在 LINE／FB 的內建瀏覽器裡也能用——Google 封鎖 in-app WebView 的 OAuth，
+  // 那是它的政策，換 signInWithRedirect 也一樣被擋。收回饋的人用哪個瀏覽器不是
+  // 我們能選的，能選的是不要求登入。
+  //
+  // 想具名的人可以自己在輸入卡填名字（記在這台裝置上，下次自動帶）。
+  // 需要「保證是本人」的場合才傳 auth:'google'。
   /**
    * 登入失敗的原因要說出來。吞掉的下場是使用者每點一次就跳一次彈窗、
    * 每次都失敗，而畫面上完全看不出為什麼——實際踩過一次，症狀是
@@ -122,19 +127,28 @@ export async function initElementMarkup(opts = {}) {
     'auth/cancelled-popup-request': '',   // 連按兩次造成，不必吵使用者
   };
 
+  const anonymous = (opts.auth || 'anonymous') !== 'google';
+
   async function ensureUser() {
     if (state.user) return state.user;
     try {
-      const cred = await fb.signInWithPopup(auth, new fb.GoogleAuthProvider());
+      const cred = anonymous
+        ? await fb.signInAnonymously(auth)
+        : await fb.signInWithPopup(auth, new fb.GoogleAuthProvider());
       return cred.user;
     } catch (error) {
       const known = SIGN_IN_ERRORS[error?.code];
       if (known) toast(known);
-      else if (known !== '') toast('登入沒有完成，再試一次。');
-      console.error('[element-markup] 登入失敗', error?.code || error);
+      else if (known !== '') toast(anonymous ? '連不上伺服器，等一下再試。' : '登入沒有完成，再試一次。');
+      console.error('[element-markup] 取得身分失敗', error?.code || error);
       return null;
     }
   }
+
+  // 名字記在這台裝置上：不強迫留名，但留過一次就不必每則重打。
+  const NAME_KEY = `em-name:${opts.projectId}`;
+  const savedName = () => { try { return localStorage.getItem(NAME_KEY) || ''; } catch { return ''; } };
+  const rememberName = (name) => { try { localStorage.setItem(NAME_KEY, name); } catch { /* 私密模式 */ } };
 
   fb.onAuthStateChanged(auth, (user) => {
     state.user = user;
@@ -159,13 +173,19 @@ export async function initElementMarkup(opts = {}) {
 
   async function save(body) {
     const { selector, relX, relY } = state.pending;
+    // 匿名：名字用填的，留空就是「未署名」——不假裝知道你是誰。
+    const typed = anonymous ? ui.nameInput.value.trim() : '';
+    if (anonymous) rememberName(typed);
+    const authorName = anonymous
+      ? (typed || '未署名')
+      : (state.user.displayName || state.user.email);
     await fb.addDoc(col, {
       type: 'positional',
       screenId: page(),
       selector, relX, relY,
       body: body.slice(0, 2000),
       authorUid: state.user.uid,
-      authorName: state.user.displayName || state.user.email,
+      authorName,
       authorPhoto: state.user.photoURL || '',
       resolved: false,
       filedAt: null,          // bridge 靠這個欄位認「還沒收進待辦」，見 user-feedback skill
@@ -182,8 +202,9 @@ export async function initElementMarkup(opts = {}) {
     const user = await ensureUser().catch(() => null);
     if (!user) return;
     const next = !mark.resolved;
+    const by = anonymous ? (savedName() || '未署名') : (user.displayName || user.email);
     await fb.updateDoc(docRef(mark.id), next
-      ? { resolved: true, resolvedBy: user.displayName || user.email, resolvedByUid: user.uid, resolvedAt: fb.serverTimestamp() }
+      ? { resolved: true, resolvedBy: by, resolvedByUid: user.uid, resolvedAt: fb.serverTimestamp() }
       : { resolved: false, resolvedBy: '', resolvedByUid: '', resolvedAt: null });
   }
 
@@ -214,7 +235,8 @@ export async function initElementMarkup(opts = {}) {
       relX: rect.width ? +(((e.clientX - rect.left) / rect.width) * 100).toFixed(2) : 50,
       relY: rect.height ? +(((e.clientY - rect.top) / rect.height) * 100).toFixed(2) : 50,
     };
-    openInput(ui, { x: e.clientX, y: e.clientY, selector: state.pending.selector, user });
+    openInput(ui, { x: e.clientX, y: e.clientY, selector: state.pending.selector, user,
+      anonymous, savedName: savedName() });
   });
 
   ui.ta.addEventListener('input', () => { ui.send.disabled = !ui.ta.value.trim(); });
