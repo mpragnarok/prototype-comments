@@ -151,11 +151,31 @@ export async function initElementMarkup(opts = {}) {
   const savedName = () => { try { return localStorage.getItem(NAME_KEY) || ''; } catch { return ''; } };
   const rememberName = (name) => { try { localStorage.setItem(NAME_KEY, name); } catch { /* 私密模式 */ } };
 
-  fb.onAuthStateChanged(auth, (user) => {
-    state.user = user;
+  /**
+   * 按鈕文字要自己說清楚會發生什麼事。
+   *
+   * 先前具名模式的按鈕跟匿名版一樣寫「給回饋」，「按下去會跳登入」只寫在 title 裡——
+   * 手機上看不到 tooltip，所以使用者的感受是「沒有看到 Google 登入」。
+   * 畫面上看不出來的狀態，等於不存在。
+   */
+  function refreshFab() {
+    if (state.marking) { ui.fab.textContent = '✕ 結束標記'; return; }
+    const needsSignIn = !anonymous && !state.user;
+    ui.fab.textContent = needsSignIn ? '🔒 用 Google 登入給回饋' : (opts.label || '給回饋');
     ui.fab.title = anonymous
       ? '不需要登入，直接點頁面上的元件留言'
-      : (user ? `以 ${user.displayName || user.email} 的身分標記` : '按一下會先請你用 Google 登入');
+      : (state.user ? `以 ${state.user.displayName || state.user.email} 的身分標記` : '會先請你用 Google 登入');
+  }
+
+  let announcedUser = null;
+  fb.onAuthStateChanged(auth, (user) => {
+    state.user = user;
+    refreshFab();
+    // 具名模式登入成功要說一聲：不然使用者不確定「剛剛那個彈窗到底成功了沒」
+    if (!anonymous && user && user.uid !== announcedUser) {
+      announcedUser = user.uid;
+      toast(`已登入：${user.displayName || user.email}`);
+    }
     // 拿到 uid 之後才知道哪些是「自己的」，要重畫才會長出編輯／刪除
     if (state.marks.length) render();
   });
@@ -240,7 +260,7 @@ export async function initElementMarkup(opts = {}) {
     state.marking = next;
     document.body.classList.toggle('em-marking', next);
     ui.fab.dataset.active = String(next);
-    ui.fab.textContent = next ? '✕ 結束標記' : (opts.label || '給回饋');
+    refreshFab();
     if (!next) { ui.hover.style.display = 'none'; ui.input.classList.remove('show'); state.pending = null; }
   }
 
@@ -347,6 +367,7 @@ export async function initElementMarkup(opts = {}) {
   addEventListener('hashchange', onRoute);
   addEventListener('popstate', onRoute);
 
+  refreshFab();
   subscribe();
 
   return {
