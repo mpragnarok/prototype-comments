@@ -439,6 +439,46 @@ const seedMark = (over = {}) => ({
     assert(done === 1, '在視窗裡按「標成已處理」框要跟著變');
   });
 
+  // 一捲動就關看似省事，但手機的慣性捲動會在點下去的當下就把它關掉——
+  // 線上實測就是這樣：標記在畫面外，點擊前的自動捲動先把視窗關了。
+  await test('捲動不會關掉留言視窗，它跟著那個框走', async () => {
+    const page = await fresh(browser, { user: null, seed: [seedMark({ id: 'a' })] });
+    await page.waitForSelector('.em-tag');
+    await page.click('.em-tag');
+    await page.waitForSelector('.em-pop.show');
+    const before = await page.evaluate(() => {
+      const pop = document.querySelector('.em-pop').getBoundingClientRect();
+      const box = document.querySelector('.em-box').getBoundingClientRect();
+      return { gapY: Math.round(pop.top - box.top), gapX: Math.round(pop.left - box.left) };
+    });
+    await page.evaluate(() => window.scrollBy(0, 120));
+    await page.waitForTimeout(400);
+    const after = await page.evaluate(() => {
+      const el = document.querySelector('.em-pop');
+      if (!el.classList.contains('show')) return { closed: true };
+      const pop = el.getBoundingClientRect();
+      const box = document.querySelector('.em-box').getBoundingClientRect();
+      return { closed: false, gapY: Math.round(pop.top - box.top), gapX: Math.round(pop.left - box.left) };
+    });
+    await page.close();
+    assert(!after.closed, '捲動不該關掉視窗');
+    assert(Math.abs(after.gapY - before.gapY) <= 2 && Math.abs(after.gapX - before.gapX) <= 2,
+      `視窗要跟著框走，捲動前後的相對位置應不變（before ${JSON.stringify(before)} after ${JSON.stringify(after)}）`);
+  });
+
+  await test('視窗顯示中的那則被刪掉 → 視窗收起來', async () => {
+    const page = await fresh(browser, { user: null });
+    await markOn(page, '#btn-step', '刪掉之後視窗要消失');
+    await page.click('.em-tag');
+    await page.waitForSelector('.em-pop.show');
+    await page.click('.em-pop .del');
+    await page.click('.del-yes');
+    await page.waitForTimeout(500);
+    const shown = await page.evaluate(() => document.querySelector('.em-pop').classList.contains('show'));
+    await page.close();
+    assert(!shown, '那則都刪了，視窗不該還停在畫面上說著不存在的東西');
+  });
+
   await test('點視窗以外的地方就收起來', async () => {
     const page = await fresh(browser, { user: null, seed: [seedMark({ id: 'a' })] });
     await page.waitForSelector('.em-tag');
