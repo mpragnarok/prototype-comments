@@ -130,13 +130,39 @@ export async function initElementMarkup(opts = {}) {
 
   const anonymous = (opts.auth || 'anonymous') !== 'google';
 
+  /**
+   * 手機一律走 redirect，不用 popup。
+   *
+   * `signInWithPopup` 在手機瀏覽器常被當成彈出廣告直接擋掉，而且擋掉時
+   * 未必丟得出錯誤——使用者的感受是「按了完全沒動靜」，實際踩過一次。
+   * redirect 是整頁跳走再回來，沒有彈窗可擋。
+   */
+  const isMobile = () => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  const REDIRECT_FALLBACK = ['auth/popup-blocked', 'auth/popup-closed-by-user',
+    'auth/operation-not-supported-in-this-environment', 'auth/cancelled-popup-request'];
+
+  async function signInWithGoogle() {
+    const provider = new fb.GoogleAuthProvider();
+    if (isMobile()) {
+      await fb.signInWithRedirect(auth, provider);   // 頁面會離開，這裡不會回來
+      return null;
+    }
+    try {
+      return (await fb.signInWithPopup(auth, provider)).user;
+    } catch (error) {
+      if (!REDIRECT_FALLBACK.includes(error?.code)) throw error;
+      // 桌機也可能擋彈窗（擴充功能、嚴格設定）→ 退回 redirect，而不是放著不管
+      console.warn('[element-markup] 彈窗被擋，改用整頁跳轉登入', error.code);
+      await fb.signInWithRedirect(auth, provider);
+      return null;
+    }
+  }
+
   async function ensureUser() {
     if (state.user) return state.user;
     try {
-      const cred = anonymous
-        ? await fb.signInAnonymously(auth)
-        : await fb.signInWithPopup(auth, new fb.GoogleAuthProvider());
-      return cred.user;
+      if (anonymous) return (await fb.signInAnonymously(auth)).user;
+      return await signInWithGoogle();
     } catch (error) {
       const known = SIGN_IN_ERRORS[error?.code];
       if (known) toast(known);
@@ -168,6 +194,16 @@ export async function initElementMarkup(opts = {}) {
   }
 
   let announcedUser = null;
+  // 從 Google 跳轉回來時把結果收下。不處理的話 onAuthStateChanged 仍會拿到 user，
+  // 但錯誤（例如網域沒授權）會靜靜消失，使用者只看到「跳出去又跳回來，還是沒登入」。
+  if (!anonymous) {
+    fb.getRedirectResult(auth).catch((error) => {
+      const known = SIGN_IN_ERRORS[error?.code];
+      toast(known || '登入沒有完成，再試一次。');
+      console.error('[element-markup] 跳轉登入失敗', error?.code || error);
+    });
+  }
+
   fb.onAuthStateChanged(auth, (user) => {
     state.user = user;
     refreshFab();

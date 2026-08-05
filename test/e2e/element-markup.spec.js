@@ -571,6 +571,49 @@ const seedMark = (over = {}) => ({
     assert(popRight <= 390 + 1, `留言視窗跑出畫面右邊：right=${popRight}`);
   });
 
+  // 使用者回報「登入版完全沒動靜」：手機瀏覽器把 signInWithPopup 當彈出廣告擋掉，
+  // 而且擋掉時未必丟得出錯誤，所以畫面上什麼都不會發生。
+  await test('手機走整頁跳轉登入，不用會被擋掉的彈窗', async () => {
+    const page = await browser.newPage({
+      viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true,
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+    });
+    await page.goto(`http://localhost:${PORT}/test/e2e/element-markup.harness.html`);
+    await page.waitForFunction(() => window.__emTest && window.__emTest.ready);
+    await page.evaluate(() => {
+      const fb = window.__emTest.createMockFirebase({ user: null, comments: [] });
+      window.__fb = fb;
+      return window.__emTest.init(fb, { auth: 'google' });
+    });
+    await page.waitForTimeout(300);
+    await page.click('.em-fab');
+    await page.waitForTimeout(500);
+    const calls = await page.evaluate(() => window.__fb.__authCalls());
+    await page.close();
+    assert(calls.redirect === 1, `手機應走 redirect，實際 redirect=${calls.redirect} popup=${calls.popup}`);
+    assert(calls.popup === 0, '手機不該用 popup——會被擋掉而且沒有錯誤訊息');
+  });
+
+  await test('桌機用彈窗；彈窗被擋時退回整頁跳轉', async () => {
+    const page = await fresh(browser, { user: null, init: { auth: 'google' } });
+    await page.click('.em-fab');
+    await page.waitForTimeout(400);
+    const normal = await page.evaluate(() => window.__fb.__authCalls());
+    assert(normal.popup === 1 && normal.redirect === 0, `桌機該用彈窗，實際 ${JSON.stringify(normal)}`);
+
+    // 讓彈窗失敗，看有沒有退回 redirect
+    const page2 = await fresh(browser, { user: null, init: { auth: 'google' } });
+    await page2.evaluate(() => {
+      const fb = window.__fb;
+      fb.signInWithPopup = async () => { const e = new Error('blocked'); e.code = 'auth/popup-blocked'; throw e; };
+    });
+    await page2.click('.em-fab');
+    await page2.waitForTimeout(500);
+    const fallback = await page2.evaluate(() => window.__fb.__authCalls());
+    await page.close(); await page2.close();
+    assert(fallback.redirect === 1, `彈窗被擋時要退回整頁跳轉，實際 ${JSON.stringify(fallback)}`);
+  });
+
   await test('回覆／子留言不會被畫成獨立的框', async () => {
     const page = await fresh(browser, {
       seed: [seedMark({ id: 'a' }), seedMark({ id: 'r', parentId: 'a', body: '我也覺得' })],

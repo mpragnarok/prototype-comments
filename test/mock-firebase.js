@@ -17,6 +17,8 @@ export function createMockFirebase(initial = {}) {
     snapListeners: new Set(), // onSnapshot callbacks
     authListeners: new Set(), // onAuthStateChanged callbacks
     user: initial.user || null,
+    redirectCalls: 0,
+    popupCalls: 0,
     apps: [],                 // { name, options } — 見下方 app 區塊
   };
   (initial.comments || []).forEach(c => {
@@ -99,10 +101,16 @@ export function createMockFirebase(initial = {}) {
       return () => state.authListeners.delete(cb);
     },
     signInWithPopup: async () => {
+      state.popupCalls += 1;
       state.user = initial.user || { uid: 'u1', email: 'test@e2e.local', displayName: 'E2E User' };
       emitAuth();
       return { user: state.user };
     },
+    // redirect 版登入：真實情況會整頁跳走再回來，測試裡只記下「被呼叫了」——
+    // 手機該走這條而不是 popup（popup 常被擋，而且擋掉時未必丟得出錯誤）。
+    signInWithRedirect: async () => { state.redirectCalls += 1; },
+    getRedirectResult: async () => ({ user: null }),
+
     // 匿名登入沒有 OAuth 流程，只是換一個 uid——在 LINE／FB 的內建瀏覽器裡也能用。
     // 沒有 displayName／email 是重點：名字得由使用者自己填。
     signInAnonymously: async () => {
@@ -114,6 +122,7 @@ export function createMockFirebase(initial = {}) {
 
     // ─ test controls ─
     __setUser: (u) => { state.user = u; emitAuth(); },
+    __authCalls: () => ({ redirect: state.redirectCalls, popup: state.popupCalls }),
     __seed: (c) => { const id = c.id || `m${++idSeq}`; state.docs.set(id, { ...c }); emitSnap(); return id; },
     __docs: () => docsArray().map(d => ({ id: d.id, ...d.data() })),
     __state: state,
