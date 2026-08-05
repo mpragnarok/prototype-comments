@@ -21,7 +21,8 @@
  * user-feedback 的 bridge 已經在讀它，不必為這支再寫一條收件通道。
  */
 import { cssSelectorFor } from './draw/selectors.js';
-import { mountChrome, openInput, renderMarks, highlightMark, placeBox, toast } from './markup-ui.js';
+import { mountChrome, openInput, renderMarks, highlightMark, placeBox, toast,
+  showMarkPopover, hideMarkPopover } from './markup-ui.js';
 
 const FB = 'https://www.gstatic.com/firebasejs/10.12.2';
 
@@ -152,7 +153,11 @@ export async function initElementMarkup(opts = {}) {
 
   fb.onAuthStateChanged(auth, (user) => {
     state.user = user;
-    ui.fab.title = user ? `以 ${user.displayName || user.email} 的身分標記` : '按一下會先請你用 Google 登入';
+    ui.fab.title = anonymous
+      ? '不需要登入，直接點頁面上的元件留言'
+      : (user ? `以 ${user.displayName || user.email} 的身分標記` : '按一下會先請你用 Google 登入');
+    // 拿到 uid 之後才知道哪些是「自己的」，要重畫才會長出編輯／刪除
+    if (state.marks.length) render();
   });
 
   // ── 資料 ────────────────────────────────────────────────────────────────────
@@ -191,6 +196,28 @@ export async function initElementMarkup(opts = {}) {
       filedAt: null,          // bridge 靠這個欄位認「還沒收進待辦」，見 user-feedback skill
       createdAt: fb.serverTimestamp(),
     });
+  }
+
+  /** 只有自己標的才給改／刪——rules 也是這樣擋的，前端只是不要顯示做不到的按鈕。 */
+  const isMine = (mark) => !!state.user && mark.authorUid === state.user.uid;
+
+  async function editMark(mark, body) {
+    try {
+      await fb.updateDoc(docRef(mark.id), { body: body.slice(0, 2000), editedAt: fb.serverTimestamp() });
+    } catch (error) {
+      console.error('[element-markup] 改不動', error);
+      toast('改不動，重新整理後再試一次。');
+    }
+  }
+
+  async function deleteMark(mark) {
+    try {
+      await fb.deleteDoc(docRef(mark.id));
+      toast('已刪除');
+    } catch (error) {
+      console.error('[element-markup] 刪不掉', error);
+      toast('刪不掉——只有自己標的才能刪。');
+    }
   }
 
   /**
@@ -271,22 +298,44 @@ export async function initElementMarkup(opts = {}) {
     if (row) { row.scrollIntoView({ block: 'center' }); highlightMark(id); }
   }
 
-  function render() {
-    renderMarks(ui, state.marks, {
-      onToggle: (m) => void toggleResolved(m),
-      onFocus: (m) => {
-        let node = null;
-        try { node = document.querySelector(m.selector); } catch { /* 壞掉的 selector */ }
-        node?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        highlightMark(m.id);
-      },
-      onFocusId: (id) => openDrawer(id),
-    });
+  // 點頁面上的標記 → 就地跳出那一則，而不是把人丟進右側清單裡自己找。
+  function popoverFor(id, at) {
+    const index = state.marks.findIndex(m => m.id === id);
+    if (index < 0) return;
+    highlightMark(id);
+    showMarkPopover(ui, state.marks[index], index, handlers(), at);
   }
 
-  const reflow = () => render();
+  const handlers = () => ({
+    isMine,
+    onEdit: (m, body) => void editMark(m, body),
+    onDelete: (m) => void deleteMark(m),
+    onToggle: (m) => void toggleResolved(m),
+    onFocus: (m) => {
+      let node = null;
+      try { node = document.querySelector(m.selector); } catch { /* 壞掉的 selector */ }
+      node?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      highlightMark(m.id);
+    },
+    onFocusId: popoverFor,
+  });
+
+  function render() {
+    renderMarks(ui, state.marks, handlers());
+  }
+
+  const reflow = () => { hideMarkPopover(ui); render(); };
   addEventListener('resize', reflow);
   addEventListener('scroll', reflow, { passive: true });
+  // 點到 popover 以外的地方就收起來——包含頁面本身與別的標記
+  const onDocClick = (e) => {
+    if (!ui.pop.classList.contains('show')) return;
+    if (ui.pop.contains(e.target)) return;
+    hideMarkPopover(ui);
+  };
+  const onEsc = (e) => { if (e.key === 'Escape') hideMarkPopover(ui); };
+  document.addEventListener('click', onDocClick, true);
+  document.addEventListener('keydown', onEsc);
   // SPA 換頁：網址變了就換一批標記（screenId 是以 page() 求值的）
   const onRoute = () => subscribe();
   addEventListener('hashchange', onRoute);
@@ -300,6 +349,8 @@ export async function initElementMarkup(opts = {}) {
       state.unsub?.();
       removeEventListener('resize', reflow);
       removeEventListener('scroll', reflow);
+      document.removeEventListener('click', onDocClick, true);
+      document.removeEventListener('keydown', onEsc);
       removeEventListener('hashchange', onRoute);
       removeEventListener('popstate', onRoute);
       document.querySelectorAll('.em-box').forEach(n => n.remove());

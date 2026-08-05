@@ -299,6 +299,158 @@ const seedMark = (over = {}) => ({
     assert(r.tags === 2 && r.rows === 2 && r.drawerOpen, `標籤與紀錄面板應照常，實際 ${JSON.stringify(r)}`);
   });
 
+  // 留言的人事後想改字、想撤回，是很正常的事。
+  await test('自己標的可以改內容', async () => {
+    const page = await fresh(browser, { user: null });
+    await markOn(page, '#btn-step', '原本寫的');
+    await page.click('.em-tab');
+    await page.waitForSelector('.em-acts .edit');
+    await page.click('.em-acts .edit');
+    await page.waitForSelector('.em-edit');
+    await page.fill('.em-edit', '改過之後的內容');
+    await page.click('.em-acts .go');
+    await page.waitForTimeout(400);
+    const r = await page.evaluate(() => ({
+      doc: window.__fb.__docs().find(d => /改過之後/.test(d.body || '')),
+      rowText: document.querySelector('.em-row .body')?.textContent,
+      stillEditing: !!document.querySelector('.em-edit'),
+    }));
+    await page.close();
+    assert(r.doc, '內容應該被改掉');
+    assert(r.rowText === '改過之後的內容', `列表要跟著更新，實際「${r.rowText}」`);
+    assert(!r.stillEditing, '存完要收起編輯框');
+  });
+
+  await test('編輯按取消不動任何資料', async () => {
+    const page = await fresh(browser, { user: null });
+    await markOn(page, '#btn-step', '不要動我');
+    await page.click('.em-tab');
+    await page.click('.em-acts .edit');
+    await page.fill('.em-edit', '亂改的');
+    await page.click('.edit-cancel');
+    await page.waitForTimeout(300);
+    const r = await page.evaluate(() => ({
+      doc: window.__fb.__docs().find(d => d.body === '不要動我'),
+      editing: !!document.querySelector('.em-edit'),
+    }));
+    await page.close();
+    assert(r.doc, '取消不該改到資料');
+    assert(!r.editing, '取消要收起編輯框');
+  });
+
+  await test('刪除要二次確認，確認後才真的消失', async () => {
+    const page = await fresh(browser, { user: null });
+    await markOn(page, '#btn-step', '待會要刪掉');
+    await page.click('.em-tab');
+    await page.waitForSelector('.em-acts .del');
+    await page.click('.em-acts .del');                 // 第一下只是問
+    await page.waitForTimeout(250);
+    const asked = await page.evaluate(() => ({
+      ask: !!document.querySelector('.em-ask'),
+      stillThere: window.__fb.__docs().some(d => d.body === '待會要刪掉'),
+    }));
+    await page.click('.del-yes');                      // 第二下才刪
+    await page.waitForTimeout(500);
+    const after = await page.evaluate(() => ({
+      docs: window.__fb.__docs().filter(d => d.body === '待會要刪掉').length,
+      boxes: document.querySelectorAll('.em-box').length,
+      rows: document.querySelectorAll('.em-row').length,
+    }));
+    await page.close();
+    assert(asked.ask && asked.stillThere, '第一下只該問，不該刪');
+    assert(after.docs === 0, '確認後資料要真的沒了');
+    assert(after.boxes === 0 && after.rows === 0, '框與列表要跟著消失');
+  });
+
+  await test('刪除的確認可以取消', async () => {
+    const page = await fresh(browser, { user: null });
+    await markOn(page, '#btn-step', '別刪我');
+    await page.click('.em-tab');
+    await page.click('.em-acts .del');
+    await page.waitForSelector('.em-ask');
+    await page.click('.del-no');
+    await page.waitForTimeout(300);
+    const r = await page.evaluate(() => ({
+      docs: window.__fb.__docs().filter(d => d.body === '別刪我').length,
+      ask: !!document.querySelector('.em-ask'),
+    }));
+    await page.close();
+    assert(r.docs === 1, '取消不該刪掉');
+    assert(!r.ask, '取消後要回到原本的按鈕');
+  });
+
+  // 界線：別人的標記連按鈕都不該出現（rules 也會擋，前端只是不顯示做不到的事）
+  await test('別人的標記不出現編輯與刪除', async () => {
+    const page = await fresh(browser, { user: null, seed: [seedMark({ id: 'other', authorUid: 'someone-else' })] });
+    await page.click('.em-tab');
+    await page.waitForSelector('.em-row');
+    const r = await page.evaluate(() => ({
+      edit: document.querySelectorAll('.em-acts .edit').length,
+      del: document.querySelectorAll('.em-acts .del').length,
+      toggle: document.querySelectorAll('.em-acts .toggle').length,
+    }));
+    await page.close();
+    assert(r.edit === 0 && r.del === 0, '別人的標記不該有編輯／刪除');
+    assert(r.toggle === 1, '但「標成已處理」仍要能按——收回饋的人得標得動別人的留言');
+  });
+
+  // 點頁面上的標記，使用者指的就是那一則——當場給他看，不要丟進清單裡自己找。
+  await test('點頁面上的標記 → 就地跳出那則留言（不是開側邊面板）', async () => {
+    const page = await fresh(browser, { user: null, seed: [seedMark({ id: 'a' })] });
+    await page.waitForSelector('.em-tag');
+    await page.click('.em-tag');
+    await page.waitForSelector('.em-pop.show', { timeout: 3000 });
+    const r = await page.evaluate(() => {
+      const pop = document.querySelector('.em-pop');
+      const rect = pop.getBoundingClientRect();
+      return {
+        body: pop.querySelector('.body')?.textContent,
+        who: pop.querySelector('.top span:nth-child(2)')?.textContent,
+        state: pop.querySelector('.state')?.textContent,
+        drawerOpen: document.querySelector('.em-drawer').classList.contains('open'),
+        inViewport: rect.left >= 0 && rect.top >= 0
+          && rect.right <= innerWidth + 1 && rect.bottom <= innerHeight + 1,
+        hasToggle: !!pop.querySelector('.toggle'),
+      };
+    });
+    await page.close();
+    assert(r.body === '這顆按鈕看不懂', `內容不對：「${r.body}」`);
+    assert(/Jenny/.test(r.who), `應顯示標記的人，實際「${r.who}」`);
+    assert(/待處理/.test(r.state), `應顯示狀態，實際「${r.state}」`);
+    assert(!r.drawerOpen, '不該連帶把側邊面板打開——那正是要取代的行為');
+    assert(r.inViewport, '視窗不能跑出畫面外');
+    assert(r.hasToggle, '在這裡就要能標成已處理');
+  });
+
+  await test('留言視窗裡就能標成已處理、也能刪自己的', async () => {
+    const page = await fresh(browser, { user: null });
+    await markOn(page, '#btn-step', '就地操作測試');
+    await page.click('.em-tag');
+    await page.waitForSelector('.em-pop.show');
+    const own = await page.evaluate(() => ({
+      edit: !!document.querySelector('.em-pop .edit'),
+      del: !!document.querySelector('.em-pop .del'),
+    }));
+    await page.click('.em-pop .toggle');
+    await page.waitForTimeout(400);
+    const done = await page.evaluate(() => document.querySelectorAll('.em-box.done').length);
+    await page.close();
+    assert(own.edit && own.del, '自己的標記在視窗裡也要能編輯與刪除');
+    assert(done === 1, '在視窗裡按「標成已處理」框要跟著變');
+  });
+
+  await test('點視窗以外的地方就收起來', async () => {
+    const page = await fresh(browser, { user: null, seed: [seedMark({ id: 'a' })] });
+    await page.waitForSelector('.em-tag');
+    await page.click('.em-tag');
+    await page.waitForSelector('.em-pop.show');
+    await page.mouse.click(20, 400);              // 點頁面空白處
+    await page.waitForTimeout(300);
+    const shown = await page.evaluate(() => document.querySelector('.em-pop').classList.contains('show'));
+    await page.close();
+    assert(!shown, '點別處應該收起來');
+  });
+
   await test('回覆／子留言不會被畫成獨立的框', async () => {
     const page = await fresh(browser, {
       seed: [seedMark({ id: 'a' }), seedMark({ id: 'r', parentId: 'a', body: '我也覺得' })],

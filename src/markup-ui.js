@@ -52,7 +52,14 @@ body.em-marking .em-shield{display:block}
   background:rgba(99,90,143,.12);color:${ACCENT_STRONG}}
 .em-row.done .state{background:rgba(13,122,79,.14);color:${DONE}}
 .em-row .body{font-size:13px;line-height:1.5;color:#1e1e1e;white-space:pre-wrap;word-break:break-word}
-.em-row .toggle{margin-top:7px;font-size:11.5px;color:${ACCENT};background:none;border:none;padding:0;cursor:pointer}
+.em-acts{display:flex;align-items:center;gap:10px;margin-top:7px;flex-wrap:wrap}
+.em-acts button{font-size:11.5px;color:${ACCENT};background:none;border:none;padding:0;cursor:pointer}
+.em-acts button.del{color:#c0392b}
+.em-acts button.go{color:#fff;background:${ACCENT};border-radius:6px;padding:4px 12px}
+.em-acts button:disabled{opacity:.5;cursor:default}
+.em-ask{font-size:11.5px;color:#c0392b}
+.em-edit{width:100%;min-height:64px;margin-top:6px;border:1px solid ${ACCENT};border-radius:7px;padding:7px;
+  font:inherit;font-size:13px;resize:vertical;color:#1e1e1e;background:#fff}
 .em-note{color:#6b7080;font-size:12.5px;text-align:center;padding:22px 10px;line-height:1.6}
 .em-input{position:fixed;z-index:${Z + 1100};width:320px;max-width:92vw;background:#fff;border-radius:12px;
   box-shadow:0 8px 32px rgba(0,0,0,.24);padding:14px;display:none;font:14px/1.5 system-ui,-apple-system,sans-serif}
@@ -70,15 +77,27 @@ body.em-marking .em-shield{display:block}
   border:1px solid #e3e5ea;background:#fff;color:#1e1e1e}
 .em-input button.go{background:${ACCENT};color:#fff;border-color:${ACCENT}}
 .em-input button:disabled{opacity:.5;cursor:default}
+.em-pop{position:fixed;z-index:${Z + 1150};width:300px;max-width:92vw;background:#fff;border-radius:12px;
+  box-shadow:0 8px 32px rgba(0,0,0,.24);padding:13px;display:none;font:14px/1.55 system-ui,-apple-system,sans-serif}
+.em-pop.show{display:block}
+.em-pop .top{display:flex;align-items:center;gap:7px;font-size:11.5px;color:#6b7080;margin-bottom:6px}
+.em-pop .num{background:${ACCENT};color:#fff;border-radius:4px;font:700 10px/1 system-ui;padding:3px 5px}
+.em-pop.done .num{background:${DONE}}
+.em-pop .state{margin-left:auto;font-size:10.5px;padding:2px 7px;border-radius:9px;
+  background:rgba(99,90,143,.12);color:${ACCENT_STRONG}}
+.em-pop.done .state{background:rgba(13,122,79,.14);color:${DONE}}
+.em-pop .x{border:none;background:none;cursor:pointer;color:#6b7080;font-size:17px;line-height:1;padding:0 2px}
+.em-pop .body{font-size:13.5px;color:#1e1e1e;white-space:pre-wrap;word-break:break-word}
 .em-err{color:#c0392b;font-size:12px;margin:8px 0 0}
 .em-toast{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);z-index:${Z + 1200};background:#1e1e1e;
   color:#fff;padding:9px 16px;border-radius:18px;font:13px/1 system-ui,-apple-system,sans-serif;box-shadow:0 3px 14px rgba(0,0,0,.3)}
 @media (prefers-color-scheme:dark){
-  .em-drawer,.em-row,.em-input{background:#1e2026;border-color:#33363f}
+  .em-drawer,.em-row,.em-input,.em-pop{background:#1e2026;border-color:#33363f}
+  .em-pop .body{color:#e8e9ee}
   .em-hd{border-color:#33363f}
   .em-list{background:#16171b}
   .em-row .body{color:#e8e9ee}
-  .em-input textarea,.em-input button,.em-name{background:#16171b;border-color:#33363f;color:#e8e9ee}
+  .em-input textarea,.em-input button,.em-name,.em-edit{background:#16171b;border-color:#33363f;color:#e8e9ee}
   .em-input button.go{background:${ACCENT};color:#fff}
 }
 `;
@@ -108,6 +127,7 @@ export function mountChrome({ label, onToggleMark, onOpenDrawer }) {
   const tab = mark(el('button', 'em-tab', { type: 'button', textContent: '標注紀錄' }));
   const drawer = mark(el('aside', 'em-drawer'));
   const input = mark(el('div', 'em-input'));
+  const pop = mark(el('div', 'em-pop'));
 
   drawer.innerHTML =
     '<div class="em-hd"><span class="t">標注紀錄</span><span class="n">0</span>'
@@ -120,13 +140,13 @@ export function mountChrome({ label, onToggleMark, onOpenDrawer }) {
   // 名字欄位只有匿名模式會用到（具名模式由 Google 帳號提供）。先建好，openInput 決定顯不顯示。
   const nameInput = el('input', 'em-name', { type: 'text', placeholder: '你的名字（可不填）', maxLength: 30 });
 
-  document.body.append(shield, hover, fab, tab, drawer, input);
+  document.body.append(shield, hover, fab, tab, drawer, input, pop);
   fab.onclick = onToggleMark;
   tab.onclick = () => onOpenDrawer();
   drawer.querySelector('.x').onclick = () => drawer.classList.remove('open');
 
   return {
-    shield, hover, fab, tab, drawer, input,
+    shield, hover, fab, tab, drawer, input, pop,
     count: drawer.querySelector('.n'),
     list: drawer.querySelector('.em-list'),
     ta: input.querySelector('textarea'),
@@ -135,7 +155,7 @@ export function mountChrome({ label, onToggleMark, onOpenDrawer }) {
     target: input.querySelector('.target'),
     send: input.querySelector('.go'),
     cancel: input.querySelector('.cancel'),
-    destroy: () => [shield, hover, fab, tab, drawer, input].forEach(n => n.remove()),
+    destroy: () => [shield, hover, fab, tab, drawer, input, pop].forEach(n => n.remove()),
   };
 }
 
@@ -177,14 +197,78 @@ function drawBox(mark, index, onTagClick) {
   const tag = el('span', 'em-tag', {
     textContent: `${mark.resolved ? '✓ ' : ''}${index + 1}　${mark.authorName || '未署名'}`,
   });
-  tag.onclick = (e) => { e.stopPropagation(); onTagClick(mark.id); };
+  tag.onclick = (e) => { e.stopPropagation(); onTagClick(mark.id, { x: e.clientX, y: e.clientY }); };
   box.append(tag);
   document.body.append(box);
   return box;
 }
 
+/** 一列底下的動作。自己的標記多兩個：改內容、刪掉。 */
+function rowActions(row, mark, { onToggle, onEdit, onDelete, isMine }) {
+  const bar = el('div', 'em-acts');
+  const btn = (cls, text, fn) => {
+    const b = el('button', cls, { type: 'button', textContent: text });
+    b.onclick = (e) => { e.stopPropagation(); fn(); };
+    return b;
+  };
+  bar.append(btn('toggle', mark.resolved ? '↩ 標回待處理' : '✓ 標成已處理', () => onToggle(mark)));
+  if (isMine) {
+    bar.append(btn('edit', '編輯', () => startEdit(row, mark, onEdit)));
+    bar.append(btn('del', '刪除', () => confirmDelete(bar, mark, onDelete)));
+  }
+  return bar;
+}
+
+/** 內容改成可編輯。取消就還原，不動任何資料。 */
+function startEdit(row, mark, onEdit) {
+  if (row.querySelector('.em-edit')) return;   // row 也可能是 popover——兩者結構相同（.body + .em-acts）              // 連按兩次不要疊出第二個
+  const body = row.querySelector('.body');
+  const acts = row.querySelector('.em-acts');
+  const ta = el('textarea', 'em-edit');
+  ta.value = mark.body || '';
+  const save = el('button', 'go', { type: 'button', textContent: '儲存' });
+  const cancel = el('button', 'edit-cancel', { type: 'button', textContent: '取消' });
+  const bar = el('div', 'em-acts em-edit-acts');
+  bar.append(save, cancel);
+  body.style.display = 'none';
+  acts.style.display = 'none';
+  row.append(ta, bar);
+  ta.focus();
+  const close = () => { ta.remove(); bar.remove(); body.style.display = ''; acts.style.display = ''; };
+  cancel.onclick = (e) => { e.stopPropagation(); close(); };
+  save.onclick = (e) => {
+    e.stopPropagation();
+    const next = ta.value.trim();
+    if (!next) return;                                     // 空的就是刪除，那要走刪除的路徑
+    save.disabled = true;
+    onEdit(mark, next);                                    // snapshot 會重畫整份，不必自己 close
+  };
+}
+
+/**
+ * 刪除要二次確認，但**不用 confirm()**：原生對話框會凍住整個頁面，
+ * 在嵌在 LINE 裡的 WebView 更容易卡死。改成就地換成兩顆按鈕。
+ */
+function confirmDelete(bar, mark, onDelete) {
+  if (bar.dataset.confirming) return;
+  bar.dataset.confirming = '1';
+  const original = [...bar.children];
+  original.forEach(n => { n.style.display = 'none'; });
+  const ask = el('span', 'em-ask', { textContent: '確定刪掉？' });
+  const yes = el('button', 'del del-yes', { type: 'button', textContent: '刪除' });
+  const no = el('button', 'del-no', { type: 'button', textContent: '取消' });
+  const restore = () => {
+    [ask, yes, no].forEach(n => n.remove());
+    original.forEach(n => { n.style.display = ''; });
+    delete bar.dataset.confirming;
+  };
+  no.onclick = (e) => { e.stopPropagation(); restore(); };
+  yes.onclick = (e) => { e.stopPropagation(); yes.disabled = true; onDelete(mark); };
+  bar.append(ask, yes, no);
+}
+
 /** 一則標記 → 抽屜裡的一列。 */
-function drawRow(mark, index, { onToggle, onFocus }) {
+function drawRow(mark, index, handlers) {
   const row = el('div', `em-row${mark.resolved ? ' done' : ''}`);
   row.dataset.markId = mark.id;
   const state = mark.resolved
@@ -192,13 +276,12 @@ function drawRow(mark, index, { onToggle, onFocus }) {
     : '待處理';
   row.innerHTML =
     `<div class="top"><span class="num">${index + 1}</span><span class="nm"></span>`
-    + `<span class="state"></span></div><div class="body"></div>`
-    + `<button type="button" class="toggle">${mark.resolved ? '↩ 標回待處理' : '✓ 標成已處理'}</button>`;
+    + `<span class="state"></span></div><div class="body"></div>`;
   row.querySelector('.nm').textContent = mark.authorName || '未署名';
   row.querySelector('.state').textContent = state;
   row.querySelector('.body').textContent = mark.body || '';
-  row.querySelector('.toggle').onclick = (e) => { e.stopPropagation(); onToggle(mark); };
-  row.onclick = () => onFocus(mark);
+  row.append(rowActions(row, mark, { ...handlers, isMine: handlers.isMine(mark) }));
+  row.onclick = () => handlers.onFocus(mark);
   return row;
 }
 
@@ -229,6 +312,46 @@ export function renderMarks(ui, marks, handlers) {
       textContent: `另有 ${missing} 則標在已經改掉的元件上，找不到位置所以沒列出來（內容還在，收回饋的人讀得到）。`,
     }));
   }
+}
+
+/**
+ * 點頁面上的標記 → 就地跳出那一則。
+ *
+ * 比「打開右側面板再自己找」直覺：使用者指著的就是這一則，
+ * 應該當場給他看，而不是把他丟進一份清單裡。
+ * 動作（標成已處理／編輯／刪除）與面板那邊共用同一組 handler，行為一致。
+ */
+export function showMarkPopover(ui, mark, index, handlers, at) {
+  const pop = ui.pop;
+  pop.className = `em-pop show${mark.resolved ? ' done' : ''}`;
+  pop.innerHTML = '';
+  const head = el('div', 'top');
+  head.append(
+    el('span', 'num', { textContent: String(index + 1) }),
+    el('span', null, { textContent: mark.authorName || '未署名' }),
+    el('span', 'state', {
+      textContent: mark.resolved
+        ? `✓ 已處理${mark.resolvedBy ? `　${mark.resolvedBy}` : ''}`
+        : '待處理',
+    }),
+  );
+  const close = el('button', 'x', { type: 'button', textContent: '×', title: '關閉' });
+  close.onclick = (e) => { e.stopPropagation(); hideMarkPopover(ui); };
+  head.append(close);
+  const body = el('div', 'body', { textContent: mark.body || '' });
+  pop.append(head, body);
+  pop.append(rowActions(pop, mark, { ...handlers, isMine: handlers.isMine(mark) }));
+
+  // 先顯示再量尺寸，才知道會不會超出視窗
+  pop.style.left = '0px'; pop.style.top = '0px';
+  const r = pop.getBoundingClientRect();
+  pop.style.left = `${Math.max(8, Math.min(at.x - r.width / 2, window.innerWidth - r.width - 8))}px`;
+  const above = at.y - r.height - 12;
+  pop.style.top = `${above > 8 ? above : Math.min(at.y + 16, window.innerHeight - r.height - 8)}px`;
+}
+
+export function hideMarkPopover(ui) {
+  ui.pop.classList.remove('show');
 }
 
 export function highlightMark(id) {
