@@ -96,6 +96,10 @@ body.em-marking .em-shield{display:block}
 .em-pop .x{border:none;background:none;cursor:pointer;color:#6b7080;font-size:17px;line-height:1;padding:0 2px}
 .em-pop .body{font-size:13.5px;color:#1e1e1e;white-space:pre-wrap;word-break:break-word}
 .em-err{color:#c0392b;font-size:12px;margin:8px 0 0}
+.em-fail{position:fixed;right:12px;bottom:12px;z-index:${Z + 2000};max-width:min(320px,92vw);
+  background:#c0392b;color:#fff;border-radius:10px;padding:10px 12px;
+  font:12.5px/1.5 system-ui,-apple-system,sans-serif;box-shadow:0 3px 14px rgba(0,0,0,.3)}
+.em-fail b{display:block;font-size:13px;margin-bottom:3px}
 .em-toast{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);z-index:${Z + 1200};background:#1e1e1e;
   color:#fff;padding:9px 16px;border-radius:18px;font:13px/1 system-ui,-apple-system,sans-serif;box-shadow:0 3px 14px rgba(0,0,0,.3)}
 @media (prefers-color-scheme:dark){
@@ -386,6 +390,21 @@ export function hideMarkPopover(ui) {
 
 export function highlightMark(id) {
   document.querySelectorAll('.em-box').forEach(b => b.classList.toggle('sel', b.dataset.markId === String(id)));
+}
+
+/**
+ * 載入失敗要看得見。
+ *
+ * 先前失敗只印 console，而使用者在手機上——他看到的是「回饋按鈕不見了」，
+ * 沒有任何線索，也沒辦法告訴我為什麼。畫面上說一句，勝過十行 log。
+ */
+export function showInitFailure(message) {
+  document.querySelector('.em-fail')?.remove();
+  const box = el('div', 'em-fail');
+  box.setAttribute('data-em', '');
+  box.append(el('b', null, { textContent: '回饋工具沒load起來' }),
+             el('span', null, { textContent: message }));
+  document.body.append(box);
 }
 
 export function toast(message) {
