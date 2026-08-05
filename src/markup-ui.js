@@ -11,6 +11,9 @@ const DONE = '#0d7a4f';
 const Z = 2147482000;
 
 export const MARKUP_STYLES = `
+/* 只對工具自己的 DOM 生效（都帶 data-em），不動 app 的樣式。
+   沒有這行時 width:300 ＋ padding:13 會量成 326，邊界計算全部偏掉。 */
+[data-em], [data-em] *{box-sizing:border-box}
 .em-hover{position:absolute;pointer-events:none;z-index:${Z};border:2px solid ${ACCENT};border-radius:5px;
   background:rgba(99,90,143,.07);transition:top .06s,left .06s,width .06s,height .06s}
 .em-box{position:absolute;pointer-events:none;z-index:${Z + 100};border:2px solid ${ACCENT};border-radius:5px;
@@ -34,8 +37,12 @@ body.em-marking .em-shield{display:block}
 .em-tab:hover{background:${ACCENT_STRONG}}
 .em-drawer{position:fixed;top:0;right:0;bottom:0;z-index:${Z + 1602};width:310px;max-width:90vw;background:#fff;
   border-left:1px solid #e3e5ea;display:flex;flex-direction:column;box-shadow:-2px 0 16px rgba(0,0,0,.12);
-  transform:translateX(100%);transition:transform .22s ease;font-family:system-ui,-apple-system,sans-serif}
-.em-drawer.open{transform:translateX(0)}
+  transform:translateX(100%);font-family:system-ui,-apple-system,sans-serif;
+  /* visibility 是關鍵：只用 transform 推到畫面外，元素仍佔著水平捲動空間，
+     手機上會把整頁撐寬、瀏覽器縮小顯示。visibility:hidden 才真的退出版面計算。
+     transition 延後 visibility，關閉動畫才不會瞬間消失。 */
+  visibility:hidden;transition:transform .22s ease,visibility 0s .22s}
+.em-drawer.open{transform:translateX(0);visibility:visible;transition:transform .22s ease}
 .em-hd{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #eceef2}
 .em-hd .t{color:${ACCENT};font-weight:700;font-size:13px}
 .em-hd .n{background:rgba(99,90,143,.12);color:${ACCENT_STRONG};border-radius:9px;font-size:10px;padding:1px 7px}
@@ -77,7 +84,7 @@ body.em-marking .em-shield{display:block}
   border:1px solid #e3e5ea;background:#fff;color:#1e1e1e}
 .em-input button.go{background:${ACCENT};color:#fff;border-color:${ACCENT}}
 .em-input button:disabled{opacity:.5;cursor:default}
-.em-pop{position:absolute;z-index:${Z + 1150};width:300px;max-width:92vw;background:#fff;border-radius:12px;
+.em-pop{position:fixed;z-index:${Z + 1150};width:300px;max-width:92vw;background:#fff;border-radius:12px;
   box-shadow:0 8px 32px rgba(0,0,0,.24);padding:13px;display:none;font:14px/1.55 system-ui,-apple-system,sans-serif}
 .em-pop.show{display:block}
 .em-pop .top{display:flex;align-items:center;gap:7px;font-size:11.5px;color:#6b7080;margin-bottom:6px}
@@ -343,19 +350,34 @@ export function showMarkPopover(ui, mark, index, handlers, at) {
   pop.append(head, body);
   pop.append(rowActions(pop, mark, { ...handlers, isMine: handlers.isMine(mark) }));
 
-  // 先顯示再量尺寸，才知道會不會超出畫面。
-  // 座標用 page（含捲動位移）而非 viewport：popover 是 absolute 的，跟著頁面走——
-  // 這樣捲動時它會黏在那個框旁邊，不必「一捲動就關掉」。
-  // （一捲就關看似省事，但手機的慣性捲動會在點下去的當下就把它關掉。）
-  pop.style.left = '0px'; pop.style.top = '0px';
-  const r = pop.getBoundingClientRect();
-  const pageX = at.x + window.scrollX;
-  const pageY = at.y + window.scrollY;
-  const maxLeft = document.documentElement.scrollWidth - r.width - 8;
-  pop.style.left = `${Math.max(8, Math.min(pageX - r.width / 2, maxLeft))}px`;
-  const above = pageY - r.height - 12;
-  pop.style.top = `${above > window.scrollY + 8 ? above : pageY + 16}px`;
+  positionPopover(ui);
 }
+
+/**
+ * 把留言視窗對準它那個框。
+ *
+ * 用 `fixed` ＋ viewport 座標，而不是 absolute ＋ page 座標：absolute 的元素若被
+ * 放到頁面右緣外，會把整份文件撐寬——手機瀏覽器只好縮小整頁來容納它，使用者的
+ * 感受是「有個標記一直讓螢幕變小」。fixed 不參與文件尺寸計算，不會有這問題。
+ *
+ * 代價是捲動時要自己重新對準，所以 reflow 會呼叫這支。換來的是「捲動時它跟著
+ * 那個框走」而且永遠不會撐寬頁面——兩件事同時成立。
+ */
+export function positionPopover(ui) {
+  const pop = ui.pop;
+  const id = pop.dataset.markId;
+  if (!id || !pop.classList.contains('show')) return;
+  const box = document.querySelector(`.em-box[data-mark-id="${cssEscapeId(id)}"]`);
+  if (!box) return hideMarkPopover(ui);      // 那個框沒了（selector 失效或被刪）
+  const b = box.getBoundingClientRect();
+  const r = pop.getBoundingClientRect();
+  const view = document.documentElement.clientWidth;
+  pop.style.left = `${Math.max(8, Math.min(b.left + b.width / 2 - r.width / 2, view - r.width - 8))}px`;
+  const above = b.top - r.height - 10;
+  pop.style.top = `${above > 8 ? above : Math.min(b.bottom + 10, window.innerHeight - r.height - 8)}px`;
+}
+
+const cssEscapeId = (v) => (window.CSS && CSS.escape) ? CSS.escape(v) : String(v).replace(/["\\]/g, '\\$&');
 
 export function hideMarkPopover(ui) {
   ui.pop.classList.remove('show');
