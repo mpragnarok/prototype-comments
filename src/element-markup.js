@@ -22,7 +22,7 @@
  */
 import { cssSelectorFor } from './draw/selectors.js';
 import { mountChrome, openInput, renderMarks, highlightMark, placeBox, toast,
-  showMarkPopover, hideMarkPopover, positionPopover } from './markup-ui.js';
+  showMarkPopover, hideMarkPopover, positionPopover, showInitFailure } from './markup-ui.js';
 
 const FB = 'https://www.gstatic.com/firebasejs/10.12.2';
 
@@ -75,6 +75,18 @@ function pickTarget(shield, clientX, clientY) {
 }
 
 export async function initElementMarkup(opts = {}) {
+  try {
+    return await start(opts);
+  } catch (error) {
+    // 掛不起來時在畫面上說一句。只印 console 的話，手機上的使用者看到的是
+    // 「回饋按鈕不見了」而沒有任何線索——連要回報什麼都不知道。
+    console.error('[element-markup] 初始化失敗', error);
+    showInitFailure(error?.message ? String(error.message).slice(0, 160) : String(error).slice(0, 160));
+    return { setMarking() {}, destroy() { document.querySelector('.em-fail')?.remove(); } };
+  }
+}
+
+async function start(opts) {
   if (!opts.projectId) throw new Error('initElementMarkup: projectId is required');
   const fb = opts._firebase || await loadFirebase();
   const config = opts.firebaseConfig || DEMO_CONFIG;
@@ -99,9 +111,15 @@ export async function initElementMarkup(opts = {}) {
     onToggleMark: async () => {
       if (state.marking) return setMarking(false);
       ui.fab.disabled = true;
-      const user = await ensureUser();   // 匿名時使用者無感，只是換一個 uid
-      ui.fab.disabled = false;
-      if (user) setMarking(true);
+      try {
+        const user = await ensureUser();   // 匿名時使用者無感，只是換一個 uid
+        if (user) setMarking(true);
+      } finally {
+        // 一定要解除。走 redirect 時頁面會跳走所以無所謂，但**跳轉沒真的發生**
+        // （被擋、失敗、或環境不支援）時，少了這行按鈕就永遠卡在灰色不能按——
+        // 使用者看到的是「按鈕不見了／按不動」，而畫面上沒有任何原因。
+        ui.fab.disabled = false;
+      }
     },
     onOpenDrawer: (id) => openDrawer(id),
   });

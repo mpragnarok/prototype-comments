@@ -614,6 +614,41 @@ const seedMark = (over = {}) => ({
     assert(fallback.redirect === 1, `彈窗被擋時要退回整頁跳轉，實際 ${JSON.stringify(fallback)}`);
   });
 
+  // 使用者回報「Google 登入後沒辦法出現回饋按鈕」：按下去時按鈕被設成 disabled，
+  // 若跳轉沒真的發生（被擋、失敗、環境不支援），那行「解除 disabled」永遠不會執行，
+  // 按鈕就卡在灰色不能按——看起來像按鈕壞了，畫面上卻沒有任何原因。
+  await test('登入沒成功時，按鈕不會卡在不能按的狀態', async () => {
+    const page = await fresh(browser, { user: null, init: { auth: 'google' } });
+    await page.evaluate(() => {
+      window.__fb.signInWithPopup = async () => { const e = new Error('boom'); e.code = 'auth/internal-error'; throw e; };
+      window.__fb.signInWithRedirect = async () => { throw new Error('redirect 也失敗'); };
+    });
+    await page.click('.em-fab');
+    await page.waitForTimeout(600);
+    const r = await page.evaluate(() => ({
+      disabled: document.querySelector('.em-fab').disabled,
+      marking: document.body.classList.contains('em-marking'),
+    }));
+    await page.close();
+    assert(!r.disabled, '登入失敗後按鈕必須能再按——卡在 disabled 等於按鈕壞了');
+    assert(!r.marking, '沒登入成功就不該進標記模式');
+  });
+
+  await test('掛不起來時畫面上要說一句，而不是靜靜消失', async () => {
+    const page = await browser.newPage({ viewport: { width: 390, height: 780 } });
+    await page.goto(`http://localhost:${PORT}/test/e2e/element-markup.harness.html`);
+    await page.waitForFunction(() => window.__emTest && window.__emTest.ready);
+    await page.evaluate(() => window.__emTest.init(null, { projectId: '' }));  // 缺 projectId → 一定失敗
+    await page.waitForTimeout(400);
+    const r = await page.evaluate(() => ({
+      fail: !!document.querySelector('.em-fail'),
+      text: document.querySelector('.em-fail')?.textContent || '',
+    }));
+    await page.close();
+    assert(r.fail, '初始化失敗時畫面上要看得到，不能只印 console');
+    assert(/projectId/.test(r.text), `訊息要說得出原因，實際「${r.text}」`);
+  });
+
   await test('回覆／子留言不會被畫成獨立的框', async () => {
     const page = await fresh(browser, {
       seed: [seedMark({ id: 'a' }), seedMark({ id: 'r', parentId: 'a', body: '我也覺得' })],
