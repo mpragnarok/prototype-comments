@@ -30,10 +30,34 @@ service cloud.firestore {
     //
     // ⚠ 白名單必須與 src/index.js 的 resolvePayload() 寫入欄位同步：
     //   改 pc.js 寫入欄位時，這份白名單要一起改，然後 `make deploy-rules`。
+    // 匿名標記（src/element-markup.js）。放行的理由與嚴格的限制：
+    //
+    // 收回饋的對象是產品的真實使用者，而連結常常是從 LINE 點開的——Google 封鎖
+    // in-app WebView 的 OAuth（signInWithRedirect 也一樣擋），所以「要求 Google
+    // 登入」等於那些人永遠留不了言。匿名登入不走 OAuth，在哪個瀏覽器都能用。
+    //
+    // 代價由形狀限制擋住：匿名只能建立「元素標記」這一種 doc，欄位、長度、
+    // resolved 初值都鎖死，authorUid 必須是自己的 uid。它寫不出設計審查用的
+    // 討論串、reactions 或決策紀錄——那些仍然只有具名帳號能建。
+    function isAnonMark() {
+      let d = request.resource.data;
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'anonymous'
+        && d.authorUid == request.auth.uid
+        && d.type == 'positional'
+        && d.resolved == false
+        && d.selector is string && d.selector.size() > 0 && d.selector.size() <= 500
+        && d.body is string && d.body.size() > 0 && d.body.size() <= 2000
+        && d.screenId is string && d.screenId.size() <= 300
+        && d.authorName is string && d.authorName.size() <= 50;
+    }
+
     match /prototype-comments/{projectId}/comments/{commentId} {
       allow read: if true;
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() &&
+      allow create: if isSignedIn() || isAnonMark();
+      // 匿名也能把標記標成「已處理」——收回饋的人自己往往也在 LINE 裡看這頁。
+      // 能改的只有收尾那幾個欄位，內容改不動。
+      allow update: if request.auth != null &&
         (request.auth.uid == resource.data.authorUid ||
          request.resource.data.diff(resource.data).affectedKeys()
            .hasOnly(['resolved', 'resolvedBy', 'resolvedByUid', 'resolvedAt',

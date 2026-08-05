@@ -33,16 +33,16 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion fai
 
 const USER = { uid: 'u1', email: 'mina@e2e.local', displayName: 'Mina', photoURL: '' };
 
-async function fresh(browser, { seed = [], user = USER } = {}) {
+async function fresh(browser, { seed = [], user = USER, init = {} } = {}) {
   const page = await browser.newPage({ viewport: { width: 900, height: 760 } });
   page.on('pageerror', e => console.log('     [pageerror]', e.message));
   await page.goto(`http://localhost:${PORT}/test/e2e/element-markup.harness.html`);
   await page.waitForFunction(() => window.__emTest && window.__emTest.ready);
-  await page.evaluate(({ seed, user }) => {
+  await page.evaluate(({ seed, user, init }) => {
     const fb = window.__emTest.createMockFirebase({ user, comments: seed });
     window.__fb = fb;
-    return window.__emTest.init(fb);
-  }, { seed, user });
+    return window.__emTest.init(fb, init);
+  }, { seed, user, init });
   await page.waitForTimeout(300);
   return page;
 }
@@ -155,8 +155,10 @@ const seedMark = (over = {}) => ({
     assert(r.states.some(s => /待處理/.test(s)) && r.states.some(s => /已處理/.test(s)), `狀態文字不對：${r.states}`);
   });
 
-  await test('按「標成已處理」→ 框當場變樣，且不碰 filedAt', async () => {
-    const page = await fresh(browser, { seed: [seedMark({ id: 'a', filedAt: null })] });
+  // 這條特意測**具名**模式（auth:'google'）：署名要是真的 Google 名字。
+  // 匿名模式的對應行為另有一條測試。
+  await test('具名模式按「標成已處理」→ 框變樣、記下是誰、且不碰 filedAt', async () => {
+    const page = await fresh(browser, { seed: [seedMark({ id: 'a', filedAt: null })], init: { auth: 'google' } });
     await page.click('.em-tab');
     await page.waitForSelector('.em-row .toggle');
     await page.click('.em-row .toggle');
@@ -222,6 +224,79 @@ const seedMark = (over = {}) => ({
     await page.close();
     assert(doc.selector === '[data-testid="unique-btn"]',
       `唯一的 testid 應直接當錨點，實際 ${doc.selector}`);
+  });
+
+  // 匿名是**預設**：連結常常是從 LINE 點開的，而 Google 封鎖 in-app WebView 的 OAuth
+  // （signInWithRedirect 也一樣擋）。要求登入等於那些人永遠留不了言。
+  await test('預設匿名：不跳登入也標得了，名字留空就是未署名', async () => {
+    const page = await fresh(browser, { user: null });
+    await markOn(page, '#btn-step', '沒登入也要能講');
+    const doc = await page.evaluate(() => window.__fb.__docs().find(d => d.body === '沒登入也要能講'));
+    await page.close();
+    assert(doc, '匿名應該也存得進去');
+    assert(doc.authorName === '未署名', `名字留空應為「未署名」，實際 ${JSON.stringify(doc.authorName)}`);
+    assert(doc.authorUid && doc.authorUid.startsWith('anon-'), '應該是匿名 uid');
+    assert(doc.selector === '#btn-step', '錨定行為與具名版一致');
+  });
+
+  await test('匿名填了名字就記住，下一則自動帶入', async () => {
+    const page = await fresh(browser, { user: null });
+    await page.click('.em-fab');
+    let box = await page.locator('#btn-step').boundingBox();
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForSelector('.em-input.show');
+    await page.fill('.em-name', 'Jenny');
+    await page.fill('.em-input textarea', '第一則');
+    await page.click('.em-input .go');
+    await page.waitForTimeout(300);
+
+    await page.click('.em-fab');
+    box = await page.locator('#size-014').boundingBox();
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForSelector('.em-input.show');
+    const prefilled = await page.inputValue('.em-name');
+    await page.fill('.em-input textarea', '第二則');
+    await page.click('.em-input .go');
+    await page.waitForTimeout(300);
+
+    const docs = await page.evaluate(() => window.__fb.__docs().filter(d => /第[一二]則/.test(d.body)));
+    await page.close();
+    assert(prefilled === 'Jenny', `第二則應自動帶入名字，實際「${prefilled}」`);
+    assert(docs.length === 2 && docs.every(d => d.authorName === 'Jenny'), '兩則都該是 Jenny');
+  });
+
+  await test('匿名也能把標記標成已處理（收回饋的人常常也在 LINE 裡看）', async () => {
+    const page = await fresh(browser, { user: null, seed: [seedMark({ id: 'a' })] });
+    await page.click('.em-tab');
+    await page.waitForSelector('.em-row .toggle');
+    await page.click('.em-row .toggle');
+    await page.waitForTimeout(400);
+    const r = await page.evaluate(() => ({
+      done: document.querySelectorAll('.em-box.done').length,
+      doc: window.__fb.__docs().find(d => d.id === 'a') || window.__fb.__docs()[0],
+    }));
+    await page.close();
+    assert(r.done === 1, '框要變成已處理樣式');
+    assert(r.doc.resolved === true, 'resolved 應為 true');
+  });
+
+  await test('匿名版的顯示與具名版完全一樣（框、標籤、面板、狀態）', async () => {
+    const page = await fresh(browser, {
+      user: null,
+      seed: [seedMark({ id: 'a' }), seedMark({ id: 'b', selector: '#size-014', resolved: true, resolvedBy: '未署名' })],
+    });
+    await page.click('.em-tab');
+    await page.waitForTimeout(300);
+    const r = await page.evaluate(() => ({
+      boxes: document.querySelectorAll('.em-box').length,
+      done: document.querySelectorAll('.em-box.done').length,
+      tags: document.querySelectorAll('.em-tag').length,
+      rows: document.querySelectorAll('.em-row').length,
+      drawerOpen: document.querySelector('.em-drawer').classList.contains('open'),
+    }));
+    await page.close();
+    assert(r.boxes === 2 && r.done === 1, `框與狀態應與具名版一致，實際 ${JSON.stringify(r)}`);
+    assert(r.tags === 2 && r.rows === 2 && r.drawerOpen, `標籤與紀錄面板應照常，實際 ${JSON.stringify(r)}`);
   });
 
   await test('回覆／子留言不會被畫成獨立的框', async () => {

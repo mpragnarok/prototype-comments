@@ -60,6 +60,8 @@ body.em-marking .em-shield{display:block}
 .em-input .who{font-size:12px;color:#6b7080;margin-bottom:8px;display:flex;align-items:center;gap:6px}
 .em-input .av{width:18px;height:18px;border-radius:50%;object-fit:cover;background:${ACCENT};color:#fff;
   font:700 10px/18px system-ui;text-align:center;flex:none}
+.em-name{flex:1;min-width:0;border:1px solid #e3e5ea;border-radius:6px;padding:4px 8px;
+  font:inherit;font-size:12px;background:transparent;color:inherit}
 .em-input textarea{width:100%;min-height:74px;border:1px solid #e3e5ea;border-radius:8px;padding:8px;
   font:inherit;font-size:13.5px;resize:vertical;color:#1e1e1e;background:#fff}
 .em-input .target{font-size:11.5px;color:#6b7080;margin-top:8px;word-break:break-all}
@@ -76,7 +78,7 @@ body.em-marking .em-shield{display:block}
   .em-hd{border-color:#33363f}
   .em-list{background:#16171b}
   .em-row .body{color:#e8e9ee}
-  .em-input textarea,.em-input button{background:#16171b;border-color:#33363f;color:#e8e9ee}
+  .em-input textarea,.em-input button,.em-name{background:#16171b;border-color:#33363f;color:#e8e9ee}
   .em-input button.go{background:${ACCENT};color:#fff}
 }
 `;
@@ -115,6 +117,8 @@ export function mountChrome({ label, onToggleMark, onOpenDrawer }) {
     + '<div class="target"></div><div class="acts">'
     + '<button type="button" class="cancel">取消</button>'
     + '<button type="button" class="go" disabled>送出</button></div>';
+  // 名字欄位只有匿名模式會用到（具名模式由 Google 帳號提供）。先建好，openInput 決定顯不顯示。
+  const nameInput = el('input', 'em-name', { type: 'text', placeholder: '你的名字（可不填）', maxLength: 30 });
 
   document.body.append(shield, hover, fab, tab, drawer, input);
   fab.onclick = onToggleMark;
@@ -127,6 +131,7 @@ export function mountChrome({ label, onToggleMark, onOpenDrawer }) {
     list: drawer.querySelector('.em-list'),
     ta: input.querySelector('textarea'),
     who: input.querySelector('.who'),
+    nameInput,
     target: input.querySelector('.target'),
     send: input.querySelector('.go'),
     cancel: input.querySelector('.cancel'),
@@ -135,12 +140,21 @@ export function mountChrome({ label, onToggleMark, onOpenDrawer }) {
 }
 
 /** 開啟輸入卡並定位在點擊處附近（貼邊時往內收，不讓它跑出視窗）。 */
-export function openInput(ui, { x, y, selector, user }) {
+export function openInput(ui, { x, y, selector, user, anonymous = false, savedName = '' }) {
   ui.who.innerHTML = '';
-  const avatar = user?.photoURL
-    ? el('img', 'av', { src: user.photoURL, alt: '' })
-    : el('span', 'av', { textContent: (user?.displayName || '?').slice(0, 1) });
-  ui.who.append(avatar, el('span', null, { textContent: user?.displayName || user?.email || '' }));
+  if (anonymous) {
+    // 匿名：名字自己填、可留空。不假裝知道你是誰，也不強迫你告訴我們。
+    ui.nameInput.value = savedName;
+    const initial = () => (ui.nameInput.value.trim() || '?').slice(0, 1);
+    const avatar = el('span', 'av', { textContent: initial() });
+    ui.nameInput.oninput = () => { avatar.textContent = initial(); };
+    ui.who.append(avatar, ui.nameInput);
+  } else {
+    const avatar = user?.photoURL
+      ? el('img', 'av', { src: user.photoURL, alt: '' })
+      : el('span', 'av', { textContent: (user?.displayName || '?').slice(0, 1) });
+    ui.who.append(avatar, el('span', null, { textContent: user?.displayName || user?.email || '' }));
+  }
   ui.target.textContent = selector ? `錨定：${selector}` : '';
   ui.ta.value = '';
   ui.send.disabled = true;
