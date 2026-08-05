@@ -18,22 +18,48 @@ export function nthOfType(el) {
   if (same.length <= 1) return null;
   return same.indexOf(el) + 1;
 }
-// DOM 元素 → 穩定 CSS selector（id 優先 → data-* → nth-of-type 路徑）。可被 querySelector round-trip。
+/**
+ * 這個 selector 是否唯一指回同一個元素。
+ *
+ * 沒有這道驗證的話，id 與 data-* 這兩條捷徑會靜默出錯：MUI 的每個圖示都自帶
+ * `data-testid="ReplayIcon"` 這種名字，同一頁往往有好幾個——標注會錨到第一個，
+ * 也就是**別人身上**，而且完全不會報錯。重複的 id 同理（HTML 沒人強制唯一）。
+ */
+function resolvesTo(sel, el) {
+  const doc = el.ownerDocument;
+  if (!doc || !doc.querySelectorAll) return true;   // 非瀏覽器環境（單測）不擋
+  try {
+    const found = doc.querySelectorAll(sel);
+    return found.length === 1 && found[0] === el;
+  } catch { return false; }                          // escape 不掉的字元 → 當作不可用
+}
+
+// DOM 元素 → 穩定 CSS selector（id 優先 → data-* → nth-of-type 路徑）。
+// 每條捷徑都必須 querySelector round-trip 回同一個元素才採用，否則往下一種退。
 export function cssSelectorFor(el) {
   if (!el || !el.tagName) return null;
-  if (el.id) return '#' + cssEscape(el.id);
+  if (el.id) {
+    const byId = '#' + cssEscape(el.id);
+    if (resolvesTo(byId, el)) return byId;
+  }
   for (const attr of ANCHOR_DATA_ATTRS) {
     const v = el.getAttribute && el.getAttribute(attr);
-    if (v) return `[${attr}="${cssEscape(v)}"]`;
+    if (!v) continue;
+    const byAttr = `[${attr}="${cssEscape(v)}"]`;
+    if (resolvesTo(byAttr, el)) return byAttr;
   }
   const parts = [];
   let cur = el;
   while (cur && cur.tagName) {
     const tag = cur.tagName.toLowerCase();
     if (tag === 'html' || tag === 'body') break;
-    if (cur.id) { parts.unshift('#' + cssEscape(cur.id)); break; }
-    const v = cur.getAttribute && ANCHOR_DATA_ATTRS.map(a => [a, cur.getAttribute(a)]).find(([, x]) => x);
-    if (v) { parts.unshift(`[${v[0]}="${cssEscape(v[1])}"]`); break; }
+    if (cur.id) {
+      const byId = '#' + cssEscape(cur.id);
+      if (resolvesTo(byId, cur)) { parts.unshift(byId); break; }
+    }
+    const hit = cur.getAttribute
+      && ANCHOR_DATA_ATTRS.map(a => [a, cur.getAttribute(a)]).find(([a, x]) => x && resolvesTo(`[${a}="${cssEscape(x)}"]`, cur));
+    if (hit) { parts.unshift(`[${hit[0]}="${cssEscape(hit[1])}"]`); break; }
     const n = nthOfType(cur);
     parts.unshift(n ? `${tag}:nth-of-type(${n})` : tag);
     cur = cur.parentElement || cur.parentNode;

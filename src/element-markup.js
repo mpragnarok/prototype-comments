@@ -93,18 +93,47 @@ export async function initElementMarkup(opts = {}) {
 
   const ui = mountChrome({
     label: opts.label || '給回饋',
-    onToggleMark: () => setMarking(!state.marking),
+    // 登入擋在「進入標記模式」這一刻，不是「點下某個元素」的那一刻——
+    // 後者會讓使用者每點一個元件就被彈窗打斷一次，而且是在他已經想好要說什麼之後。
+    onToggleMark: async () => {
+      if (state.marking) return setMarking(false);
+      ui.fab.disabled = true;
+      const user = await ensureUser();
+      ui.fab.disabled = false;
+      if (user) setMarking(true);
+    },
     onOpenDrawer: (id) => openDrawer(id),
   });
 
   // ── 登入 ────────────────────────────────────────────────────────────────────
   // 要能看到別人標過什麼就必須能讀，能讀就得知道是誰標的——所以這條路要登入。
   // 只在「要寫」的當下才擋，純瀏覽不必登入（rules 的 read 是公開的）。
+  /**
+   * 登入失敗的原因要說出來。吞掉的下場是使用者每點一次就跳一次彈窗、
+   * 每次都失敗，而畫面上完全看不出為什麼——實際踩過一次，症狀是
+   * 「我都沒辦法使用」，真因是網域沒加進 Firebase 的授權清單。
+   */
+  const SIGN_IN_ERRORS = {
+    'auth/unauthorized-domain':
+      `這個網域（${location.hostname}）沒有加進 Firebase 的授權清單，登入不會成功。`
+      + '要掛這頁的人到 Firebase Console → Authentication → Settings → Authorized domains 加進去。',
+    'auth/popup-blocked': '瀏覽器擋掉了登入彈窗，允許彈出視窗後再試一次。',
+    'auth/popup-closed-by-user': '登入視窗被關掉了，再按一次。',
+    'auth/cancelled-popup-request': '',   // 連按兩次造成，不必吵使用者
+  };
+
   async function ensureUser() {
     if (state.user) return state.user;
-    const provider = new fb.GoogleAuthProvider();
-    const cred = await fb.signInWithPopup(auth, provider);
-    return cred.user;
+    try {
+      const cred = await fb.signInWithPopup(auth, new fb.GoogleAuthProvider());
+      return cred.user;
+    } catch (error) {
+      const known = SIGN_IN_ERRORS[error?.code];
+      if (known) toast(known);
+      else if (known !== '') toast('登入沒有完成，再試一次。');
+      console.error('[element-markup] 登入失敗', error?.code || error);
+      return null;
+    }
   }
 
   fb.onAuthStateChanged(auth, (user) => {
@@ -177,12 +206,8 @@ export async function initElementMarkup(opts = {}) {
   ui.shield.addEventListener('click', async (e) => {
     const node = pickTarget(ui.shield, e.clientX, e.clientY);
     if (!node) return;
-    const user = await ensureUser().catch((error) => {
-      console.warn('[element-markup] 登入未完成，這則沒有送出', error);
-      toast('要先用 Google 登入才能標記');
-      return null;
-    });
-    if (!user) return;
+    const user = state.user || await ensureUser();   // 一般走不到這裡：進標記模式時已經登入過
+    if (!user) return setMarking(false);
     const rect = node.getBoundingClientRect();
     state.pending = {
       selector: cssSelectorFor(node),
