@@ -183,8 +183,8 @@ const seedMark = (over = {}) => ({
     }));
     await page.close();
     assert(r.boxes === 0, `失效的 selector 不該畫框，實際畫了 ${r.boxes}`);
-    assert(r.rows === 1, '列表仍要列出它——資料還在，只是畫不出來');
-    assert(/找不到/.test(r.note), `面板要說明有幾則沒畫出來，實際「${r.note}」`);
+    assert(r.rows === 0, '畫不出來的也不該列在面板——點了跳不過去，列著只會讓人以為漏看了什麼');
+    assert(/找不到位置/.test(r.note), `面板要說明有幾則被省略，實際「${r.note}」`);
   });
 
   await test('工具自己的 UI 不會被當成可標記的元素', async () => {
@@ -196,6 +196,32 @@ const seedMark = (over = {}) => ({
     const hoverShown = await page.evaluate(() => getComputedStyle(document.querySelector('.em-hover')).display);
     await page.close();
     assert(hoverShown === 'none', '滑到工具列上不該出現選取框');
+  });
+
+  // MUI 的每個圖示都自帶 data-testid（ReplayIcon、AddIcon…），同一頁常有好幾個。
+  // 一看到 data-* 就採用的話，標記會錨到「第一個同名的」——也就是別人身上，而且不會報錯。
+  await test('重複的 data-testid 不採用，退回位置路徑指到正確那一個', async () => {
+    const page = await fresh(browser);
+    await markOn(page, '#dup-b span[data-testid="ReplayIcon"]', '這顆的圖示怪怪的');
+    const doc = await page.evaluate(() => window.__fb.__docs().find(d => d.body === '這顆的圖示怪怪的'));
+    const resolved = await page.evaluate((sel) => {
+      const found = document.querySelectorAll(sel);
+      return { count: found.length, insideB: found.length === 1 && !!found[0].closest('#dup-b') };
+    }, doc.selector);
+    await page.close();
+    assert(doc.selector !== '[data-testid="ReplayIcon"]',
+      `重複的 testid 不該被當錨點，實際存了 ${doc.selector}`);
+    assert(resolved.count === 1, `selector 應唯一命中，實際命中 ${resolved.count} 個`);
+    assert(resolved.insideB, 'selector 應指回 dup-b 裡那顆，而不是 dup-a');
+  });
+
+  await test('唯一的 data-testid 仍優先採用（那是最耐改版的錨點）', async () => {
+    const page = await fresh(browser);
+    await markOn(page, '[data-testid="unique-btn"]', '這顆按鈕文案要改');
+    const doc = await page.evaluate(() => window.__fb.__docs().find(d => d.body === '這顆按鈕文案要改'));
+    await page.close();
+    assert(doc.selector === '[data-testid="unique-btn"]',
+      `唯一的 testid 應直接當錨點，實際 ${doc.selector}`);
   });
 
   await test('回覆／子留言不會被畫成獨立的框', async () => {

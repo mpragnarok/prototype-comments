@@ -29,6 +29,14 @@
   <div class="card">
     <div class="row"><span>彎折</span><button class="app" id="btn-step">Step</button></div>
   </div>
+  <!-- MUI 的圖示都自帶 data-testid，同一頁往往重複好幾個：錨定不能一看到就用，
+       否則會指到「第一個同名的」，也就是別人身上。 -->
+  <div class="card" id="dup-zone">
+    <button class="app" id="dup-a"><span data-testid="ReplayIcon">↻</span> 重來 A</button>
+    <button class="app" id="dup-b"><span data-testid="ReplayIcon">↻</span> 重來 B</button>
+  </div>
+  <!-- 唯一的 data-testid 才該被當成錨點 -->
+  <div class="card"><button class="app" data-testid="unique-btn">唯一標記的按鈕</button></div>
 </main>
 
 <script type="module">
