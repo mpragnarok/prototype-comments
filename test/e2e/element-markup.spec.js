@@ -705,6 +705,23 @@ const seedMark = (over = {}) => ({
     assert(calls.redirect === 1, `同源時該正常跳轉，實際 ${JSON.stringify(calls)}`);
   });
 
+  // CDN 是公開的：改檔名不能弄壞已經照舊網址掛上去的頁面。
+  await test('舊路徑 element-markup.js 仍然可用（相容轉接沒斷）', async () => {
+    const page = await browser.newPage({ viewport: { width: 900, height: 760 } });
+    await page.goto(`http://localhost:${PORT}/test/e2e/element-markup.harness.html`);
+    const r = await page.evaluate(async () => {
+      const oldPath = await import('/src/element-markup.js');
+      const newPath = await import('/src/user-feedback-markup.js');
+      return {
+        oldHasInit: typeof oldPath.initElementMarkup === 'function',
+        sameFunction: oldPath.initElementMarkup === newPath.initElementMarkup,
+      };
+    });
+    await page.close();
+    assert(r.oldHasInit, '舊路徑仍要 export 得出 initElementMarkup');
+    assert(r.sameFunction, '舊路徑該轉接到同一個實作，不是複製一份');
+  });
+
   await test('回覆／子留言不會被畫成獨立的框', async () => {
     const page = await fresh(browser, {
       seed: [seedMark({ id: 'a' }), seedMark({ id: 'r', parentId: 'a', body: '我也覺得' })],
