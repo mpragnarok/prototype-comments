@@ -523,6 +523,54 @@ const seedMark = (over = {}) => ({
     assert(/不需要登入/.test(r.title), `提示要說明不必登入，實際「${r.title}」`);
   });
 
+  // 使用者回報「有個標記一直讓螢幕變小」：抽屜用 transform 推到畫面外，
+  // 但仍佔著水平捲動空間，於是手機把整頁縮小以容納那 310px。
+  // 這條在手機尺寸下驗「工具不准把頁面撐寬」。
+  await test('手機尺寸下，標記工具不會把頁面撐寬', async () => {
+    const page = await browser.newPage({ viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true });
+    await page.goto(`http://localhost:${PORT}/test/e2e/element-markup.harness.html`);
+    await page.waitForFunction(() => window.__emTest && window.__emTest.ready);
+    const baseline = await page.evaluate(() => document.documentElement.scrollWidth);
+    await page.evaluate(() => {
+      const fb = window.__emTest.createMockFirebase({ user: null, comments: [] });
+      window.__fb = fb;
+      return window.__emTest.init(fb);
+    });
+    await page.waitForTimeout(500);
+    const closed = await page.evaluate(() => document.documentElement.scrollWidth);
+
+    await page.click('.em-tab');                       // 打開抽屜
+    await page.waitForTimeout(400);
+    const opened = await page.evaluate(() => document.documentElement.scrollWidth);
+    await page.close();
+
+    assert(closed <= baseline + 1,
+      `掛上工具後頁面就被撐寬了：掛之前 ${baseline}px → 掛之後 ${closed}px`);
+    assert(opened <= baseline + 1,
+      `抽屜打開時把頁面撐寬了：${baseline}px → ${opened}px（抽屜寬 310px，正好是被撐出來的量）`);
+  });
+
+  await test('留言視窗不會把頁面撐寬（手機尺寸）', async () => {
+    const page = await browser.newPage({ viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true });
+    await page.goto(`http://localhost:${PORT}/test/e2e/element-markup.harness.html`);
+    await page.waitForFunction(() => window.__emTest && window.__emTest.ready);
+    const baseline = await page.evaluate(() => document.documentElement.scrollWidth);
+    await page.evaluate((seed) => {
+      const fb = window.__emTest.createMockFirebase({ user: null, comments: [seed] });
+      window.__fb = fb;
+      return window.__emTest.init(fb);
+    }, seedMark({ id: 'a' }));
+    await page.waitForSelector('.em-tag', { timeout: 4000 });
+    await page.click('.em-tag');
+    await page.waitForSelector('.em-pop.show');
+    const w = await page.evaluate(() => document.documentElement.scrollWidth);
+    const popRight = await page.evaluate(() =>
+      Math.round(document.querySelector('.em-pop').getBoundingClientRect().right));
+    await page.close();
+    assert(w <= baseline + 1, `留言視窗把頁面撐寬了：${baseline}px → ${w}px`);
+    assert(popRight <= 390 + 1, `留言視窗跑出畫面右邊：right=${popRight}`);
+  });
+
   await test('回覆／子留言不會被畫成獨立的框', async () => {
     const page = await fresh(browser, {
       seed: [seedMark({ id: 'a' }), seedMark({ id: 'r', parentId: 'a', body: '我也覺得' })],

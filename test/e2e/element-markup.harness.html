@@ -6,6 +6,9 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
+<!-- 沒有這行，行動模式下瀏覽器會用 980px 的虛擬視窗，測試就測不到真實手機的窄畫面
+     （實際踩過：popover 的邊界計算在測試裡永遠寬鬆，線上才發現跑出畫面） -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>element-markup e2e harness</title>
 <style>
   body { margin:0; font:15px/1.6 system-ui, sans-serif; }

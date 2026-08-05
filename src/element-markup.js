@@ -22,7 +22,7 @@
  */
 import { cssSelectorFor } from './draw/selectors.js';
 import { mountChrome, openInput, renderMarks, highlightMark, placeBox, toast,
-  showMarkPopover, hideMarkPopover } from './markup-ui.js';
+  showMarkPopover, hideMarkPopover, positionPopover } from './markup-ui.js';
 
 const FB = 'https://www.gstatic.com/firebasejs/10.12.2';
 
@@ -349,8 +349,9 @@ export async function initElementMarkup(opts = {}) {
     if (shownId && !state.marks.some(m => String(m.id) === shownId)) hideMarkPopover(ui);
   }
 
-  // 捲動／改變視窗只要重畫框——popover 是 absolute 的，會自己跟著頁面走。
-  const reflow = () => render();
+  // 捲動／改變視窗：重畫框，並讓留言視窗重新對準它那個框
+  // （視窗是 fixed 的——absolute 會把頁面撐寬，見 positionPopover 的說明）。
+  const reflow = () => { render(); positionPopover(ui); };
   addEventListener('resize', reflow);
   addEventListener('scroll', reflow, { passive: true });
   // 點到 popover 以外的地方就收起來——包含頁面本身與別的標記

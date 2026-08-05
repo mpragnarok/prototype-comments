@@ -1,0 +1,36 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>訂單管理系統</title><style>
+*{margin:0;box-sizing:border-box;font-family:-apple-system,'PingFang TC',sans-serif}
+body{background:#f5f7fa}
+header{background:#fff;border-bottom:1px solid #e5e9f0;padding:14px 28px;display:flex;align-items:center;gap:24px}
+.logo{font-weight:800;color:#1a56db;font-size:17px}.nav{display:flex;gap:18px;color:#4b5563;font-size:14px}
+.nav b{color:#1a56db;border-bottom:2px solid #1a56db;padding-bottom:12px}
+main{padding:24px 28px;display:grid;grid-template-columns:2fr 1fr;gap:20px;max-width:1180px}
+.card{background:#fff;border:1px solid #e5e9f0;border-radius:10px;padding:20px}
+h2{font-size:15px;margin-bottom:14px;color:#111827}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;color:#6b7280;font-weight:600;padding:8px 6px;border-bottom:1px solid #e5e9f0}
+td{padding:10px 6px;border-bottom:1px solid #f1f3f7;color:#111827}
+.badge{padding:2px 9px;border-radius:99px;font-size:12px}
+.g{background:#ecfdf5;color:#047857}.y{background:#fffbeb;color:#b45309}.r{background:#fef2f2;color:#b91c1c}
+.stat{font-size:26px;font-weight:800;color:#111827}.lbl{font-size:12.5px;color:#6b7280;margin-top:2px}
+.row{display:flex;gap:16px;margin-bottom:16px}.row .card{flex:1}
+.btn{background:#1a56db;color:#fff;border:0;border-radius:8px;padding:10px 22px;font-size:14px;font-weight:600}
+</style></head><body>
+<header><div class="logo">◆ OrderHub</div><div class="nav"><b>訂單</b><span>商品</span><span>出貨</span><span>報表</span></div></header>
+<main><div>
+<div class="row"><div class="card"><div class="stat">1,284</div><div class="lbl">本月訂單</div></div>
+<div class="card"><div class="stat">NT$ 2408917</div><div class="lbl">本月營收</div></div>
+<div class="card"><div class="stat">97.2%</div><div class="lbl">準時出貨率</div></div></div>
+<div class="card"><h2>近期訂單</h2><table><tr><th>訂單編號</th><th>客戶</th><th>金額</th><th>狀態</th></tr>
+<tr><td>#20481</td><td>林小姐</td><td>NT$ 3200</td><td><span class="badge g">已出貨</span></td></tr>
+<tr><td>#20480</td><td>陳先生</td><td>NT$ 12800</td><td><span class="badge y">揀貨中</span></td></tr>
+<tr><td>#20479</td><td>王先生</td><td>NT$ 890</td><td><span class="badge r">付款失敗</span></td></tr>
+<tr><td>#20478</td><td>張小姐</td><td>NT$ 5600</td><td><span class="badge g">已出貨</span></td></tr></table></div>
+</div><div>
+<div class="card" id="panel"><h2>快速出貨</h2><p style="font-size:13px;color:#6b7280;line-height:1.7">選擇待出貨訂單後，系統將自動列印揀貨單並通知物流。</p>
+<br><button class="btn" id="ship-btn">建立出貨單</button></div>
+</div></main>
+<script type="module">
+import { initDrawLayer } from '/src/draw-layer.js';
+window.__promo = initDrawLayer('body');
+</script></body></html>
