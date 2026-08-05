@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<!--
+  element-markup 的 e2e 載入頁：模擬一個真實 app（結構刻意有巢狀與重複 tag，
+  好讓 nth-of-type 路徑真的被用到），掛上 in-memory mock firebase。
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>element-markup e2e harness</title>
+<style>
+  body { margin:0; font:15px/1.6 system-ui, sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:24px; }
+  .card { border:1px solid #ddd; border-radius:10px; padding:16px; margin-bottom:14px; }
+  .row { display:flex; gap:8px; align-items:center; margin:10px 0; }
+  button.app { border:1px solid #ccc; background:#fff; border-radius:8px; padding:8px 14px; font:inherit; cursor:pointer; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">弓線紀錄</h1>
+  <div class="card">
+    <div class="row"><span>材質</span>
+      <button class="app">NiTi</button><button class="app">SS</button>
+    </div>
+    <div class="row" id="size-row"><span>尺寸</span>
+      <button class="app">012</button><button class="app" id="size-014">014</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row"><span>彎折</span><button class="app" id="btn-step">Step</button></div>
+  </div>
+</main>
+
+<script type="module">
+  import { initElementMarkup } from '/src/element-markup.js';
+  import { createMockFirebase } from '/test/mock-firebase.js';
+
+  window.__emTest = {
+    createMockFirebase,
+    init: (mockFb, overrides = {}) => initElementMarkup({
+      projectId: 'e2e',
+      page: () => '/wire',
+      _firebase: mockFb,
+      ...overrides,
+    }),
+    ready: true,
+  };
+</script>
+</body>
+</html>
