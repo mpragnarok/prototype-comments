@@ -583,7 +583,8 @@ const seedMark = (over = {}) => ({
     await page.evaluate(() => {
       const fb = window.__emTest.createMockFirebase({ user: null, comments: [] });
       window.__fb = fb;
-      return window.__emTest.init(fb, { auth: 'google' });
+      // authDomain 設成同源：跨網域的情況另有一條測試（那種組合本來就不該跳轉）
+      return window.__emTest.init(fb, { auth: 'google', firebaseConfig: { authDomain: location.hostname, projectId: 'x' } });
     });
     await page.waitForTimeout(300);
     await page.click('.em-fab');
@@ -647,6 +648,61 @@ const seedMark = (over = {}) => ({
     await page.close();
     assert(r.fail, '初始化失敗時畫面上要看得到，不能只印 console');
     assert(/projectId/.test(r.text), `訊息要說得出原因，實際「${r.text}」`);
+  });
+
+  // Firebase 官方已知限制：authDomain 與 app 不同源時，擋跨站儲存的瀏覽器
+  // （Safari 16.1+／Chrome 115+）會把使用者導回但沒登入，而且沒有任何錯誤。
+  // 症狀是「登入兩次還是沒登入」。明知會失敗就不要讓人白跳一趟。
+  await test('手機＋跨網域 authDomain：不跳轉，直接說明並指回匿名模式', async () => {
+    const page = await browser.newPage({
+      viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true,
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+    });
+    await page.goto(`http://localhost:${PORT}/test/e2e/element-markup.harness.html`);
+    await page.waitForFunction(() => window.__emTest && window.__emTest.ready);
+    await page.evaluate(() => {
+      const fb = window.__emTest.createMockFirebase({ user: null, comments: [] });
+      window.__fb = fb;
+      return window.__emTest.init(fb, {
+        auth: 'google',
+        firebaseConfig: { authDomain: 'someone-else.firebaseapp.com', projectId: 'x' },
+      });
+    });
+    await page.waitForTimeout(300);
+    await page.click('.em-fab');
+    await page.waitForTimeout(600);
+    const r = await page.evaluate(() => ({
+      calls: window.__fb.__authCalls(),
+      toast: document.querySelector('.em-toast')?.textContent || '',
+      disabled: document.querySelector('.em-fab').disabled,
+    }));
+    await page.close();
+    assert(r.calls.redirect === 0, `明知會失敗就不該跳轉，實際 redirect=${r.calls.redirect}`);
+    assert(/登不進去|不需登入/.test(r.toast), `要說明為什麼，實際「${r.toast}」`);
+    assert(!r.disabled, '按鈕不能卡在不可按');
+  });
+
+  await test('同源 authDomain 時照常跳轉登入', async () => {
+    const page = await browser.newPage({
+      viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true,
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+    });
+    await page.goto(`http://localhost:${PORT}/test/e2e/element-markup.harness.html`);
+    await page.waitForFunction(() => window.__emTest && window.__emTest.ready);
+    await page.evaluate(() => {
+      const fb = window.__emTest.createMockFirebase({ user: null, comments: [] });
+      window.__fb = fb;
+      return window.__emTest.init(fb, {
+        auth: 'google',
+        firebaseConfig: { authDomain: location.hostname, projectId: 'x' },
+      });
+    });
+    await page.waitForTimeout(300);
+    await page.click('.em-fab');
+    await page.waitForTimeout(600);
+    const calls = await page.evaluate(() => window.__fb.__authCalls());
+    await page.close();
+    assert(calls.redirect === 1, `同源時該正常跳轉，實際 ${JSON.stringify(calls)}`);
   });
 
   await test('回覆／子留言不會被畫成獨立的框', async () => {

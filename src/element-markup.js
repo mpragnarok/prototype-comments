@@ -159,9 +159,33 @@ async function start(opts) {
   const REDIRECT_FALLBACK = ['auth/popup-blocked', 'auth/popup-closed-by-user',
     'auth/operation-not-supported-in-this-environment', 'auth/cancelled-popup-request'];
 
+  /**
+   * 跨網域的 authDomain ＋ 擋第三方儲存的瀏覽器 = redirect 登入必定失敗。
+   *
+   * Firebase 官方已知限制（2024-06-24 起）：SDK 靠一個連到 authDomain 的跨站 iframe
+   * 完成 redirect 流程，而 Safari 16.1+／Chrome 115+／Firefox 109+ 擋掉跨站儲存後，
+   * 使用者會被導回、卻**沒有登入**——而且不會有任何錯誤。症狀是「登入兩次還是沒登入」。
+   * https://firebase.google.com/docs/auth/web/redirect-best-practices
+   *
+   * 官方解法是讓 authDomain 與 app 同源（自訂網域或反向代理）。在那之前，明知會
+   * 失敗就不要讓使用者白跳一趟 Google——直接說清楚，並指回不受影響的匿名模式。
+   */
+  const crossSiteAuth = () => {
+    const domain = (config.authDomain || '').toLowerCase();
+    return !!domain && domain !== location.hostname.toLowerCase();
+  };
+
   async function signInWithGoogle() {
     const provider = new fb.GoogleAuthProvider();
     if (isMobile()) {
+      if (crossSiteAuth()) {
+        toast('這個瀏覽器擋跨站儲存，Google 登入會跳回來但登不進去（Firebase 已知限制）。'
+          + '改用不需登入的模式即可，功能完全一樣。');
+        console.warn('[element-markup] authDomain（' + config.authDomain + '）與本站不同源，'
+          + '行動瀏覽器上的 signInWithRedirect 無法完成。'
+          + '見 https://firebase.google.com/docs/auth/web/redirect-best-practices');
+        return null;
+      }
       await fb.signInWithRedirect(auth, provider);   // 頁面會離開，這裡不會回來
       return null;
     }
