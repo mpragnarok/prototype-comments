@@ -8,9 +8,13 @@
  * 視覺語言刻意沿用 draw layer（accent #635a8f、右側抽屜、白底列項），
  * 因為使用者在同一批頁面上會同時看到兩者，長得不一樣會像兩個工具。
  */
+import { resolveAnchor } from './anchor.js';
+
 const ACCENT = '#635a8f';
 const ACCENT_STRONG = '#4f4775';
 const DONE = '#0d7a4f';
+/** 只靠位置路徑定位的舊標記——琥珀色，跟「已處理」的綠、「待處理」的紫都分得開 */
+const STALE = '#a86b12';
 const Z = 2147482000;
 
 export const MARKUP_STYLES = `
@@ -23,6 +27,12 @@ export const MARKUP_STYLES = `
   background:rgba(99,90,143,.05)}
 .em-box.done{border-style:dashed;border-color:${DONE};background:rgba(13,122,79,.05);opacity:.72}
 .em-box.sel{box-shadow:0 0 0 3px rgba(99,90,143,.25)}
+/* 只靠位置路徑定位的：外面再套一圈琥珀色點狀 outline。
+   刻意不動 border——border 已經在講「待處理／已處理」（實線／虛線、紫／綠），
+   蓋掉它的話那個區別就消失了，而那是兩件不同的事，要能同時看得出來。 */
+.em-box.stale{outline:2px dotted ${STALE};outline-offset:2px}
+.em-row.stale{border-left:3px solid ${STALE}}
+.em-row .stale-note{margin-top:5px;color:${STALE};font-size:11.5px;line-height:1.5}
 .em-tag{position:absolute;top:-11px;left:-2px;pointer-events:auto;cursor:pointer;background:${ACCENT};color:#fff;
   border-radius:5px;font:700 11px/1 system-ui,-apple-system,sans-serif;padding:4px 7px;white-space:nowrap;
   box-shadow:0 1px 4px rgba(0,0,0,.25);max-width:180px;overflow:hidden;text-overflow:ellipsis}
@@ -199,17 +209,22 @@ export function openInput(ui, { x, y, selector, user, anonymous = false, savedNa
   ui.ta.focus();
 }
 
-/** 一則標記 → 頁面上的框。找不到元素回 null（不畫，而不是畫在錯的地方）。 */
-function drawBox(mark, index, onTagClick) {
-  let node = null;
-  try { node = document.querySelector(mark.selector); } catch { return null; }
-  if (!node) return null;
-  const box = el('div', `em-box${mark.resolved ? ' done' : ''}`);
+/**
+ * 一則標記 → 頁面上的框。
+ *
+ * 只靠位置路徑解出來的（`how === 'selector'`）加上 `stale`：那些是舊資料，
+ * 頁面一改就可能指到別人身上，而框本身不會透露這件事。看的人有權知道
+ * 哪幾則不能全信——這正是 2026-08-07 那次整批位移沒有任何人察覺的原因。
+ */
+function drawBox(mark, node, how, index, onTagClick) {
+  const stale = how === 'selector' ? ' stale' : '';
+  const box = el('div', `em-box${mark.resolved ? ' done' : ''}${stale}`);
   box.setAttribute('data-em', '');
   box.dataset.markId = mark.id;
   placeBox(box, node);
   const tag = el('span', 'em-tag', {
-    textContent: `${mark.resolved ? '✓ ' : ''}${index + 1}　${mark.authorName || '未署名'}`,
+    // ⚠ 放在標籤上，因為使用者多半只看畫面上的框，不會去開右側面板
+    textContent: `${mark.resolved ? '✓ ' : ''}${stale ? '⚠ ' : ''}${index + 1}　${mark.authorName || '未署名'}`,
   });
   tag.onclick = (e) => { e.stopPropagation(); onTagClick(mark.id, { x: e.clientX, y: e.clientY }); };
   box.append(tag);
@@ -282,8 +297,9 @@ function confirmDelete(bar, mark, onDelete) {
 }
 
 /** 一則標記 → 抽屜裡的一列。 */
-function drawRow(mark, index, handlers) {
-  const row = el('div', `em-row${mark.resolved ? ' done' : ''}`);
+function drawRow(mark, index, handlers, how) {
+  const stale = how === 'selector' ? ' stale' : '';
+  const row = el('div', `em-row${mark.resolved ? ' done' : ''}${stale}`);
   row.dataset.markId = mark.id;
   const state = mark.resolved
     ? `✓ 已處理${mark.resolvedBy ? `　${mark.resolvedBy}` : ''}`
@@ -294,6 +310,12 @@ function drawRow(mark, index, handlers) {
   row.querySelector('.nm').textContent = mark.authorName || '未署名';
   row.querySelector('.state').textContent = state;
   row.querySelector('.body').textContent = mark.body || '';
+  // 舊資料只有位置路徑，頁面改過就可能框在別人身上。說出來，不要讓人以為每一則都是準的。
+  if (stale) {
+    row.append(el('div', 'stale-note', {
+      textContent: '⚠ 這則是用舊方式（頁面上的位置）定位的，頁面改過的話可能不準。',
+    }));
+  }
   row.append(rowActions(row, mark, { ...handlers, isMine: handlers.isMine(mark) }));
   row.onclick = () => handlers.onFocus(mark);
   return row;
@@ -308,8 +330,14 @@ export function renderMarks(ui, marks, handlers) {
   // 只列「這一頁真的畫得出來」的標記。錨點失效的列在這裡沒有意義——
   // 點了跳不過去，也對不上畫面上任何東西，只會讓人以為自己漏看了什麼。
   // 資料沒有消失（agent 與 bridge 照樣讀得到），只是不在這個面板上。
+  // 一則只解析一次，框與列項共用同一個結果——否則兩邊可能各自解到不同的元素
   const visible = [];
-  marks.forEach((m) => { if (drawBox(m, visible.length, handlers.onFocusId)) visible.push(m); });
+  marks.forEach((m) => {
+    const { node, how } = resolveAnchor(m);
+    if (!node) return;
+    drawBox(m, node, how, visible.length, handlers.onFocusId);
+    visible.push({ mark: m, how });
+  });
 
   ui.count.textContent = String(visible.length);
   ui.list.innerHTML = '';
@@ -319,7 +347,7 @@ export function renderMarks(ui, marks, handlers) {
   if (!marks.length) {
     ui.list.append(el('div', 'em-note', { textContent: '這一頁還沒有標記。按右下角的按鈕開始。' }));
   } else {
-    visible.forEach((m, i) => ui.list.append(drawRow(m, i, handlers)));
+    visible.forEach(({ mark, how }, i) => ui.list.append(drawRow(mark, i, handlers, how)));
   }
   if (missing > 0) {
     ui.list.append(el('div', 'em-note', {

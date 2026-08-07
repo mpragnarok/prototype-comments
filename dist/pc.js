@@ -1,4 +1,4 @@
-/* pc.js 61d7bc3 2026-08-05T12:19:27Z */
+/* pc.js a8dd5aa 2026-08-07T11:27:52Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -1538,7 +1538,9 @@ function pointHitsObject(o, p, tol, ends) { return objHitDist(o, p, tol, ends) !
  */
 
 // ── P4 結構化匯出（selector 擷取 + 精簡 JSON）────────────────────────────────────
-const ANCHOR_DATA_ATTRS = ['data-testid', 'data-test', 'data-cy', 'data-id'];
+// `data-fb-id` 排第一：它存在的唯一理由就是「回饋要錨在這裡」，動它的人知道自己在動什麼。
+// 其餘幾個是測試用的識別碼——測試一重構就會改名，只是沒有更好的東西時的替代品。
+const ANCHOR_DATA_ATTRS = ['data-fb-id', 'data-testid', 'data-test', 'data-cy', 'data-id'];
 function cssEscape(s) {
   if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(s);
   return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&'); // node fallback（無 CSS API）
@@ -5174,7 +5176,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = '61d7bc3';
+export const PC_VERSION = 'a8dd5aa';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';

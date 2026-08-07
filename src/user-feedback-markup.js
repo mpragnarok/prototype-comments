@@ -24,6 +24,7 @@
  * user-feedback 的 bridge 已經在讀它，不必為這支再寫一條收件通道。
  */
 import { cssSelectorFor } from './draw/selectors.js';
+import { anchorFor, elementTextFor, resolveAnchor } from './anchor.js';
 import { mountChrome, openInput, renderMarks, highlightMark, placeBox, toast,
   showMarkPopover, hideMarkPopover, positionPopover, showInitFailure } from './markup-ui.js';
 
@@ -278,7 +279,7 @@ async function start(opts) {
   }
 
   async function save(body) {
-    const { selector, relX, relY } = state.pending;
+    const { selector, anchorId, anchorAttr, elementText, relX, relY } = state.pending;
     // 匿名：名字用填的，留空就是「未署名」——不假裝知道你是誰。
     const typed = anonymous ? ui.nameInput.value.trim() : '';
     if (anonymous) rememberName(typed);
@@ -289,6 +290,14 @@ async function start(opts) {
       type: 'positional',
       screenId: page(),
       selector, relX, relY,
+      /*
+       * 三個都寫進去，而且 anchorId 沒有時明寫 null（不是省略）——
+       * Firestore 查不到「欄位不存在」，省略等於之後想撈「哪些沒有穩定錨點」時撈不到。
+       * elementText 一律要有：它是頁面改版後唯一能重新比對的線索，成本近乎零。
+       */
+      anchorId: anchorId || null,
+      anchorAttr: anchorAttr || null,
+      elementText,
       body: body.slice(0, 2000),
       authorUid: state.user.uid,
       authorName,
@@ -360,6 +369,9 @@ async function start(opts) {
     const rect = node.getBoundingClientRect();
     state.pending = {
       selector: cssSelectorFor(node),
+      // 穩定 id 與文字都在這裡一起擷取：頁面改版之後，這兩個是唯一還對得上的東西
+      ...anchorFor(node),
+      elementText: elementTextFor(node),
       relX: rect.width ? +(((e.clientX - rect.left) / rect.width) * 100).toFixed(2) : 50,
       relY: rect.height ? +(((e.clientY - rect.top) / rect.height) * 100).toFixed(2) : 50,
     };
@@ -413,8 +425,9 @@ async function start(opts) {
     onDelete: (m) => void deleteMark(m),
     onToggle: (m) => void toggleResolved(m),
     onFocus: (m) => {
-      let node = null;
-      try { node = document.querySelector(m.selector); } catch { /* 壞掉的 selector */ }
+      // 跟畫框走同一條解析（穩定 id → 文字 → 位置路徑），否則點列表跳到的位置
+      // 會跟畫面上的框不是同一個地方
+      const { node } = resolveAnchor(m);
       node?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       highlightMark(m.id);
     },
