@@ -6,7 +6,9 @@
 import { ICON_PATHS } from './constants.js';
 
 // ── P4 結構化匯出（selector 擷取 + 精簡 JSON）────────────────────────────────────
-export const ANCHOR_DATA_ATTRS = ['data-testid', 'data-test', 'data-cy', 'data-id'];
+// `data-fb-id` 排第一：它存在的唯一理由就是「回饋要錨在這裡」，動它的人知道自己在動什麼。
+// 其餘幾個是測試用的識別碼——測試一重構就會改名，只是沒有更好的東西時的替代品。
+export const ANCHOR_DATA_ATTRS = ['data-fb-id', 'data-testid', 'data-test', 'data-cy', 'data-id'];
 export function cssEscape(s) {
   if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(s);
   return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&'); // node fallback（無 CSS API）

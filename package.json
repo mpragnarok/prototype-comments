@@ -13,6 +13,7 @@
     "test:e2e:pagescope": "node test/e2e/draw-page-scope.spec.js",
     "test:e2e:feedback": "node test/e2e/feedback-box.spec.js",
     "test:e2e:anchor": "node test/e2e/anchor-selector.spec.js",
+    "test:e2e:anchorstable": "node test/e2e/anchor-stability.spec.js",
     "test:e2e:markup": "node test/e2e/element-markup.spec.js",
     "test:e2e:note": "node test/e2e/note-mode-crash.spec.js",
     "test:e2e:notedel": "node test/e2e/note-delete-record-sync.spec.js",
@@ -25,7 +26,7 @@
     "test:visual": "node test/visual/visual-shot.js",
     "test:visual:update": "node test/visual/visual-shot.js --update",
     "lint": "biome lint .",
-    "test:all": "npm run test:unit && npm run test:cdn && npm run test:dist-sync && npm run test:e2e && npm run test:e2e:draw && npm run test:e2e:pagescope && npm run test:e2e:feedback && npm run test:e2e:anchor && npm run test:e2e:markup && npm run test:e2e:note && npm run test:e2e:notedel && npm run test:e2e:notemultiline && npm run test:e2e:noterange && npm run test:e2e:noteoutside && npm run test:e2e:noteeditghost && npm run test:e2e:spec && npm run test:e2e:comments && npm run test:e2e:userfeedback && npm run test:visual",
+    "test:all": "npm run test:unit && npm run test:cdn && npm run test:dist-sync && npm run test:e2e && npm run test:e2e:draw && npm run test:e2e:pagescope && npm run test:e2e:feedback && npm run test:e2e:anchor && npm run test:e2e:anchorstable && npm run test:e2e:markup && npm run test:e2e:note && npm run test:e2e:notedel && npm run test:e2e:notemultiline && npm run test:e2e:noterange && npm run test:e2e:noteoutside && npm run test:e2e:noteeditghost && npm run test:e2e:spec && npm run test:e2e:comments && npm run test:e2e:userfeedback && npm run test:visual",
     "test": "npm run test:e2e && npm run test:visual",
     "test:e2e:userfeedback": "node test/e2e/user-feedback.spec.js"
   },
