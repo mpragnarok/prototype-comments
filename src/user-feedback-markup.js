@@ -128,6 +128,15 @@ async function start(opts) {
     onOpenDrawer: (id) => openDrawer(id),
   });
 
+  /**
+   * 一開始捲頁就把浮動鈕縮成小圓鈕。
+   *
+   * 捲頁＝正在讀內容，而這顆鈕就停在右下角——在 390×844 的手機上，它蓋掉的常常正好是
+   * 「代價：…」那一句。載入時仍是完整標籤（要看得到它是什麼），使用者一動它才讓位；
+   * 進標記模式時 CSS 會把它拉回全尺寸，所以「正在標記」依然一眼看得出來。
+   */
+  window.addEventListener('scroll', () => { ui.fab.dataset.compact = 'true'; }, { passive: true, once: true });
+
   // ── 身分 ────────────────────────────────────────────────────────────────────
   // 預設**匿名**：signInAnonymously 只是跟 Firebase 換一個 uid，不走 OAuth，
   // 所以在 LINE／FB 的內建瀏覽器裡也能用——Google 封鎖 in-app WebView 的 OAuth，
@@ -375,7 +384,7 @@ async function start(opts) {
       relX: rect.width ? +(((e.clientX - rect.left) / rect.width) * 100).toFixed(2) : 50,
       relY: rect.height ? +(((e.clientY - rect.top) / rect.height) * 100).toFixed(2) : 50,
     };
-    openInput(ui, { x: e.clientX, y: e.clientY, selector: state.pending.selector, user,
+    openInput(ui, { x: e.clientX, y: e.clientY, selector: state.pending.selector, node, user,
       anonymous, savedName: savedName() });
   });
 
