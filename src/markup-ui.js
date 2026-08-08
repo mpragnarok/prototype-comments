@@ -39,15 +39,30 @@ export const MARKUP_STYLES = `
 .em-box.done .em-tag{background:${DONE}}
 .em-shield{position:fixed;inset:0;z-index:${Z - 100};display:none;cursor:crosshair}
 body.em-marking .em-shield{display:block}
-.em-fab{position:fixed;right:16px;bottom:16px;z-index:${Z + 1000};display:flex;align-items:center;gap:8px;
-  background:${ACCENT};color:#fff;border:none;border-radius:22px;padding:11px 18px;cursor:pointer;
-  font:600 14px/1 system-ui,-apple-system,sans-serif;box-shadow:0 3px 14px rgba(0,0,0,.28)}
-.em-fab[data-active="true"]{background:#c0392b}
+/* 浮動鈕的存在感跟著「使用者現在在做什麼」走。
+   讀頁面時它只是待命，壓住內文的代價比它自己的可見度高得多——實測在 390×844 的手機上，
+   它蓋掉的常常正好是各方案「代價：…」那一句，而那是整頁最該讀的地方。
+   所以：待命時半透明、貼邊；一開始捲頁（＝正在讀）就縮成右下角的小圓鈕；
+   進標記模式才回到全尺寸全不透明——那時她必須一眼看出「現在正在標記」。 */
+.em-fab{position:fixed;right:8px;bottom:10px;z-index:${Z + 1000};display:flex;align-items:center;justify-content:center;gap:8px;
+  background:${ACCENT};color:#fff;border:none;border-radius:22px;padding:9px 15px;cursor:pointer;opacity:.85;
+  font:600 13.5px/1 system-ui,-apple-system,sans-serif;box-shadow:0 3px 14px rgba(0,0,0,.28);
+  transition:opacity .18s,padding .18s,width .18s,height .18s}
+.em-fab[data-compact="true"]{width:40px;height:40px;padding:0;font-size:0;border-radius:50%}
+.em-fab[data-compact="true"]::before{content:"💬";font-size:17px;line-height:1}
+.em-fab[data-active="true"]{background:#c0392b;opacity:1;width:auto;height:auto;padding:11px 18px;font-size:14px;border-radius:22px}
+.em-fab[data-active="true"]::before{content:none}
 .em-fab:disabled{opacity:.55;cursor:default}
+/* 直立 tab 跟 FAB 是同一個問題：固定在右緣 top:62%，同樣壓住內文（實測 390×844 的滿版
+   排版上壓掉「…看診時要自己判斷哪一列」的行尾）。
+   但它禁不起像 FAB 那樣縮——這是「開啟標注紀錄」的唯一入口，縮到找不到比擋住更糟。
+   所以待命時以降透明度為主、尺寸只收一點；標記模式（body.em-marking）整組還原。 */
 .em-tab{position:fixed;top:62%;right:0;transform:translateY(-50%);z-index:${Z + 1603};border:none;cursor:pointer;
-  background:${ACCENT};color:#fff;padding:14px 7px;border-radius:10px 0 0 10px;box-shadow:-2px 0 12px rgba(0,0,0,.2);
-  writing-mode:vertical-rl;font:700 12px/1 system-ui,-apple-system,sans-serif;letter-spacing:2px}
-.em-tab:hover{background:${ACCENT_STRONG}}
+  background:${ACCENT};color:#fff;padding:12px 5px;border-radius:10px 0 0 10px;box-shadow:-2px 0 12px rgba(0,0,0,.2);
+  writing-mode:vertical-rl;font:700 11.5px/1 system-ui,-apple-system,sans-serif;letter-spacing:1.5px;opacity:.82;
+  transition:opacity .18s,padding .18s}
+body.em-marking .em-tab{opacity:1;padding:14px 7px;font-size:12px;letter-spacing:2px}
+.em-tab:hover,.em-tab:focus-visible{background:${ACCENT_STRONG};opacity:1}
 .em-drawer{position:fixed;top:0;right:0;bottom:0;z-index:${Z + 1602};width:310px;max-width:90vw;background:#fff;
   border-left:1px solid #e3e5ea;display:flex;flex-direction:column;box-shadow:-2px 0 16px rgba(0,0,0,.12);
   transform:translateX(100%);font-family:system-ui,-apple-system,sans-serif;
@@ -183,8 +198,21 @@ export function mountChrome({ label, onToggleMark, onOpenDrawer }) {
   };
 }
 
+/**
+ * 錨定給人看的說法：那個元件的可見文字，取前 20 字。
+ *
+ * 終端使用者（醫師、客戶）看到的是自己剛剛點的那句話，不是
+ * `[data-testid="option-a"] > div > h2`——那串對他沒有意義，還會讓人以為自己點錯了。
+ * selector 沒有被丟掉，只是搬去 title 與 console，開發者除錯照樣拿得到。
+ */
+function anchorLabel(node) {
+  const text = (node?.innerText || node?.textContent || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  return text.length > 20 ? `${text.slice(0, 20)}…` : text;
+}
+
 /** 開啟輸入卡並定位在點擊處附近（貼邊時往內收，不讓它跑出視窗）。 */
-export function openInput(ui, { x, y, selector, user, anonymous = false, savedName = '' }) {
+export function openInput(ui, { x, y, selector, node, user, anonymous = false, savedName = '' }) {
   ui.who.innerHTML = '';
   if (anonymous) {
     // 匿名：名字自己填、可留空。不假裝知道你是誰，也不強迫你告訴我們。
@@ -199,7 +227,10 @@ export function openInput(ui, { x, y, selector, user, anonymous = false, savedNa
       : el('span', 'av', { textContent: (user?.displayName || '?').slice(0, 1) });
     ui.who.append(avatar, el('span', null, { textContent: user?.displayName || user?.email || '' }));
   }
-  ui.target.textContent = selector ? `錨定：${selector}` : '';
+  const label = anchorLabel(node);
+  ui.target.textContent = label ? `標在：「${label}」` : '';
+  ui.target.title = selector || '';
+  if (selector) console.debug('[element-markup] 錨定 selector', selector);
   ui.ta.value = '';
   ui.send.disabled = true;
   ui.input.querySelector('.em-err')?.remove();
