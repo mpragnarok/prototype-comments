@@ -46,11 +46,16 @@
   import { initElementMarkup } from '/src/user-feedback-markup.js';
   import { createMockFirebase } from '/test/mock-firebase.js';
 
+  // 預設固定回 '/wire'：多數測試不該被 harness 自己的檔案路徑影響。
+  // 要驗 pushState 換頁的那幾條把 __emPageFromLocation 打開，page() 才真的跟著網址走
+  // （page 是函式，沒辦法從 page.evaluate 的參數傳進來，只能用旗標切換）。
+  const pageId = () => (window.__emPageFromLocation ? location.pathname : '/wire');
+
   window.__emTest = {
     createMockFirebase,
     init: (mockFb, overrides = {}) => initElementMarkup({
       projectId: 'e2e',
-      page: () => '/wire',
+      page: pageId,
       _firebase: mockFb,
       ...overrides,
     }),

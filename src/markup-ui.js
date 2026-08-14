@@ -366,6 +366,9 @@ export function renderMarks(ui, marks, handlers) {
   marks.forEach((m) => {
     const { node, how } = resolveAnchor(m);
     if (!node) return;
+    // 元素還在 DOM 裡但目前不顯示（切到別的分頁、收合的區塊）→ 不畫。
+    // 它的矩形是 0×0，畫下去會在畫面左上角變成一顆 4px 的紅點，指著沒人看得到的東西。
+    if (!node.getClientRects().length) return;
     drawBox(m, node, how, visible.length, handlers.onFocusId);
     visible.push({ mark: m, how });
   });
