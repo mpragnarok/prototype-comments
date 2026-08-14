@@ -850,6 +850,130 @@ const seedMark = (over = {}) => ({
     assert(r.events === 1, `一次 pushState 只該發一個事件（重複 patch 會變 ${r.events} 個）`);
   });
 
+  // class 一改只發**一次** mutation。若那個 class 觸發的是 300～500ms 的 CSS transition，
+  // 只在下一幀量一次的話，框會定格在動畫剛開始的地方——元素繼續走到最終位置，
+  // 而之後沒有任何觸發點會再修正它。使用者看到的是「框停在半路上」，沒有任何錯誤。
+  await test('CSS transition 推移元素 → 動畫結束後框仍貼齊（不是定格在動畫初段）', async () => {
+    const page = await fresh(browser, { seed: [seedMark()] });
+    await page.waitForSelector('.em-box', { timeout: 3000 });
+    const r = await page.evaluate(async () => {
+      const spacer = document.createElement('div');
+      spacer.style.cssText = 'height:0;transition:height .4s linear';
+      document.querySelector('main').prepend(spacer);
+      await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+      const settled = document.querySelector('.em-box').getBoundingClientRect().top;
+      spacer.style.height = '200px';                     // 400ms 的 transition 開始
+      await new Promise(res => setTimeout(res, 900));    // 動畫早就結束了
+      return {
+        settled,
+        boxTop: document.querySelector('.em-box').getBoundingClientRect().top,
+        targetTop: document.getElementById('btn-step').getBoundingClientRect().top,
+      };
+    });
+    await page.close();
+    assert(r.targetTop - r.settled > 150, `前提檢查：元素應真的被推下 200px，實際 ${r.targetTop - r.settled}`);
+    assert(Math.abs(r.boxTop - r.targetTop) < 6,
+      `動畫結束後框要對齊最終位置（元素在 ${r.targetTop}），實際 ${r.boxTop}`
+      + `（差 ${Math.round(r.boxTop - r.targetTop)}px＝定格在動畫初段）`);
+  });
+
+  /**
+   * host 頁面把 history 凍住（或把 replaceState 設成不可寫）是合法的做法。
+   * 那時我們只是少一個 SPA 導航的觸發點——不該讓整個回饋功能陣亡。
+   */
+  const initWithHistoryGuard = async (freezeScript, seed = []) => {
+    const page = await browser.newPage({ viewport: { width: 900, height: 760 } });
+    page.on('pageerror', e => console.log('     [pageerror]', e.message));
+    await page.goto(`http://localhost:${PORT}/test/e2e/element-markup.harness.html`);
+    await page.waitForFunction(() => window.__emTest && window.__emTest.ready);
+    await page.evaluate(freezeScript);
+    await page.evaluate((seed) => {
+      const fb = window.__emTest.createMockFirebase({ user: null, comments: seed });
+      window.__fb = fb;
+      return window.__emTest.init(fb);
+    }, seed);
+    await page.waitForTimeout(400);
+    return page;
+  };
+
+  await test('history 被凍結時元件照常掛起來（少一個觸發點 ≠ 整個功能不見）', async () => {
+    const page = await initWithHistoryGuard(() => { Object.freeze(window.history); }, [seedMark()]);
+    const r = await page.evaluate(() => ({
+      fail: document.querySelector('.em-fail')?.textContent || '',
+      fab: !!document.querySelector('.em-fab'),
+      boxes: document.querySelectorAll('.em-box').length,
+    }));
+    await page.close();
+    assert(!r.fail, `不該走初始化失敗，實際顯示「${r.fail}」`);
+    assert(r.fab, '浮動按鈕要在');
+    assert(r.boxes === 1, `標記照樣要畫出來，實際 ${r.boxes} 個框`);
+  });
+
+  await test('只有 replaceState 不可寫：pushState 照樣攔得到，且重複 init 不會包兩層', async () => {
+    const page = await initWithHistoryGuard(() => {
+      Object.defineProperty(window.history, 'replaceState', {
+        value: window.history.replaceState, writable: false, configurable: true,
+      });
+    });
+    const r = await page.evaluate(async () => {
+      let events = 0;
+      addEventListener('em:locationchange', () => { events++; });
+      await window.__emTest.init(window.__fb, { projectId: 'e2e-2' });   // 第二份元件
+      history.pushState({}, '', '/frozen-check');
+      return {
+        events, url: location.pathname,
+        fail: document.querySelector('.em-fail')?.textContent || '',
+      };
+    });
+    await page.close();
+    assert(!r.fail, `replaceState patch 不了不該讓元件掛掉，實際「${r.fail}」`);
+    assert(r.url === '/frozen-check', `原生 pushState 行為要保留，實際 ${r.url}`);
+    assert(r.events === 1,
+      `一次導航只該發一個事件（第一次 patch 沒設旗標的話 pushState 會被包第二層 → ${r.events} 個）`);
+  });
+
+  // 「畫不出來」有兩種原因，講成同一句會誣賴到好好的元件身上：
+  // 切到別的分頁時，另一個分頁的標記是**看不到**，不是元件被改掉了。
+  await test('看不到的區塊與已經改掉的元件，說法不一樣', async () => {
+    const page = await fresh(browser, {
+      seed: [
+        seedMark({ id: 'shown', selector: '#size-014' }),
+        seedMark({ id: 'hidden', selector: '#btn-step' }),
+        seedMark({ id: 'gone', selector: '#long-gone' }),
+      ],
+    });
+    await page.waitForSelector('.em-box', { timeout: 3000 });
+    await page.click('.em-tab');
+    const notes = await page.evaluate(async () => {
+      document.getElementById('btn-step').closest('.card').style.display = 'none';
+      await new Promise(res => setTimeout(res, 400));
+      return {
+        texts: [...document.querySelectorAll('.em-note')].map(n => n.textContent),
+        boxes: document.querySelectorAll('.em-box').length,
+      };
+    });
+    await page.close();
+    assert(notes.boxes === 1, `只有一則畫得出來，實際 ${notes.boxes}`);
+    const hiddenNote = notes.texts.find(t => /看不到/.test(t));
+    const goneNote = notes.texts.find(t => /改掉/.test(t));
+    assert(hiddenNote, `藏起來的那則要說「在目前看不到的區塊裡」，實際 ${JSON.stringify(notes.texts)}`);
+    assert(goneNote, `找不到的那則要維持「已經改掉的元件」說法，實際 ${JSON.stringify(notes.texts)}`);
+    assert(hiddenNote !== goneNote,
+      '兩種狀態不能共用同一句話——藏起來的元件好好的，講成「已經改掉」是誣賴');
+    assert(/1/.test(hiddenNote) && /1/.test(goneNote), `兩句各自要報自己的則數：${JSON.stringify(notes.texts)}`);
+  });
+
+  await test('兩種都是 0 時，一句補充說明都不顯示', async () => {
+    const page = await fresh(browser, { seed: [seedMark()] });
+    await page.waitForSelector('.em-box', { timeout: 3000 });
+    await page.click('.em-tab');
+    await page.waitForTimeout(300);
+    const notes = await page.evaluate(() =>
+      [...document.querySelectorAll('.em-note')].map(n => n.textContent));
+    await page.close();
+    assert(notes.length === 0, `全部畫得出來時不該有任何補充說明，實際 ${JSON.stringify(notes)}`);
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

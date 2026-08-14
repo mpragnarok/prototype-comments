@@ -361,31 +361,43 @@ export function renderMarks(ui, marks, handlers) {
   // 只列「這一頁真的畫得出來」的標記。錨點失效的列在這裡沒有意義——
   // 點了跳不過去，也對不上畫面上任何東西，只會讓人以為自己漏看了什麼。
   // 資料沒有消失（agent 與 bridge 照樣讀得到），只是不在這個面板上。
-  // 一則只解析一次，框與列項共用同一個結果——否則兩邊可能各自解到不同的元素
+  // 一則只解析一次，框與列項共用同一個結果——否則兩邊可能各自解到不同的元素。
+  //
+  // 「畫不出來」的兩種原因要分開講：**元素找不到**（頁面改版了）與**元素在、只是目前
+  // 看不到**（切到別的分頁、收合起來）是兩回事。混成同一句的話，切到別的分頁時，
+  // 另一個分頁那些好好的標記會被說成「標在已經改掉的元件上」——那是誣賴，
+  // 而且會讓人以為留言弄丟了。
   const visible = [];
+  let hidden = 0;   // 元素還在，只是這個當下看不到
+  let gone = 0;     // 錨點解不出任何元素
   marks.forEach((m) => {
     const { node, how } = resolveAnchor(m);
-    if (!node) return;
-    // 元素還在 DOM 裡但目前不顯示（切到別的分頁、收合的區塊）→ 不畫。
-    // 它的矩形是 0×0，畫下去會在畫面左上角變成一顆 4px 的紅點，指著沒人看得到的東西。
-    if (!node.getClientRects().length) return;
+    if (!node) { gone++; return; }
+    // 目前不顯示的不畫：它的矩形是 0×0，畫下去會在畫面左上角變成一顆 4px 的紅點，
+    // 指著沒人看得到的東西。
+    if (!node.getClientRects().length) { hidden++; return; }
     drawBox(m, node, how, visible.length, handlers.onFocusId);
     visible.push({ mark: m, how });
   });
 
   ui.count.textContent = String(visible.length);
   ui.list.innerHTML = '';
-  const missing = marks.length - visible.length;
-  // 「還沒有標記」只在真的一則都沒有時說。有 missing 卻說「還沒有標記」是自相矛盾的，
+  // 「還沒有標記」只在真的一則都沒有時說。有畫不出來的卻說「還沒有標記」是自相矛盾的，
   // 底下馬上又寫「另有 N 則」——看的人會以為工具壞了。
   if (!marks.length) {
     ui.list.append(el('div', 'em-note', { textContent: '這一頁還沒有標記。按右下角的按鈕開始。' }));
   } else {
     visible.forEach(({ mark, how }, i) => ui.list.append(drawRow(mark, i, handlers, how)));
   }
-  if (missing > 0) {
+  if (hidden > 0) {
     ui.list.append(el('div', 'em-note', {
-      textContent: `另有 ${missing} 則標在已經改掉的元件上，找不到位置所以沒列出來（內容還在，收回饋的人讀得到）。`,
+      textContent: `另有 ${hidden} 則在目前看不到的地方（那一區收起來了，或在別的分頁）。`
+        + '切過去就會看到它們。',
+    }));
+  }
+  if (gone > 0) {
+    ui.list.append(el('div', 'em-note', {
+      textContent: `另有 ${gone} 則標在已經改掉的元件上，找不到位置所以沒列出來（內容還在，收回饋的人讀得到）。`,
     }));
   }
 }

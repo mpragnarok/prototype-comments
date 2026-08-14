@@ -87,6 +87,11 @@ function pickTarget(shield, clientX, clientY) {
  *   - 呼叫的是**當下**那支函式，不是原生的——別的函式庫若也 patch 過，它的行為照樣跑到，
  *     我們只在它之後補發事件，不搶不蓋。
  *   - patch 不解除：解除等於把後來疊上去的別人那層一起砍掉。它只多發一個事件，留著無害。
+ *   - **patch 不了就跳過那一支**：host 頁面凍結 history（`Object.freeze`）、或把某一支設成
+ *     不可寫，都是合法的做法，而那時賦值在 strict mode 會丟錯。讓錯誤往上冒等於整個回饋
+ *     功能走 `showInitFailure()` 陣亡——為了少一個 SPA 導航觸發點賠掉全部功能不成比例。
+ *   - 旗標在**任何一支包成功**時就要設起來：只包到 pushState 卻沒設旗標的話，下次 init
+ *     會把 pushState 再包一層，一次導航發兩個事件。
  */
 const LOCATION_EVENT = 'em:locationchange';
 const PATCH_FLAG = '__emLocationPatched';
@@ -94,18 +99,29 @@ const PATCH_FLAG = '__emLocationPatched';
 function patchHistory() {
   const history = window.history;
   if (!history || history[PATCH_FLAG]) return;
+  let patched = 0;
   for (const name of ['pushState', 'replaceState']) {
     const previous = history[name];
     if (typeof previous !== 'function') continue;
-    history[name] = function patched(...args) {
+    const wrapper = function patchedHistoryMethod(...args) {
       const result = previous.apply(this, args);
       // 事件一定在原函式之後才發：處理端會去讀 location，早發就讀到舊網址。
       window.dispatchEvent(new Event(LOCATION_EVENT));
       return result;
     };
+    // 兩種失敗都要接住：strict mode 會丟錯，非 strict 的宿主則可能靜靜不生效——
+    // 所以賦值後回頭確認真的換上去了，沒換上去就當這一支沒包到。
+    try {
+      history[name] = wrapper;
+      if (history[name] === wrapper) patched++;
+    } catch { /* 這一支包不了，其餘照常 */ }
   }
+  if (!patched) return;   // 一支都沒包到 → 不設旗標，之後的 init 還有機會再試
   try { Object.defineProperty(history, PATCH_FLAG, { value: true }); }
-  catch { history[PATCH_FLAG] = true; }
+  catch {
+    try { history[PATCH_FLAG] = true; }
+    catch { /* 旗標也寫不進去；能包的都包過了，重複 init 頂多多發一個事件，不致命 */ }
+  }
 }
 
 export async function initElementMarkup(opts = {}) {
@@ -477,13 +493,23 @@ async function start(opts) {
    * 「已經畫出來的框，位置還對嗎」的簽章。
    *
    * 只看**被標記的那些元素**在文件座標上的矩形（外加「這則現在錨不到任何元素」這個狀態），
-   * 不看頁面其它任何東西。這是整個閘門的關鍵：畫框不會改變被標記元素的矩形
-   * （`.em-box` 是 absolute，脫離文件流），所以「重畫」永遠不會讓簽章變動——
-   * 沒有這個性質，observer 觸發 render、render 又觸發 observer，就是無限重繪風暴。
+   * 不看頁面其它任何東西。這是整個閘門的關鍵：在正常頁面上，畫框不會改變被標記元素的矩形
+   * （`.em-box` 是 absolute，脫離文件流），所以「重畫」不會讓簽章變動——沒有這個性質，
+   * observer 觸發 render、render 又觸發 observer，就是無限重繪風暴。
+   *
+   * 這是「正常頁面上成立」，不是結構上不可能：host 頁面若寫了指名我們 class 的選擇器
+   * （例如 `body:has(.em-box) #target { … }`），插入框確實會改變目標的矩形，那時
+   * 簽章會在「有框／沒框」之間來回而重繪不會停。刻意不為此加防禦——要踩到得由 host
+   * 自己寫 CSS 指名我們的內部 class，發生機率極低，而防禦碼的代價是常駐的。
+   * 真的遇到時症狀會很明顯（那一頁持續重繪），從這段註解回推得到原因。
    *
    * 用文件座標（加上捲動位移）而不是視窗座標：純捲動不該讓簽章變，捲動本來就有自己那條線。
+   *
+   * 每則都要 querySelector ＋ getBoundingClientRect（強制 layout），所以沒有標記時
+   * 直接回空字串——多數頁面多數時候就是這個狀態，不必為了「沒有東西」去量頁面。
    */
   function anchorSignature() {
+    if (!state.marks.length) return '';
     const parts = [];
     for (const mark of state.marks) {
       const { node } = resolveAnchor(mark);
@@ -538,9 +564,11 @@ async function start(opts) {
    *
    * 三層閘門，缺一就會變成重繪風暴（refresh 改 DOM → observer 再觸發 → 無限循環）：
    *   1. 自己造成的變動直接略過（工具的 DOM 一律有 `data-em`）。
-   *   2. 每幀最多排一次（requestAnimationFrame 節流）。
+   *   2. 每幀最多排一次（requestAnimationFrame 節流）；沒有任何標記時連排都不排。
    *   3. rAF 內比對錨點簽章，位置沒變就不重畫——這層才是真正止血的，因為第 1 層擋不掉
    *      「頁面自己的 hover / 動畫」這種與標記無關的變動。
+   * 簽章真的變了之後還有第 4 層「沉澱期」，見下方 settleStep——那層處理的是
+   * 「一次 mutation、卻要花 400ms 才走到定位」的 CSS transition。
    */
   const isSelfMutation = (m) => {
     if (m.target instanceof Element && m.target.closest('[data-em]')) return true;
@@ -548,19 +576,71 @@ async function start(opts) {
     return touched.length > 0 && touched.every(n => n instanceof Element && n.hasAttribute('data-em'));
   };
 
+  /**
+   * 第 4 層：位置**變過之後**的沉澱期。
+   *
+   * class 一改只發一次 mutation，但版面不會在那一幀就定下來——展開／切分頁多半是
+   * 300～500ms 的 CSS transition。只在下一幀量一次的話，框會定格在動畫剛開始的位置，
+   * 元素繼續走到終點，而之後沒有任何觸發點會再修正它（transition 期間不發 mutation）。
+   *
+   * 所以簽章一旦真的變動，就進入沉澱期：每幀重量一次，變了就重畫，直到連續
+   * SETTLE_STABLE_FRAMES 幀不變、或超過 SETTLE_MAX_MS 為止。
+   *
+   * 這不會破壞防重繪風暴的性質：
+   *   - 沉澱期**只在簽章真的變過**之後才開始，頁面自己的 hover／顏色動畫進不來
+   *     （它們不改被標記元素的矩形，簽章不動）。
+   *   - 期間仍是每幀最多量一次、仍然簽章比對過才重畫。
+   *   - 有時間上限，就算頁面在跑無止盡的動畫也會自己停，不會變成常駐的每幀重繪。
+   */
+  const SETTLE_STABLE_FRAMES = 3;
+  const SETTLE_MAX_MS = 1000;
+  let settleRaf = null;
+  let settleUntil = 0;
+  let stableFrames = 0;
+
+  const settleStep = () => {
+    settleRaf = requestAnimationFrame(() => {
+      settleRaf = null;
+      if (anchorSignature() === lastSignature) stableFrames++;
+      else { stableFrames = 0; reflow(); }   // reflow → render 會把 lastSignature 對齊現況
+      if (stableFrames >= SETTLE_STABLE_FRAMES || performance.now() > settleUntil) return;
+      settleStep();
+    });
+  };
+  const startSettle = () => {
+    settleUntil = performance.now() + SETTLE_MAX_MS;   // 又動了就把期限往後推
+    stableFrames = 0;
+    if (settleRaf === null) settleStep();
+  };
+
   let reflowRaf = null;
   const scheduleReflow = () => {
-    if (reflowRaf !== null) return;
+    if (reflowRaf !== null || settleRaf !== null) return;   // 沉澱期本身就在每幀重量了
+    if (!state.marks.length) return;                       // 沒有標記就沒有東西要對齊
     reflowRaf = requestAnimationFrame(() => {
       reflowRaf = null;
       if (anchorSignature() === lastSignature) return;
       reflow();
+      startSettle();
     });
   };
   const onMutate = (records) => {
     if (records.every(isSelfMutation)) return;
     scheduleReflow();
   };
+  /**
+   * transition／animation 結束時再補一次。
+   *
+   * 兩者互補：沉澱期接得住比 1 秒短的、以及被中途取代而根本不發 transitionend 的動畫；
+   * 這一支接得住比 1 秒長的。走 capture 是因為 animationend 不保證冒泡到 document。
+   */
+  const onAnimationEnd = (e) => {
+    if (e.target instanceof Element && e.target.closest('[data-em]')) return;   // 我們自己的動畫
+    scheduleReflow();
+  };
+  document.addEventListener('transitionend', onAnimationEnd, true);
+  document.addEventListener('animationend', onAnimationEnd, true);
+
   let observer = null;
   try {
     observer = new MutationObserver(onMutate);
@@ -589,8 +669,11 @@ async function start(opts) {
       removeEventListener('hashchange', onRoute);
       removeEventListener('popstate', onRoute);
       removeEventListener(LOCATION_EVENT, onRoute);
+      document.removeEventListener('transitionend', onAnimationEnd, true);
+      document.removeEventListener('animationend', onAnimationEnd, true);
       observer?.disconnect();
       if (reflowRaf !== null) cancelAnimationFrame(reflowRaf);
+      if (settleRaf !== null) cancelAnimationFrame(settleRaf);
       document.querySelectorAll('.em-box').forEach(n => n.remove());
       document.body.classList.remove('em-marking');
       ui.destroy();
