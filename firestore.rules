@@ -21,7 +21,8 @@ service cloud.firestore {
         && request.auth.token.email_verified == true;
     }
 
-    // 設計審查留言。Read 公開（分享連結即可看），寫入限已登入帳號。
+    // 設計審查留言。Read 預設公開（jenny-ortho 例外，理由見下方 match 區塊），
+    // 寫入限已登入帳號。
     // 作者本人可改全部欄位；其他登入同事只能改白名單欄位（協作型、非破壞性）：
     //   resolved + resolvedBy/resolvedByUid/resolvedAt = 收尾歸屬（pc.js resolve 一次寫這四欄）
     //   reactions                                       = 表情
@@ -30,16 +31,94 @@ service cloud.firestore {
     //
     // ⚠ 白名單必須與 src/index.js 的 resolvePayload() 寫入欄位同步：
     //   改 pc.js 寫入欄位時，這份白名單要一起改，然後 `make deploy-rules`。
+    // 匿名標記（src/element-markup.js）。放行的理由與嚴格的限制：
+    //
+    // 收回饋的對象是產品的真實使用者，而連結常常是從 LINE 點開的——Google 封鎖
+    // in-app WebView 的 OAuth（signInWithRedirect 也一樣擋），所以「要求 Google
+    // 登入」等於那些人永遠留不了言。匿名登入不走 OAuth，在哪個瀏覽器都能用。
+    //
+    // 代價由形狀限制擋住：匿名只能建立「元素標記」這一種 doc，欄位、長度、
+    // resolved 初值都鎖死，authorUid 必須是自己的 uid。它寫不出設計審查用的
+    // 討論串、reactions 或決策紀錄——那些仍然只有具名帳號能建。
+    function isAnonMark() {
+      let d = request.resource.data;
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'anonymous'
+        && d.authorUid == request.auth.uid
+        && d.type == 'positional'
+        && d.resolved == false
+        && d.selector is string && d.selector.size() > 0 && d.selector.size() <= 500
+        && d.body is string && d.body.size() > 0 && d.body.size() <= 2000
+        && d.screenId is string && d.screenId.size() <= 300
+        && d.authorName is string && d.authorName.size() <= 50;
+    }
+
     match /prototype-comments/{projectId}/comments/{commentId} {
-      allow read: if true;
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() &&
+      // Read 預設公開（同事的設計審查留言，分享連結即可看）。
+      //
+      // 例外：`jenny-ortho` 底下**不是**同事間的設計審查留言，而是一位執業牙醫
+      // 對自己診所系統留下的真實臨床回饋——內容含具名醫師、器材廠牌、實際的
+      // 臨床做法。那些留言對外公開等於把一間診所的內部作業攤在網路上，與其他
+      // prototype「給同事看的 UI 意見」性質完全不同，所以只有這個 projectId 收緊。
+      //
+      // 收緊的形狀刻意選成「要有 auth，任何 auth 都算」而不是限特定帳號：
+      // jenny-ortho 的頁面（user-feedback-markup.js）本來就會先做**匿名登入**才
+      // 顯示標記，所以 request.auth != null 對真實使用者恆成立，顯示行為零變化；
+      // 擋掉的是完全不帶 token 的爬蟲與路人 —— 也就是搜尋引擎與拿到網址亂點的人。
+      //
+      // 其他 prototype（vitallink / coshift / badminton …）不受影響，維持
+      // 「分享連結即可看」。要再收緊別的 projectId，把它加進這個條件即可。
+      allow read: if projectId != 'jenny-ortho' || request.auth != null;
+      allow create: if isSignedIn() || isAnonMark();
+      // 匿名也能把標記標成「已處理」——收回饋的人自己往往也在 LINE 裡看這頁。
+      // 能改的只有收尾那幾個欄位，內容改不動。
+      allow update: if request.auth != null &&
         (request.auth.uid == resource.data.authorUid ||
          request.resource.data.diff(resource.data).affectedKeys()
            .hasOnly(['resolved', 'resolvedBy', 'resolvedByUid', 'resolvedAt',
                      'reactions', 'decision', 'decisionNote']));
-      allow delete: if isSignedIn() &&
+      // 匿名也要能刪自己的：留言的人事後想撤回是很正常的事，而他不可能「登入」。
+      // 仍然只能刪自己的——uid 對不上就擋掉。
+      allow delete: if request.auth != null &&
         request.auth.uid == resource.data.authorUid;
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // 終端使用者回饋（src/user-feedback.js）。
+    //
+    // 與上面的設計審查留言是**兩種不同的東西**，刻意分開存：
+    //   comments      給同事，要登入，可協作 resolve，read 預設公開
+    //                 （jenny-ortho 是例外，那份是真實使用者的臨床回饋，要 auth）。
+    //   user-feedback 給產品的真實使用者（醫師、客戶），**免登入**——
+    //                 要他們先登入才留言，回饋率會掉。
+    //
+    // 免登入的代價由這三件事擋住，缺一不可：
+    //   1. 只能 create。read/update/delete 全關，連寫的人自己都讀不回來，
+    //      所以它不會變成一個公開留言板，也沒有爬取價值。
+    //   2. 欄位白名單 + 長度上限（圖片 700 KB，留在單文件 1 MiB 之內）。
+    //   3. 本機 bridge 用 Google 服務憑證讀取（繞過 rules），所以不必開 read。
+    //
+    // ⚠ 因此這個 collection **不得存放敏感或個人資料**。
+    // ⚠ 欄位白名單要與 src/user-feedback.js 的 send() 寫入欄位同步。
+    function hasValidFeedbackShape() {
+      let note = request.resource.data;
+      return note.keys().hasOnly([
+          'page', 'selector', 'elementText', 'note',
+          'image', 'reporter', 'createdAt', 'status'
+        ]) &&
+        note.status == 'new' &&
+        note.note is string && note.note.size() > 0 && note.note.size() <= 2000 &&
+        note.image is string && note.image.size() <= 700000 &&
+        note.page is string && note.page.size() <= 200 &&
+        note.selector is string && note.selector.size() <= 500 &&
+        note.elementText is string && note.elementText.size() <= 200 &&
+        note.reporter is string && note.reporter.size() <= 50 &&
+        note.createdAt is string && note.createdAt.size() <= 40;
+    }
+
+    match /user-feedback/{projectId}/notes/{noteId} {
+      allow create: if hasValidFeedbackShape();
+      allow read, update, delete: if false;
     }
   }
 }

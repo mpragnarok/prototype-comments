@@ -1,0 +1,81 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>user-feedback harness</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px; }
+  .card { border: 1px solid #ccc; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+  button { min-height: 44px; padding: 0 16px; }
+</style>
+
+<!-- 宿主頁面的內容：測試要驗證「回饋模式開著時，點這些不會觸發它們原本的行為」 -->
+<div class="card">
+  <h2 id="section-title">四象限牙位表</h2>
+  <button id="host-btn" aria-label="14 右上第一小臼齒" onclick="window.__hostClicked = true">14</button>
+</div>
+<div class="card">
+  <p id="plain-text">沒有 aria-label 的一段文字</p>
+</div>
+
+<script type="module">
+  import { createMockFirebase } from '../mock-firebase.js';
+  import { initUserFeedback } from '../../src/user-feedback.js';
+
+  const mockFb = createMockFirebase({});
+  window.__mockFb = mockFb;
+  window.__hostClicked = false;
+
+  /** 讀回目前寫進 mock 的文件：mock 的 onSnapshot 會立即推一次當前狀態 */
+  window.__docs = () => {
+    let out = [];
+    const unsub = mockFb.onSnapshot(null, snap =>
+      out = snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    unsub();
+    return out;
+  };
+
+  // ?pagefn=1 改用「函式形式的 page」，模擬投影片 deck／SPA：網址不變但當前頁會變。
+  // 測試會在掛載之後才改 window.__currentPage，用來驗證求值時機是送出當下、不是掛載當下。
+  const usePageFn = new URLSearchParams(location.search).has('pagefn');
+  window.__currentPage = '/harness/slide-1';
+
+  // ?transport=http|supabase 改走「POST 到自己的端點」那條路——完全不碰 Firebase。
+  // fetch 在這裡被換掉，請求都記進 window.__requests 供斷言（?fail 模擬端點掛掉）。
+  const mode = new URLSearchParams(location.search).get('transport');
+  window.__requests = [];
+  if (mode) {
+    const failing = new URLSearchParams(location.search).has('fail');
+    window.fetch = async (url, init = {}) => {
+      window.__requests.push({
+        url: String(url),
+        headers: init.headers || {},
+        body: JSON.parse(init.body),
+      });
+      return new Response(failing ? 'boom' : '', { status: failing ? 500 : 201 });
+    };
+  }
+
+  // ?seedapp 先建一個「頁面自己的」預設 Firebase app，模擬同頁已經掛了 pc.js 或自家 SDK；
+  // ?fbconfig 則讓 initUserFeedback 傳入自己的專案設定。兩者組合用來驗證
+  // 「傳了 config 不該被別人的預設 app 蓋掉」「沒傳 config 也不該寫進別人的專案」。
+  const params = new URLSearchParams(location.search);
+  if (params.has('seedapp')) mockFb.initializeApp({ projectId: 'someone-else' });
+  // 讓測試能模擬「同一頁掛了第二份 user-feedback，但給了不同的 Firebase 專案」
+  window.__initAgain = (firebaseConfig) =>
+    initUserFeedback({ projectId: 'harness', firebaseConfig, _firebase: mockFb });
+  window.__apps = () =>
+    mockFb.getApps().map(a => ({ name: a.name, projectId: a.options?.projectId }));
+
+  const TRANSPORTS = {
+    http: { type: 'http', url: 'https://example.test/feedback', headers: { 'X-Token': 'abc' } },
+    supabase: { type: 'supabase', url: 'https://proj.supabase.co/', anonKey: 'anon-key-123' },
+  };
+
+  window.__ready = initUserFeedback({
+    projectId: 'harness',
+    page: usePageFn ? () => window.__currentPage : '/harness/',
+    transport: TRANSPORTS[mode],
+    firebaseConfig: params.has('fbconfig') ? { projectId: 'my-own-project' } : undefined,
+    _firebase: mockFb,
+    onSent: () => { window.__sent = true; },
+  });
+</script>

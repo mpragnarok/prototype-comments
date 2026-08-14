@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!--
+  錨點穩定性的 e2e 載入頁。
+
+  刻意長成「一疊問題卡」的樣子——那是回饋工具實際被用的地方（jenny-ortho-crm
+  的 /preview/* 就是這個形狀），而且它正是出事的形狀：只要有人在最前面插一張新卡，
+  `main > div:nth-of-type(N)` 這種純位置的錨點就會整批往後推一格，
+  每一則回饋都貼到別題身上，而且畫面上完全看不出來。
+
+  所以這裡有三種卡：有 data-fb-id 的、沒有的、以及文字重複的
+  （文字比對不能因為「看起來一樣」就亂認一個）。
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>anchor-stability e2e harness</title>
+<style>
+  body { margin:0; font:15px/1.6 system-ui, sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:24px; }
+  .card { border:1px solid #ddd; border-radius:10px; padding:16px; margin-bottom:14px; }
+  .field { font-weight:700; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">你的資料，還有幾件事想問你</h1>
+  <div class="card" data-fb-id="q-extraction">
+    <div><p class="field">Extraction</p><p>那個單獨的「x」是什麼意思？</p></div>
+  </div>
+  <div class="card" data-fb-id="q-brand">
+    <div><p class="field">品牌</p><p>我已經把它對應成系統的「矯正方式」了，這樣對嗎？</p></div>
+  </div>
+  <!-- 沒有錨點的卡：舊資料與還沒補 data-fb-id 的頁面都是這個樣子 -->
+  <div class="card">
+    <div><p class="field">合作醫師</p><p>是轉診來的醫師，還是一起處理這個 case 的醫師？</p></div>
+  </div>
+  <!-- 同一段文字出現兩次：文字比對命中多個時不可以亂挑一個 -->
+  <div class="card"><div><p>對嗎？</p></div></div>
+  <div class="card"><div><p>對嗎？</p></div></div>
+</main>
+
+<script type="module">
+  import { initElementMarkup } from '/src/user-feedback-markup.js';
+  import { createMockFirebase } from '/test/mock-firebase.js';
+
+  window.__emTest = {
+    createMockFirebase,
+    init: (mockFb, overrides = {}) => initElementMarkup({
+      projectId: 'e2e',
+      page: () => '/questions',
+      _firebase: mockFb,
+      ...overrides,
+    }),
+    /** 模擬「有人在最前面插了一個新區塊」——今天真的發生的那件事 */
+    insertBlockAtTop: () => {
+      const block = document.createElement('div');
+      block.className = 'card';
+      block.innerHTML = '<div><p class="field">這幾題最急</p><p>系統裡已經有一組值在跑了。</p></div>';
+      document.querySelector('main').insertBefore(block, document.querySelector('.card'));
+    },
+    ready: true,
+  };
+</script>
+</body>
+</html>

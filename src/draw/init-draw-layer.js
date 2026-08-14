@@ -2339,11 +2339,11 @@ export function initDrawLayer(target, opts = {}) {
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
     // 決策 A：外部（如 live-markup 換頁監聽）呼叫 → 依當前 getScreenId() 重畫，只顯示當前頁標注。
     refresh: () => render(),
-    clear: () => { [...moveOrigTransform.keys()].forEach(sel => resetMoveOf(sel, querySelectorSafe(sel))); state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sentConfirmN = 0; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; state.moves = []; render(); persistLocalSave(); persistSentState(); },
+    clear: () => { [...moveOrigTransform.keys()].forEach(sel => { resetMoveOf(sel, querySelectorSafe(sel)); }); state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sentConfirmN = 0; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; state.moves = []; render(); persistLocalSave(); persistSentState(); },
     destroy: () => {
       stopLive(); // Batch 4：拆掉 live reposition 監聽/rAF/ResizeObserver
       replyPolling = false; // 停掉 AI 方案卡輪詢
-      [...moveOrigTransform.keys()].forEach(sel => resetMoveOf(sel, querySelectorSafe(sel))); // 還原被拖過的真實元件 transform
+      [...moveOrigTransform.keys()].forEach(sel => { resetMoveOf(sel, querySelectorSafe(sel)); }); // 還原被拖過的真實元件 transform
       svg.remove(); toolbar.remove(); contextMenu.remove(); replyLayer.remove();
       noteLayer.remove(); moveLayer.remove(); closeNotePanel(); // 留言層 + 拖曳層 + 放大面板/遮罩
       recordTab.remove(); recordDrawer.remove();

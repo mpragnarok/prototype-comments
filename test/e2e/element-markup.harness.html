@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!--
+  element-markup 的 e2e 載入頁：模擬一個真實 app（結構刻意有巢狀與重複 tag，
+  好讓 nth-of-type 路徑真的被用到），掛上 in-memory mock firebase。
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<!-- 沒有這行，行動模式下瀏覽器會用 980px 的虛擬視窗，測試就測不到真實手機的窄畫面
+     （實際踩過：popover 的邊界計算在測試裡永遠寬鬆，線上才發現跑出畫面） -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>element-markup e2e harness</title>
+<style>
+  body { margin:0; font:15px/1.6 system-ui, sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:24px; }
+  .card { border:1px solid #ddd; border-radius:10px; padding:16px; margin-bottom:14px; }
+  .row { display:flex; gap:8px; align-items:center; margin:10px 0; }
+  button.app { border:1px solid #ccc; background:#fff; border-radius:8px; padding:8px 14px; font:inherit; cursor:pointer; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">弓線紀錄</h1>
+  <div class="card">
+    <div class="row"><span>材質</span>
+      <button class="app">NiTi</button><button class="app">SS</button>
+    </div>
+    <div class="row" id="size-row"><span>尺寸</span>
+      <button class="app">012</button><button class="app" id="size-014">014</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row"><span>彎折</span><button class="app" id="btn-step">Step</button></div>
+  </div>
+  <!-- MUI 的圖示都自帶 data-testid，同一頁往往重複好幾個：錨定不能一看到就用，
+       否則會指到「第一個同名的」，也就是別人身上。 -->
+  <div class="card" id="dup-zone">
+    <button class="app" id="dup-a"><span data-testid="ReplayIcon">↻</span> 重來 A</button>
+    <button class="app" id="dup-b"><span data-testid="ReplayIcon">↻</span> 重來 B</button>
+  </div>
+  <!-- 唯一的 data-testid 才該被當成錨點 -->
+  <div class="card"><button class="app" data-testid="unique-btn">唯一標記的按鈕</button></div>
+</main>
+
+<script type="module">
+  import { initElementMarkup } from '/src/user-feedback-markup.js';
+  import { createMockFirebase } from '/test/mock-firebase.js';
+
+  // 預設固定回 '/wire'：多數測試不該被 harness 自己的檔案路徑影響。
+  // 要驗 pushState 換頁的那幾條把 __emPageFromLocation 打開，page() 才真的跟著網址走
+  // （page 是函式，沒辦法從 page.evaluate 的參數傳進來，只能用旗標切換）。
+  const pageId = () => (window.__emPageFromLocation ? location.pathname : '/wire');
+
+  window.__emTest = {
+    createMockFirebase,
+    init: (mockFb, overrides = {}) => initElementMarkup({
+      projectId: 'e2e',
+      page: pageId,
+      _firebase: mockFb,
+      ...overrides,
+    }),
+    ready: true,
+  };
+</script>
+</body>
+</html>
