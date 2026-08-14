@@ -1,4 +1,4 @@
-/* pc.js 5a0afe5 2026-08-14T16:24:11Z */
+/* pc.js 85c0399 2026-08-14T16:37:33Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -3788,7 +3788,7 @@ function initDrawLayer(target, opts = {}) {
       row, isSelected(row.id), onRecordRowClick, !state.sendUnchecked[row.id], onToggleSendChecked,
       row.isNote ? removeNote : (row.isDecision ? removeDecision : (row.isMove ? removeMove : null)),
       // 收納中的標注（已送、畫布隱藏）→ 提供「還原到畫布」單筆操作
-      (row.archived && !row.isNote && !row.isDecision) ? restoreObject : null
+      (row.archived && !row.isNote && !row.isDecision && !row.isMove) ? restoreObject : null
     )); });
     refreshRecordPreview();
   }
@@ -5423,7 +5423,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = '5a0afe5';
+export const PC_VERSION = '85c0399';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';

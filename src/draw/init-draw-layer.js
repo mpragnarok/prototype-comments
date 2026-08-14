@@ -783,7 +783,7 @@ export function initDrawLayer(target, opts = {}) {
       row, isSelected(row.id), onRecordRowClick, !state.sendUnchecked[row.id], onToggleSendChecked,
       row.isNote ? removeNote : (row.isDecision ? removeDecision : (row.isMove ? removeMove : null)),
       // 收納中的標注（已送、畫布隱藏）→ 提供「還原到畫布」單筆操作
-      (row.archived && !row.isNote && !row.isDecision) ? restoreObject : null
+      (row.archived && !row.isNote && !row.isDecision && !row.isMove) ? restoreObject : null
     )); });
     refreshRecordPreview();
   }
