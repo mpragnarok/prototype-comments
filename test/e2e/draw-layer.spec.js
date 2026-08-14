@@ -884,7 +884,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.out.pen === '7', `pen 筆刷徽章應為 7，實際 ${r.out.pen}`);
     assert(r.allVisible && r.allPE, `徽章應可見且 pointer-events:none（visible=${r.allVisible} pe=${r.allPE}）`);
     assert(!r.markerBadge && !r.hlBadge, 'marker/highlighter 不應有徽章');
-    assert(r.order.join(',') === '1,2,3,4,5,6,7,8,C', `工具列徽章應依序 1-8 + 留言模式 C，實際 ${r.order}`);
+    assert(r.order.join(',') === '1,2,3,4,5,6,7,8,C,M', `工具列徽章應依序 1-8 + 留言模式 C + 元件拖曳 M，實際 ${r.order}`);
     assert(!r.pencilToolBtn, '不應有獨立 pencil 工具鈕（改由筆刷代表）');
     assert(!r.offBadge && !r.actBadge, 'off/動作 鈕不應有徽章');
   });
