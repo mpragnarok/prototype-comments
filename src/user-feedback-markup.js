@@ -78,6 +78,36 @@ function pickTarget(shield, clientX, clientY) {
   return node;
 }
 
+/**
+ * SPA 換頁：`popstate` 只在上一頁／下一頁時發，站內用 `pushState` 導航**不會**發——
+ * 於是標記層還停在前一頁的資料上，而且完全不報錯。這裡補一個自訂事件補上那個缺口。
+ *
+ * 攔截寫成「可重入 + 合作式」：
+ *   - 只 patch 一次（旗標記在 history 物件上），同頁掛多份元件不會疊上好幾層。
+ *   - 呼叫的是**當下**那支函式，不是原生的——別的函式庫若也 patch 過，它的行為照樣跑到，
+ *     我們只在它之後補發事件，不搶不蓋。
+ *   - patch 不解除：解除等於把後來疊上去的別人那層一起砍掉。它只多發一個事件，留著無害。
+ */
+const LOCATION_EVENT = 'em:locationchange';
+const PATCH_FLAG = '__emLocationPatched';
+
+function patchHistory() {
+  const history = window.history;
+  if (!history || history[PATCH_FLAG]) return;
+  for (const name of ['pushState', 'replaceState']) {
+    const previous = history[name];
+    if (typeof previous !== 'function') continue;
+    history[name] = function patched(...args) {
+      const result = previous.apply(this, args);
+      // 事件一定在原函式之後才發：處理端會去讀 location，早發就讀到舊網址。
+      window.dispatchEvent(new Event(LOCATION_EVENT));
+      return result;
+    };
+  }
+  try { Object.defineProperty(history, PATCH_FLAG, { value: true }); }
+  catch { history[PATCH_FLAG] = true; }
+}
+
 export async function initElementMarkup(opts = {}) {
   try {
     return await start(opts);
@@ -443,6 +473,30 @@ async function start(opts) {
     onFocusId: popoverFor,
   });
 
+  /**
+   * 「已經畫出來的框，位置還對嗎」的簽章。
+   *
+   * 只看**被標記的那些元素**在文件座標上的矩形（外加「這則現在錨不到任何元素」這個狀態），
+   * 不看頁面其它任何東西。這是整個閘門的關鍵：畫框不會改變被標記元素的矩形
+   * （`.em-box` 是 absolute，脫離文件流），所以「重畫」永遠不會讓簽章變動——
+   * 沒有這個性質，observer 觸發 render、render 又觸發 observer，就是無限重繪風暴。
+   *
+   * 用文件座標（加上捲動位移）而不是視窗座標：純捲動不該讓簽章變，捲動本來就有自己那條線。
+   */
+  function anchorSignature() {
+    const parts = [];
+    for (const mark of state.marks) {
+      const { node } = resolveAnchor(mark);
+      if (!node) { parts.push(`${mark.id}:none`); continue; }
+      const r = node.getBoundingClientRect();
+      parts.push(`${mark.id}:${Math.round(r.left + window.scrollX)},${Math.round(r.top + window.scrollY)}`
+        + `,${Math.round(r.width)},${Math.round(r.height)}`);
+    }
+    return parts.join('|');
+  }
+
+  let lastSignature = '';
+
   function render() {
     renderMarks(ui, state.marks, handlers());
     // 視窗顯示的那則若已經不在了（自己刪掉、或別人刪的），就收起來——
@@ -450,6 +504,8 @@ async function start(opts) {
     // 因為刪除走的是 snapshot 更新，不是捲動。
     const shownId = ui.pop.dataset.markId;
     if (shownId && !state.marks.some(m => String(m.id) === shownId)) hideMarkPopover(ui);
+    // 畫完就把簽章對齊現況：少了這行，第一次 DOM 抖動會因為「簽章還沒初始化」白重畫一次。
+    lastSignature = anchorSignature();
   }
 
   // 捲動／改變視窗：重畫框，並讓留言視窗重新對準它那個框
@@ -470,6 +526,54 @@ async function start(opts) {
   const onRoute = () => subscribe();
   addEventListener('hashchange', onRoute);
   addEventListener('popstate', onRoute);
+  // pushState/replaceState 不發 popstate，所以自己補一支（見檔案上方 patchHistory）
+  patchHistory();
+  addEventListener(LOCATION_EVENT, onRoute);
+
+  /**
+   * 頁面內容變動 → 重新定位（沒有換網址的情況）。
+   *
+   * 展開一段文字、切換分頁、載入圖片……都會把已標記的元素推到別的位置，而標記框是絕對座標，
+   * 不會自己跟上：使用者看到的是「框指著隔壁那個東西」，沒有任何錯誤訊息。
+   *
+   * 三層閘門，缺一就會變成重繪風暴（refresh 改 DOM → observer 再觸發 → 無限循環）：
+   *   1. 自己造成的變動直接略過（工具的 DOM 一律有 `data-em`）。
+   *   2. 每幀最多排一次（requestAnimationFrame 節流）。
+   *   3. rAF 內比對錨點簽章，位置沒變就不重畫——這層才是真正止血的，因為第 1 層擋不掉
+   *      「頁面自己的 hover / 動畫」這種與標記無關的變動。
+   */
+  const isSelfMutation = (m) => {
+    if (m.target instanceof Element && m.target.closest('[data-em]')) return true;
+    const touched = [...m.addedNodes, ...m.removedNodes];
+    return touched.length > 0 && touched.every(n => n instanceof Element && n.hasAttribute('data-em'));
+  };
+
+  let reflowRaf = null;
+  const scheduleReflow = () => {
+    if (reflowRaf !== null) return;
+    reflowRaf = requestAnimationFrame(() => {
+      reflowRaf = null;
+      if (anchorSignature() === lastSignature) return;
+      reflow();
+    });
+  };
+  const onMutate = (records) => {
+    if (records.every(isSelfMutation)) return;
+    scheduleReflow();
+  };
+  let observer = null;
+  try {
+    observer = new MutationObserver(onMutate);
+    observer.observe(document.body, {
+      attributes: true,
+      // 只盯這三個屬性：顯示／隱藏與版面幾乎都是走它們。盯全部屬性等於每個 aria-*、
+      // data-* 更新都要進一次閘門，成本大而多出來的命中近乎零。
+      attributeFilter: ['class', 'style', 'hidden'],
+      // childList 也要：「在被標記元素上方插入一段」是插節點，不是改屬性。
+      childList: true,
+      subtree: true,
+    });
+  } catch { /* 環境沒有 MutationObserver → 至少 resize/scroll/route 那幾條還在 */ }
 
   refreshFab();
   subscribe();
@@ -484,6 +588,9 @@ async function start(opts) {
       document.removeEventListener('keydown', onEsc);
       removeEventListener('hashchange', onRoute);
       removeEventListener('popstate', onRoute);
+      removeEventListener(LOCATION_EVENT, onRoute);
+      observer?.disconnect();
+      if (reflowRaf !== null) cancelAnimationFrame(reflowRaf);
       document.querySelectorAll('.em-box').forEach(n => n.remove());
       document.body.classList.remove('em-marking');
       ui.destroy();

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>標記會不會跟著頁面走？——自己按按看</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; background: #f4f5f7; color: #1e1e1e;
+         font: 15.5px/1.75 system-ui, -apple-system, "PingFang TC", "Noto Sans TC", sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 28px 20px 140px; }
+
+  .intro { background: #fff; border: 1px solid #e3e5ea; border-left: 5px solid #635a8f;
+           border-radius: 12px; padding: 20px 22px; margin-bottom: 26px; }
+  .intro h1 { margin: 0 0 12px; font-size: 21px; line-height: 1.45; }
+  .intro p { margin: 0 0 10px; }
+  .intro p:last-child { margin-bottom: 0; }
+  .intro strong { color: #4f4775; }
+
+  .steps { background: #fffdf5; border: 1px solid #ecdfb8; border-radius: 12px;
+           padding: 16px 22px; margin-bottom: 26px; }
+  .steps ol { margin: 8px 0 0; padding-left: 22px; }
+  .steps li { margin-bottom: 6px; }
+
+  .card { background: #fff; border: 1px solid #e3e5ea; border-radius: 12px;
+          padding: 18px 20px; margin-bottom: 14px; }
+  .card h3 { margin: 0 0 8px; font-size: 16px; }
+  .card p { margin: 0; }
+
+  .panel { display: none; }
+  .panel.on { display: block; }
+
+  .fold { display: none; }
+  .fold.on { display: block; }
+  .fold .card { background: #f0f7f4; border-color: #cfe4da; }
+
+  .controls { margin: 0 0 26px; background: #fff; border: 2px solid #635a8f; border-radius: 12px;
+              padding: 16px 18px; box-shadow: 0 -2px 18px rgba(0,0,0,.06); }
+  .controls h2 { margin: 0 0 12px; font-size: 15px; color: #4f4775; }
+  .ctl { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+  .ctl:last-child { margin-bottom: 0; }
+  .ctl button { flex: none; min-width: 148px; border: 1px solid #635a8f; background: #635a8f;
+                color: #fff; border-radius: 8px; padding: 9px 14px; font: inherit; font-size: 13.5px;
+                cursor: pointer; }
+  .ctl button:hover { background: #4f4775; }
+  .ctl span { font-size: 13px; color: #55596a; line-height: 1.6; }
+  .where { font-size: 12.5px; color: #6b7080; margin-top: 14px; word-break: break-all; }
+  code { background: #eceef2; border-radius: 4px; padding: 1px 5px; font-size: .92em; }
+</style>
+</head>
+<body>
+<main>
+
+  <section class="intro">
+    <h1>這一頁在測什麼：頁面動了之後，紅色標記框有沒有跟著動</h1>
+    <p>這個回饋工具的用法是——你按右下角的按鈕，然後點頁面上任何一個東西，
+       就會在那個東西身上留下一個<strong>紅色的框</strong>和你寫的一句話。</p>
+    <p>問題在於：網頁的內容是會動的。展開一段說明、切到另一個分頁、
+       或是在你標記過的東西上面又多出一段文字——這些都會把原本那個東西推到別的位置去。
+       <strong>如果框沒有跟著走，它就會停在原地、指著隔壁的東西</strong>，
+       而畫面上不會有任何錯誤訊息，看的人只會以為你當初講的是那個。</p>
+    <p>下面三顆按鈕就是在製造這三種情況。先標一個記，再按按鈕，
+       看框有沒有乖乖跟上。<strong>跟上了，就是修好了。</strong></p>
+  </section>
+
+  <section class="steps">
+    <strong>怎麼玩（30 秒）</strong>
+    <ol>
+      <li>按<strong>右下角紫色的「給回饋」</strong>按鈕。</li>
+      <li>點下面〈記得標我〉那張卡片裡的文字，隨便寫一句話，送出。那段字上會出現一個紅框。</li>
+      <li>回到下面那三顆按鈕，一顆一顆試，對照它旁邊寫的「應該看到什麼」。</li>
+    </ol>
+  </section>
+
+  <section class="controls">
+    <h2>三個情況，按下去對照看</h2>
+
+    <div class="ctl">
+      <button type="button" id="btn-fold">展開下面一段</button>
+      <span><strong>應該看到：</strong>〈記得標我〉<em>上方</em>多出一段文字，把它整個往下推。
+        你標在它身上的紅框要跟著往下移到新位置，不能留在原地。</span>
+    </div>
+
+    <div class="ctl">
+      <button type="button" id="btn-tab">切換分頁 A / B</button>
+      <span><strong>應該看到：</strong>兩區內容互換顯示。
+        標在被藏起來那一區的紅框會一起消失（而不是縮成小紅點）；切回來它就回來了。</span>
+    </div>
+
+    <div class="ctl">
+      <button type="button" id="btn-route">換網址（pushState）</button>
+      <span><strong>應該看到：</strong>上面的網址列會變成 <code>?view=b</code> 或 <code>?view=a</code>，
+        但頁面沒有重新載入。標記層要整批換成「新網址那一頁」的標記——
+        你在 A 標的東西，切到 B 就不該再看到，切回來又要在。</span>
+    </div>
+
+    <p class="where">目前這一頁的標記存在：<span id="which">（載入中）</span>
+      ｜　標記寫進共用的示範專案，任何人都看得到彼此的標記，請不要留真實個資。</p>
+  </section>
+
+  <div class="fold" id="fold">
+    <div class="card">
+      <h3>剛剛展開的一段</h3>
+      <p>這一段本來是收起來的。它一出現，就把下面所有東西整批往下推——
+         包括你剛標記過的那張卡片。真實頁面上這種事每天都在發生：
+         展開常見問題、載入圖片、跳出提示列。</p>
+      <p>如果紅框沒有跟著往下移，它現在就會停在原地、指著別人。</p>
+    </div>
+  </div>
+
+  <div class="card" id="anchor-card" data-fb-id="demo-anchor">
+    <h3>記得標我</h3>
+    <p>先在這張卡片上留一則回饋。接下來三顆按鈕都會影響到它——
+       它會被往下推、會換到另一個網址底下。</p>
+  </div>
+
+  <div class="panel on" id="panel-a">
+    <div class="card" data-fb-id="panel-a-card">
+      <h3>分頁 A 的內容</h3>
+      <p>這一區屬於「分頁 A」。切到分頁 B 時，這一整區會被藏起來——
+         標在這裡的紅框應該一起收掉，而不是縮成一個小紅點卡在畫面角落。</p>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-b">
+    <div class="card" data-fb-id="panel-b-card">
+      <h3>分頁 B 的內容</h3>
+      <p>這一區屬於「分頁 B」。你可以在這裡也標一則，然後來回切分頁，
+         看看兩邊的標記會不會各自出現在自己那一頁。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>一段用來墊高的內容</h3>
+    <p>多一點內容，捲動起來比較像真的頁面。捲動本來就會重新定位，那條路一直都在，
+       這次補的是「沒有捲動、頁面自己變了」的那些情況。</p>
+  </div>
+
+</main>
+
+<script type="module">
+  // 走相對路徑吃這個 repo 裡的 src/，不是 CDN 上的版本——
+  // 引 CDN 就等於在測上一版，這一頁想證明的改動根本不會被載到。
+  import { initElementMarkup } from '../src/user-feedback-markup.js';
+
+  const view = () => new URLSearchParams(location.search).get('view') || 'a';
+  const label = document.getElementById('which');
+  const showView = () => { label.textContent = `${location.pathname}?view=${view()}`; };
+  showView();
+  addEventListener('em:locationchange', showView);
+  addEventListener('popstate', showView);
+
+  document.getElementById('btn-fold').onclick = () => {
+    document.getElementById('fold').classList.toggle('on');
+  };
+  document.getElementById('btn-tab').onclick = () => {
+    document.getElementById('panel-a').classList.toggle('on');
+    document.getElementById('panel-b').classList.toggle('on');
+  };
+  document.getElementById('btn-route').onclick = () => {
+    const next = view() === 'a' ? 'b' : 'a';
+    history.pushState({}, '', `${location.pathname}?view=${next}`);
+  };
+
+  // firebaseConfig 不傳 → 沿用元件內建的共用示範專案（repo 既有 demo 就是連它，
+  // 不為了這一頁另開一個）。匿名登入，不需要 Google 帳號。
+  initElementMarkup({
+    projectId: 'markup-reflow-demo-v1',
+    // 標記依網址分頁存放，「換網址（pushState）」那顆按鈕才有東西可驗。
+    page: () => `${location.pathname}?view=${view()}`,
+  });
+</script>
+</body>
+</html>

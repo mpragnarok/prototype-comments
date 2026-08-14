@@ -33,11 +33,12 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion fai
 
 const USER = { uid: 'u1', email: 'mina@e2e.local', displayName: 'Mina', photoURL: '' };
 
-async function fresh(browser, { seed = [], user = USER, init = {} } = {}) {
+async function fresh(browser, { seed = [], user = USER, init = {}, pageFromLocation = false } = {}) {
   const page = await browser.newPage({ viewport: { width: 900, height: 760 } });
   page.on('pageerror', e => console.log('     [pageerror]', e.message));
   await page.goto(`http://localhost:${PORT}/test/e2e/element-markup.harness.html`);
   await page.waitForFunction(() => window.__emTest && window.__emTest.ready);
+  if (pageFromLocation) await page.evaluate(() => { window.__emPageFromLocation = true; });
   await page.evaluate(({ seed, user, init }) => {
     const fb = window.__emTest.createMockFirebase({ user, comments: seed });
     window.__fb = fb;
@@ -730,6 +731,123 @@ const seedMark = (over = {}) => ({
     const n = await page.evaluate(() => document.querySelectorAll('.em-box').length);
     await page.close();
     assert(n === 1, `有 parentId 的是討論串回覆，不該自成一個框，實際 ${n}`);
+  });
+
+  // ── 版面變動時的重新定位 ─────────────────────────────────────────────────────
+  // 標記框是絕對座標，元素一移動它就指著別的東西，而且不會報錯。以下四條各守一個缺口。
+
+  await test('頁面抖動（狂改 class/style）一次都不重畫——重繪風暴守門', async () => {
+    const page = await fresh(browser, { seed: [seedMark()] });
+    await page.waitForSelector('.em-box', { timeout: 3000 });
+    const renders = await page.evaluate(async () => {
+      // 數「重畫了幾次」：render() 會先移除所有 .em-box 再重建，數移除次數就是重畫次數。
+      let count = 0;
+      const mo = new MutationObserver((recs) => {
+        for (const r of recs) for (const n of r.removedNodes) {
+          if (n.nodeType === 1 && n.classList && n.classList.contains('em-box')) count++;
+        }
+      });
+      mo.observe(document.body, { childList: true });
+      const target = document.getElementById('title');
+      for (let i = 0; i < 120; i++) {
+        target.classList.toggle('jitter');            // 不存在的 class：不改版面，只製造 mutation
+        target.style.color = i % 2 ? 'red' : 'blue';  // 顏色不影響任何元素的矩形
+      }
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      await new Promise(r => setTimeout(r, 300));
+      mo.disconnect();
+      return count;
+    });
+    await page.close();
+    assert(renders === 0, `位置沒變就不該重畫，實際重畫 ${renders} 次（沒有這道閘門會變成正回饋重繪風暴）`);
+  });
+
+  await test('元素被推走 → 框跟著移動到新位置', async () => {
+    const page = await fresh(browser, { seed: [seedMark()] });
+    await page.waitForSelector('.em-box', { timeout: 3000 });
+    const r = await page.evaluate(async () => {
+      const before = document.querySelector('.em-box').getBoundingClientRect().top;
+      const spacer = document.createElement('div');
+      spacer.style.height = '200px';
+      document.querySelector('main').prepend(spacer);   // 在被標記元素上方插入一段
+      await new Promise(res => setTimeout(res, 400));
+      return {
+        before,
+        boxTop: document.querySelector('.em-box').getBoundingClientRect().top,
+        targetTop: document.getElementById('btn-step').getBoundingClientRect().top,
+      };
+    });
+    await page.close();
+    assert(r.boxTop - r.before > 150, `插入 200px 後框應往下移，實際從 ${r.before} 到 ${r.boxTop}`);
+    assert(Math.abs(r.boxTop - r.targetTop) < 6,
+      `框要重新貼上元素（元素在 ${r.targetTop}），實際 ${r.boxTop}`);
+  });
+
+  await test('切到別的分頁 → 藏起來那一區的框收掉，不留 4px 紅點', async () => {
+    const page = await fresh(browser, {
+      seed: [seedMark({ id: 'a' }), seedMark({ id: 'b', selector: '#size-014' })],
+    });
+    await page.waitForSelector('.em-box', { timeout: 3000 });
+    const r = await page.evaluate(async () => {
+      const before = document.querySelectorAll('.em-box').length;
+      document.getElementById('btn-step').closest('.card').style.display = 'none';
+      await new Promise(res => setTimeout(res, 400));
+      const boxes = [...document.querySelectorAll('.em-box')];
+      return { before, after: boxes.length, ids: boxes.map(b => b.dataset.markId) };
+    });
+    await page.close();
+    assert(r.before === 2, `先要有兩個框，實際 ${r.before}`);
+    assert(r.after === 1 && r.ids[0] === 'b',
+      `藏起來的那則不該再畫框（0×0 會變成左上角的紅點），實際剩 ${JSON.stringify(r.ids)}`);
+  });
+
+  /** pushState/replaceState 都不發 popstate，沒攔截就等於「換頁了但標記層不知道」。 */
+  const routeSeed = [
+    seedMark({ id: 'a', screenId: '/page-a', selector: '#btn-step', body: 'A 頁的標記' }),
+    seedMark({ id: 'b', screenId: '/page-b', selector: '#size-014', body: 'B 頁的標記' }),
+  ];
+  const boxIds = (page) => page.evaluate(() =>
+    [...document.querySelectorAll('.em-box')].map(b => b.dataset.markId));
+
+  await test('pushState 換頁 → 標記層換成新頁的資料（舊頁的消失）', async () => {
+    const page = await fresh(browser, { seed: routeSeed, pageFromLocation: true });
+    await page.evaluate(() => history.pushState({}, '', '/page-a'));
+    await page.waitForTimeout(300);
+    const onA = await boxIds(page);
+    await page.evaluate(() => history.pushState({}, '', '/page-b'));
+    await page.waitForTimeout(300);
+    const onB = await boxIds(page);
+    await page.close();
+    assert(onA.length === 1 && onA[0] === 'a', `/page-a 應只剩 A 的框，實際 ${JSON.stringify(onA)}`);
+    assert(onB.length === 1 && onB[0] === 'b', `/page-b 應換成 B 的框，實際 ${JSON.stringify(onB)}`);
+  });
+
+  await test('replaceState 換頁 → 標記層一樣要跟著換', async () => {
+    const page = await fresh(browser, { seed: routeSeed, pageFromLocation: true });
+    await page.evaluate(() => history.replaceState({}, '', '/page-a'));
+    await page.waitForTimeout(300);
+    const onA = await boxIds(page);
+    await page.evaluate(() => history.replaceState({}, '', '/page-b'));
+    await page.waitForTimeout(300);
+    const onB = await boxIds(page);
+    await page.close();
+    assert(onA.length === 1 && onA[0] === 'a', `/page-a 應只剩 A 的框，實際 ${JSON.stringify(onA)}`);
+    assert(onB.length === 1 && onB[0] === 'b', `/page-b 應換成 B 的框，實際 ${JSON.stringify(onB)}`);
+  });
+
+  await test('history 攔截只裝一次，且原本的 pushState 行為照樣跑到', async () => {
+    const page = await fresh(browser, { seed: [], pageFromLocation: true });
+    const r = await page.evaluate(async () => {
+      let events = 0;
+      addEventListener('em:locationchange', () => { events++; });
+      // 再掛一份元件：可重入的話不該疊出第二層 patch（一次 pushState 只發一個事件）
+      await window.__emTest.init(window.__fb, { projectId: 'e2e-2' });
+      history.pushState({}, '', '/patch-check');
+      return { events, url: location.pathname };
+    });
+    await page.close();
+    assert(r.url === '/patch-check', `原生行為要保留（網址該真的變），實際 ${r.url}`);
+    assert(r.events === 1, `一次 pushState 只該發一個事件（重複 patch 會變 ${r.events} 個）`);
   });
 
   await browser.close();

@@ -27,11 +27,17 @@ export function createMockFirebase(initial = {}) {
     state.docs.set(id, data);
   });
 
-  const docsArray = () => [...state.docs.entries()].map(([id, data]) => ({
-    id,
-    data: () => ({ ...data }),
-  }));
-  const emitSnap = () => state.snapListeners.forEach(l => { l({ docs: docsArray() }); });
+  // where 是真的會篩的。放行等於讓「換頁沒重新訂閱」這種 bug 在測試裡全綠：
+  // 訂閱條件錯了照樣拿到全部文件，畫面看起來對，線上才發現前一頁的標記沒消失。
+  const matches = (data, clauses) => clauses.every(({ field, op, value }) => {
+    if (op === '==') return data[field] === value;
+    if (op === '!=') return data[field] !== value;
+    throw new Error(`mock-firebase: 還沒實作的 where 運算子「${op}」`);
+  });
+  const docsArray = (clauses = []) => [...state.docs.entries()]
+    .filter(([, data]) => matches(data, clauses))
+    .map(([id, data]) => ({ id, data: () => ({ ...data }) }));
+  const emitSnap = () => state.snapListeners.forEach(l => { l.cb({ docs: docsArray(l.clauses) }); });
   const emitAuth = () => state.authListeners.forEach(cb => { cb(state.user); });
 
   return {
@@ -62,15 +68,15 @@ export function createMockFirebase(initial = {}) {
     // ─ firestore refs（輕量；mock 不需真實路徑，doc 只記住 id）─
     collection: () => ({ __col: true }),
     doc: (_db, _root, _pid, _coll, id) => ({ __id: id }),
-    query: (col) => col,
-    where: () => ({ __where: true }),
+    query: (col, ...clauses) => ({ ...col, __clauses: clauses.filter(c => c && c.__where) }),
+    where: (field, op, value) => ({ __where: true, field, op, value }),
     serverTimestamp: () => ({ toMillis: () => 0 }),
 
     // ─ firestore ops ─
-    onSnapshot: (_q, onChange) => {
-      const l = snap => onChange(snap);
+    onSnapshot: (q, onChange) => {
+      const l = { cb: onChange, clauses: (q && q.__clauses) || [] };
       state.snapListeners.add(l);
-      l({ docs: docsArray() });                  // 立即推一次當前狀態
+      l.cb({ docs: docsArray(l.clauses) });       // 立即推一次當前狀態
       return () => state.snapListeners.delete(l);
     },
     addDoc: async (_col, data) => {
