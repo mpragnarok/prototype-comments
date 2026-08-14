@@ -33,17 +33,19 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion fai
 
 const USER = { uid: 'u1', email: 'mina@e2e.local', displayName: 'Mina', photoURL: '' };
 
-async function fresh(browser, { seed = [], user = USER, init = {}, pageFromLocation = false } = {}) {
+async function fresh(browser, {
+  seed = [], user = USER, init = {}, pageFromLocation = false, deferAuth = false,
+} = {}) {
   const page = await browser.newPage({ viewport: { width: 900, height: 760 } });
   page.on('pageerror', e => console.log('     [pageerror]', e.message));
   await page.goto(`http://localhost:${PORT}/test/e2e/element-markup.harness.html`);
   await page.waitForFunction(() => window.__emTest && window.__emTest.ready);
   if (pageFromLocation) await page.evaluate(() => { window.__emPageFromLocation = true; });
-  await page.evaluate(({ seed, user, init }) => {
-    const fb = window.__emTest.createMockFirebase({ user, comments: seed });
+  await page.evaluate(({ seed, user, init, deferAuth }) => {
+    const fb = window.__emTest.createMockFirebase({ user, comments: seed, deferAuth });
     window.__fb = fb;
     return window.__emTest.init(fb, init);
-  }, { seed, user, init });
+  }, { seed, user, init, deferAuth });
   await page.waitForTimeout(300);
   return page;
 }
@@ -972,6 +974,73 @@ const seedMark = (over = {}) => ({
       [...document.querySelectorAll('.em-note')].map(n => n.textContent));
     await page.close();
     assert(notes.length === 0, `全部畫得出來時不該有任何補充說明，實際 ${JSON.stringify(notes)}`);
+  });
+
+  // ── auth: 'host'（沿用頁面已經登入的人）─────────────────────────────────
+  // 這一組驗的是三件會靜默做錯的事：偷偷退回匿名登入（uid 從此不穩定）、
+  // 把還在還原中的身分判成沒登入、以及 app 名字沒對上（那是共用 session 的唯一機制）。
+  const HOST_USER = { uid: 'g-jenny-uid', email: 'jenny@clinic.local', displayName: 'Jenny' };
+
+  await test('host 模式：用頁面已登入的身分標記，且完全不自己發起登入', async () => {
+    const page = await fresh(browser, { user: HOST_USER, init: { auth: 'host' } });
+    await markOn(page, '#size-014', '沿用登入身分留的');
+    const r = await page.evaluate(() => ({
+      doc: window.__fb.__docs().find(d => d.body === '沿用登入身分留的'),
+      calls: window.__fb.__authCalls(),
+    }));
+    await page.close();
+    assert(r.doc, '沒存進去');
+    assert(r.doc.authorUid === 'g-jenny-uid', `authorUid 應是頁面使用者，實際 ${r.doc.authorUid}`);
+    assert(r.doc.authorName === 'Jenny', `authorName 應取自頁面使用者，實際 ${r.doc.authorName}`);
+    assert(r.calls.anon === 0 && r.calls.popup === 0 && r.calls.redirect === 0,
+      `host 模式不該發起任何登入，實際 ${JSON.stringify(r.calls)}`);
+  });
+
+  await test('host 模式的 app 名字沿用頁面的（session 就是靠這個共用的）', async () => {
+    const page = await fresh(browser, { user: HOST_USER, init: { auth: 'host' } });
+    const names = await page.evaluate(() => window.__fb.__state.apps.map(a => a.name));
+    await page.close();
+    assert(names.includes('[DEFAULT]'),
+      `host 模式要用頁面的預設 app 名字才讀得到同一份登入狀態，實際 ${JSON.stringify(names)}`);
+  });
+
+  await test('預設（匿名）仍用自己的具名 app，不去碰頁面的預設 app', async () => {
+    const page = await fresh(browser, { user: null });
+    await page.waitForTimeout(200);
+    const names = await page.evaluate(() => window.__fb.__state.apps.map(a => a.name));
+    await page.close();
+    assert(names.includes('element-markup:e2e') && !names.includes('[DEFAULT]'),
+      `既有掛法的 app 名字不該被改動，實際 ${JSON.stringify(names)}`);
+  });
+
+  await test('host 模式頁面沒人登入：不進標記模式，並說清楚要先登入', async () => {
+    const page = await fresh(browser, { user: null, init: { auth: 'host' } });
+    await page.click('.em-fab');
+    await page.waitForTimeout(400);
+    const r = await page.evaluate(() => ({
+      marking: document.body.classList.contains('em-marking'),
+      toast: document.querySelector('.em-toast')?.textContent || '',
+      calls: window.__fb.__authCalls(),
+    }));
+    await page.close();
+    assert(!r.marking, '沒登入不該進入標記模式（點下去會存不進 authorUid）');
+    assert(/登入/.test(r.toast), `要說明為什麼不能標，實際「${r.toast}」`);
+    assert(r.calls.anon === 0 && r.calls.popup === 0 && r.calls.redirect === 0,
+      `不該退回自己登入，實際 ${JSON.stringify(r.calls)}`);
+  });
+
+  await test('host 模式：身分晚一步還原（IndexedDB 是非同步的）也要標得成', async () => {
+    // deferAuth：模擬「還原還沒完成」的空窗，第一次 auth 回呼要等 __setUser 才發生
+    const page = await fresh(browser, { user: null, deferAuth: true, init: { auth: 'host' } });
+    // 按鈕先按下去，登入狀態才落地——真實情況就是這個順序（頁面剛載入就按）
+    const clicked = page.click('.em-fab');
+    await page.waitForTimeout(100);
+    await page.evaluate((u) => window.__fb.__setUser(u), HOST_USER);
+    await clicked;
+    await page.waitForTimeout(300);
+    const marking = await page.evaluate(() => document.body.classList.contains('em-marking'));
+    await page.close();
+    assert(marking, '身分還原後應該要能進標記模式（等不到就會誤判成沒登入）');
   });
 
   await browser.close();

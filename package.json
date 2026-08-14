@@ -15,6 +15,7 @@
     "test:e2e:anchor": "node test/e2e/anchor-selector.spec.js",
     "test:e2e:anchorstable": "node test/e2e/anchor-stability.spec.js",
     "test:e2e:markup": "node test/e2e/element-markup.spec.js",
+    "test:live:hostsession": "node test/live/host-session.spec.js",
     "test:e2e:note": "node test/e2e/note-mode-crash.spec.js",
     "test:e2e:notedel": "node test/e2e/note-delete-record-sync.spec.js",
     "test:e2e:notemultiline": "node test/e2e/note-multiline.spec.js",
