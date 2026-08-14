@@ -19,6 +19,10 @@ export function createMockFirebase(initial = {}) {
     user: initial.user || null,
     redirectCalls: 0,
     popupCalls: 0,
+    // 匿名登入也要記次數：`auth: 'host'` 的合約是「絕不自己發起登入」，
+    // 而匿名登入正是它最容易不小心退回去走的那一條——沒有這個計數，
+    // 那條合約在測試裡驗不到（畫面看起來一模一樣，只有 uid 悄悄變成匿名的）。
+    anonCalls: 0,
     apps: [],                 // { name, options } — 見下方 app 區塊
   };
   (initial.comments || []).forEach(c => {
@@ -101,9 +105,18 @@ export function createMockFirebase(initial = {}) {
     },
 
     // ─ auth ─
+    /**
+     * 真 SDK 的第一次回呼是在**還原持久化的身分之後**才發生的（IndexedDB 是非同步的），
+     * 所以「第一次回呼給 null」等於真的沒人登入。預設在這裡立即推一次就是模擬那個已經
+     * 落地的狀態。
+     *
+     * `deferAuth: true` 則模擬「還原還沒完成」那段空窗：註冊時什麼都不推，等
+     * `__setUser` 才第一次回呼。沒有這個開關就驗不到「使用者在頁面剛載入就按下按鈕」
+     * ——那一刻 state.user 還是 null，而誤判的下場是對一個明明登入了的人說「請先登入」。
+     */
     onAuthStateChanged: (_auth, cb) => {
       state.authListeners.add(cb);
-      cb(state.user);                            // 立即推一次當前 user
+      if (!initial.deferAuth) cb(state.user);
       return () => state.authListeners.delete(cb);
     },
     signInWithPopup: async () => {
@@ -120,6 +133,7 @@ export function createMockFirebase(initial = {}) {
     // 匿名登入沒有 OAuth 流程，只是換一個 uid——在 LINE／FB 的內建瀏覽器裡也能用。
     // 沒有 displayName／email 是重點：名字得由使用者自己填。
     signInAnonymously: async () => {
+      state.anonCalls += 1;
       state.user = { uid: `anon-${++idSeq}`, isAnonymous: true };
       emitAuth();
       return { user: state.user };
@@ -128,7 +142,9 @@ export function createMockFirebase(initial = {}) {
 
     // ─ test controls ─
     __setUser: (u) => { state.user = u; emitAuth(); },
-    __authCalls: () => ({ redirect: state.redirectCalls, popup: state.popupCalls }),
+    __authCalls: () => ({
+      redirect: state.redirectCalls, popup: state.popupCalls, anon: state.anonCalls,
+    }),
     __seed: (c) => { const id = c.id || `m${++idSeq}`; state.docs.set(id, { ...c }); emitSnap(); return id; },
     __docs: () => docsArray().map(d => ({ id: d.id, ...d.data() })),
     __state: state,

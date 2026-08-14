@@ -5,6 +5,13 @@
  *   import { initElementMarkup } from 'https://prototype-comments.netlify.app/src/user-feedback-markup.js';
  *   initElementMarkup({ projectId: 'my-app', page: () => location.pathname });
  *
+ * 身分有三種（`auth`），差別在「uid 從哪來」：
+ *   'anonymous'（預設）每台裝置一組匿名 uid，名字自己填。換裝置就編不動舊標記。
+ *   'google'          這支 script 自己跑 OAuth。in-app WebView 裡會被 Google 擋。
+ *   'host'            沿用頁面**已經登入**的 Firebase 使用者，自己絕不發起登入。
+ *                     給本來就有登入閘的站用；uid 穩定，換裝置照樣編得動、刪得掉。
+ *                     必須一起傳頁面自己的 `firebaseConfig`（見 appNameFor 的說明）。
+ *
  * 舊路徑 `element-markup.js` 仍可用（一行 re-export），但新的掛法請用這個檔名——
  * 它與同資料夾的 `user-feedback.js` 是同一家族，看得出屬於哪個 skill。
  *
@@ -50,10 +57,26 @@ async function loadFirebase() {
 }
 
 /** app 名字帶 projectId：同頁掛多份、各指不同專案時不會互相沿用第一份的設定。 */
-function appFor(fb, config, projectId) {
-  const name = `element-markup:${projectId}`;
+function appFor(fb, config, name) {
   const existing = fb.getApps().find(a => a.name === name);
   return existing || fb.initializeApp(config, name);
+}
+
+/**
+ * 這份標記要用哪個 Firebase app 名字。
+ *
+ * 預設帶 projectId，理由見 appFor。`auth: 'host'` 是唯一的例外，而那個例外
+ * 正是它能沿用頁面身分的**全部機制**：Firebase 把登入狀態存進 IndexedDB，
+ * 鍵是 `firebase:authUser:{apiKey}:{app 名字}`。這支 script 從 CDN 載自己那份
+ * SDK，與頁面自己打包的那份是兩個互不相識的實例——app／auth／db 物件不能互相
+ * 傳遞（跨實例的 component 沒註冊過，會直接 throw）。兩邊唯一共用得到的東西
+ * 就是那把鍵，所以**名字一樣**才讀得到同一個已登入的使用者。
+ *
+ * 也因此 host 模式必須傳與頁面相同的 `firebaseConfig`——apiKey 是那把鍵的另一半。
+ */
+function appNameFor(opts, mode) {
+  if (opts.appName) return opts.appName;
+  return mode === 'host' ? '[DEFAULT]' : `element-markup:${opts.projectId}`;
 }
 
 /** `page` 可以給字串或函式——函式在每次求值當下才呼叫（SPA／deck 這種網址不變的頁面要用）。 */
@@ -144,7 +167,18 @@ async function start(opts) {
     console.warn('[element-markup] 沒有傳 firebaseConfig，標記會寫進共用示範專案，你的 bridge 讀不到。');
   }
 
-  const app = appFor(fb, config, opts.projectId);
+  // 'anonymous'（預設）｜'google'（自己跑 OAuth）｜'host'（沿用頁面已登入的人）
+  const mode = opts.auth || 'anonymous';
+  /*
+   * host 模式配上示範專案的 config 是一個「不會報錯、只會靜靜錯掉」的組合：
+   * 共用的 session 鍵是 apiKey + app 名字，apiKey 不是頁面那把就永遠讀不到那個
+   * 已登入的人，畫面上只會出現一句「請先登入這個網站」——而他就是登入的。
+   * 這裡直接擋下來，讓掛的人當場知道少傳了什麼。
+   */
+  if (mode === 'host' && !opts.firebaseConfig && !opts._firebase) {
+    throw new Error('initElementMarkup: auth:\'host\' 必須傳頁面自己的 firebaseConfig');
+  }
+  const app = appFor(fb, config, appNameFor(opts, mode));
   const db = fb.getFirestore(app);
   const auth = fb.getAuth(app);
   const col = fb.collection(db, 'prototype-comments', opts.projectId, 'comments');
@@ -205,7 +239,20 @@ async function start(opts) {
     'auth/cancelled-popup-request': '',   // 連按兩次造成，不必吵使用者
   };
 
-  const anonymous = (opts.auth || 'anonymous') !== 'google';
+  /**
+   * `auth: 'host'`——身分完全由頁面決定，這支 script **絕不主動發起登入**。
+   *
+   * 給的是本來就有登入閘的站（例如診所自己的病歷系統）：使用者早就用 Google
+   * 登入過了，再彈一次 OAuth 只是多一次打斷，而且那一次很可能失敗（跨站
+   * 儲存、in-app WebView），結果是「明明已經登入卻留不了言」。
+   *
+   * 這也是唯一能給出**穩定 uid** 的模式：匿名 uid 是「每個瀏覽器 × 每個專案」
+   * 各生一組，換一台裝置就編不動自己先前的標記。沿用頁面的 Google 身分之後，
+   * 編輯／刪除（rules 比對 authorUid）在任何裝置上都成立。
+   */
+  const hostSession = mode === 'host';
+  const anonymous = mode === 'anonymous';
+  const HOST_SIGN_IN_HINT = '請先登入這個網站，再回來留回饋。';
 
   /**
    * 手機一律走 redirect，不用 popup。
@@ -259,8 +306,27 @@ async function start(opts) {
     }
   }
 
+  /**
+   * host 模式要等第一次 auth 狀態落地，才知道這頁「到底有沒有人登入」。
+   *
+   * 從 IndexedDB 還原身分是非同步的：不等就會在剛載入的頁面上把已經登入的人
+   * 判成沒登入，而他看到的只有一句「請先登入這個網站」——他明明就登入了。
+   * 逾時是防呆，讓按鈕不會因為 auth 永遠不落地而卡住不能按。
+   */
+  let settleAuth;
+  const authSettled = new Promise((resolve) => { settleAuth = resolve; });
+  const AUTH_SETTLE_MS = 8000;
+
+  async function hostUser() {
+    if (state.user) return state.user;
+    await Promise.race([authSettled, new Promise(r => setTimeout(r, AUTH_SETTLE_MS))]);
+    if (!state.user) toast(HOST_SIGN_IN_HINT);
+    return state.user;
+  }
+
   async function ensureUser() {
     if (state.user) return state.user;
+    if (hostSession) return hostUser();
     try {
       if (anonymous) return (await fb.signInAnonymously(auth)).user;
       return await signInWithGoogle();
@@ -285,19 +351,26 @@ async function start(opts) {
    * 手機上看不到 tooltip，所以使用者的感受是「沒有看到 Google 登入」。
    * 畫面上看不出來的狀態，等於不存在。
    */
+  function fabTitle() {
+    if (anonymous) return '不需要登入，直接點頁面上的元件留言';
+    if (state.user) return `以 ${state.user.displayName || state.user.email} 的身分標記`;
+    // host 模式不會自己彈登入，所以要說的是「去登入這個網站」而不是「我會請你登入」
+    return hostSession ? HOST_SIGN_IN_HINT : '會先請你用 Google 登入';
+  }
+
   function refreshFab() {
     if (state.marking) { ui.fab.textContent = '✕ 結束標記'; return; }
-    const needsSignIn = !anonymous && !state.user;
+    const needsSignIn = mode === 'google' && !state.user;
     ui.fab.textContent = needsSignIn ? '🔒 用 Google 登入給回饋' : (opts.label || '給回饋');
-    ui.fab.title = anonymous
-      ? '不需要登入，直接點頁面上的元件留言'
-      : (state.user ? `以 ${state.user.displayName || state.user.email} 的身分標記` : '會先請你用 Google 登入');
+    ui.fab.title = fabTitle();
   }
 
   let announcedUser = null;
   // 從 Google 跳轉回來時把結果收下。不處理的話 onAuthStateChanged 仍會拿到 user，
   // 但錯誤（例如網域沒授權）會靜靜消失，使用者只看到「跳出去又跳回來，還是沒登入」。
-  if (!anonymous) {
+  // 只有自己跑 OAuth 的模式需要收跳轉結果。host 模式的跳轉是頁面自己發起的，
+  // 由頁面自己收——這裡再收一次會把它的結果吃掉。
+  if (mode === 'google') {
     fb.getRedirectResult(auth).catch((error) => {
       const known = SIGN_IN_ERRORS[error?.code];
       toast(known || '登入沒有完成，再試一次。');
@@ -307,9 +380,12 @@ async function start(opts) {
 
   fb.onAuthStateChanged(auth, (user) => {
     state.user = user;
+    settleAuth();
     refreshFab();
-    // 具名模式登入成功要說一聲：不然使用者不確定「剛剛那個彈窗到底成功了沒」
-    if (!anonymous && user && user.uid !== announcedUser) {
+    // 具名模式登入成功要說一聲：不然使用者不確定「剛剛那個彈窗到底成功了沒」。
+    // host 模式不說：登入不是這支 script 做的，跳一句「已登入」只會讓人以為
+    // 剛剛按的按鈕做了什麼——他早就登入了。
+    if (mode === 'google' && user && user.uid !== announcedUser) {
       announcedUser = user.uid;
       toast(`已登入：${user.displayName || user.email}`);
     }
