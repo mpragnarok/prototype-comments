@@ -21,7 +21,8 @@ service cloud.firestore {
         && request.auth.token.email_verified == true;
     }
 
-    // 設計審查留言。Read 公開（分享連結即可看），寫入限已登入帳號。
+    // 設計審查留言。Read 預設公開（jenny-ortho 例外，理由見下方 match 區塊），
+    // 寫入限已登入帳號。
     // 作者本人可改全部欄位；其他登入同事只能改白名單欄位（協作型、非破壞性）：
     //   resolved + resolvedBy/resolvedByUid/resolvedAt = 收尾歸屬（pc.js resolve 一次寫這四欄）
     //   reactions                                       = 表情
@@ -53,7 +54,21 @@ service cloud.firestore {
     }
 
     match /prototype-comments/{projectId}/comments/{commentId} {
-      allow read: if true;
+      // Read 預設公開（同事的設計審查留言，分享連結即可看）。
+      //
+      // 例外：`jenny-ortho` 底下**不是**同事間的設計審查留言，而是一位執業牙醫
+      // 對自己診所系統留下的真實臨床回饋——內容含具名醫師、器材廠牌、實際的
+      // 臨床做法。那些留言對外公開等於把一間診所的內部作業攤在網路上，與其他
+      // prototype「給同事看的 UI 意見」性質完全不同，所以只有這個 projectId 收緊。
+      //
+      // 收緊的形狀刻意選成「要有 auth，任何 auth 都算」而不是限特定帳號：
+      // jenny-ortho 的頁面（user-feedback-markup.js）本來就會先做**匿名登入**才
+      // 顯示標記，所以 request.auth != null 對真實使用者恆成立，顯示行為零變化；
+      // 擋掉的是完全不帶 token 的爬蟲與路人 —— 也就是搜尋引擎與拿到網址亂點的人。
+      //
+      // 其他 prototype（vitallink / coshift / badminton …）不受影響，維持
+      // 「分享連結即可看」。要再收緊別的 projectId，把它加進這個條件即可。
+      allow read: if projectId != 'jenny-ortho' || request.auth != null;
       allow create: if isSignedIn() || isAnonMark();
       // 匿名也能把標記標成「已處理」——收回饋的人自己往往也在 LINE 裡看這頁。
       // 能改的只有收尾那幾個欄位，內容改不動。
@@ -72,7 +87,8 @@ service cloud.firestore {
     // 終端使用者回饋（src/user-feedback.js）。
     //
     // 與上面的設計審查留言是**兩種不同的東西**，刻意分開存：
-    //   comments      給同事，要登入，可協作 resolve，read 公開。
+    //   comments      給同事，要登入，可協作 resolve，read 預設公開
+    //                 （jenny-ortho 是例外，那份是真實使用者的臨床回饋，要 auth）。
     //   user-feedback 給產品的真實使用者（醫師、客戶），**免登入**——
     //                 要他們先登入才留言，回饋率會掉。
     //
