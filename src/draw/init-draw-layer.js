@@ -587,7 +587,9 @@ export function initDrawLayer(target, opts = {}) {
   if (drawerSendBtn) drawerSendBtn.onclick = () => handleDrawerSend();
   // 標注紀錄「送出時納入哪些」勾選集合：unchecked 內的不送（預設全送）。
   // outbox：送出對象＝勾選且「尚未送過（或送後又改過）」；已送未改的不再重複送。
-  const checkedObjects = () => state.objects.filter(o => !state.sendUnchecked[o.id] && !isSent(o));
+  // 眼睛鈕隱藏（o.hidden）者也排除——截圖不畫它（isCaptureExcluded 的 invariant：截圖＝送出內容），
+  //   若仍送出，AI 會收到一筆畫面上看不見的標注。非破壞性：勾選框不動，取消隱藏就自動回到送出集合。
+  const checkedObjects = () => state.objects.filter(o => !state.sendUnchecked[o.id] && !isSent(o) && !o.hidden);
   const checkedDecisions = () => state.decisions.filter(d => !state.sendUnchecked[d.id] && state.sentSigs[d.id] !== decisionSig(d));
   const onToggleSendChecked = (id, checked) => {
     // 有 groupId → 整組一起勾/取消；否則只動自己（decision 無 groupId 也走單一）。
@@ -646,7 +648,8 @@ export function initDrawLayer(target, opts = {}) {
     return feedbackBox;
   }
   function removeFeedbackBox() { if (feedbackBox) { feedbackBox.remove(); feedbackBox = null; } }
-  const uncheckedUnsentNotes = () => state.notes.filter(n => !state.sendUnchecked[n.id] && state.sentSigs[n.id] !== noteSig(n));
+  // 註記的送出集合：勾選 + 未送（或送後又改） + 未被眼睛鈕隱藏（同 checkedObjects，截圖＝送出內容）。
+  const uncheckedUnsentNotes = () => state.notes.filter(n => !state.sendUnchecked[n.id] && state.sentSigs[n.id] !== noteSig(n) && !n.hidden);
   const uncheckedUnsentMoves = () => state.moves.filter(m => !state.sendUnchecked[m.id] && state.sentSigs[m.id] !== moveSig(m));
   function feedbackCount() { return checkedObjects().length + checkedDecisions().length + uncheckedUnsentNotes().length + uncheckedUnsentMoves().length; }
   function renderFeedbackBox() {
@@ -759,7 +762,7 @@ export function initDrawLayer(target, opts = {}) {
     rows.forEach(r => { r.replies = replyMap.get(r.id) || []; });
     // 「待送」＝尚未送出的列（已送/收納者不納入送出計數與全選）。
     const pendingRows = rows.filter(r => !r.sent);
-    const checkedRows = pendingRows.filter(r => !state.sendUnchecked[r.id]); // 納入送出的列
+    const checkedRows = pendingRows.filter(r => !state.sendUnchecked[r.id] && !r.archived); // 納入送出的列（眼睛鈕隱藏者不送 → 不計數）
     const checkedCount = checkedRows.length;
     const count = recordDrawer.querySelector('.pc-draw-rec-count');
     if (count) count.textContent = String(rows.length); // 標題計數＝紀錄總筆數（語意維持現狀）
@@ -806,11 +809,15 @@ export function initDrawLayer(target, opts = {}) {
       r.grouped ? 1 : 0, r.sent ? 1 : 0, r.archived ? 1 : 0, isSelected(r.id) ? 1 : 0,
       state.sendUnchecked[r.id] ? 0 : 1, r.replies.map(x => x.id).join('+'),
       r.isNote ? 'N' : (r.isDecision ? 'D' : (r.isMove ? 'M' : 'A'))].join(':')).join('|')
-      + '||' + orphanReplies.map(x => x.id).join('+');
-    if (rowSig === _recRowSig) { if (visibleRows.length) refreshRecordPreview(); return; }
+      + '||' + orphanReplies.map(x => x.id).join('+')
+      + '||' + rows.length; // 空狀態文案吃 totalRows（「這個篩選下沒有標注」vs「尚無標注」）→ 總筆數也要進簽章
+    // 預覽框只在 renderRecordList 真的 append 了它時才需要填內容——條件與那邊的早退一致
+    // （只有孤兒回覆、沒有可見列時，預覽框也會被 append）。
+    const hasPreview = visibleRows.length > 0 || orphanReplies.length > 0;
+    if (rowSig === _recRowSig) { if (hasPreview) refreshRecordPreview(); return; }
     _recRowSig = rowSig;
     renderRecordList(list, visibleRows, orphanReplies, rows.length);
-    if (visibleRows.length) refreshRecordPreview();
+    if (hasPreview) refreshRecordPreview();
   }
   // 這一列在目前篩選下看不看得到。純判斷，抽出來讓 renderRecordPanel 維持可讀長度。
   function matchesRecordFilter(row, filter) {
@@ -1844,7 +1851,7 @@ export function initDrawLayer(target, opts = {}) {
     const p = buildExport(checkedObjects(), { w: svg.clientWidth || host.clientWidth, h: svg.clientHeight || host.clientHeight });
     const decs = checkedDecisions();
     if (decs.length) p.decisions = decs.map(d => ({ replyId: d.replyId, optionId: d.optionId, optionLabel: d.optionLabel }));
-    const checkedNotes = state.notes.filter(n => !state.sendUnchecked[n.id] && state.sentSigs[n.id] !== noteSig(n)); // outbox：已送未改的不重複送
+    const checkedNotes = uncheckedUnsentNotes(); // outbox：已送未改的不重複送；眼睛鈕隱藏的也不送（截圖看不到它）
     if (checkedNotes.length) p.notes = checkedNotes.map(n => ({
       id: n.id, text: n.text, label: n.label || '',
       selector: n.sel || null, objId: n.objId != null ? n.objId : null,
@@ -1998,7 +2005,7 @@ export function initDrawLayer(target, opts = {}) {
       const sentObjs = checkedObjects(); // 先擷取（標記 sentSigs 後 isSent 會變真、checkedObjects 會清空）
       sentObjs.forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
       checkedDecisions().forEach(d => { state.sentSigs[d.id] = decisionSig(d); });
-      state.notes.filter(n => !state.sendUnchecked[n.id]).forEach(n => { state.sentSigs[n.id] = noteSig(n); });
+      uncheckedUnsentNotes().forEach(n => { state.sentSigs[n.id] = noteSig(n); }); // 只標「真的送出去的那批」（隱藏者沒送 → 不標已送）
       uncheckedUnsentMoves().forEach(m => { state.sentSigs[m.id] = moveSig(m); }); // 位移標記已送（元件維持位移，離開未送清單）
       archiveObjects(sentObjs); // 送出即收納：從畫布消失、留在標注紀錄（可還原）
       state.sentConfirmN = n; // outbox 清空清單後，footer 靠此維持「✅ 已送出（N 筆）」確認
