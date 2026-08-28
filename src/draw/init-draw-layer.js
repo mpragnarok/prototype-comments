@@ -44,7 +44,8 @@ import {
   buildToolbar, buildContextMenu, syncToolbar,
 } from './toolbar.js';
 import {
-  buildRecordTab, buildRecordDrawer, recordRowEl, replyCardEl,
+  buildRecordTab, buildRecordDrawer, buildRecordFilters, syncRecordFilters,
+  recordRowEl, replyBubbleEl, replyCardEl,
 } from './record-panel.js';
 
 function resolveTarget(target) {
@@ -99,6 +100,8 @@ export function initDrawLayer(target, opts = {}) {
     exportEndpoint: opts.exportEndpoint || null, // 「送給 AI」POST 目標（無則只回 payload）
     recordOpen: false, // P6 側邊標注紀錄抽屜開關（預設關 → 不打擾一般使用）
     sentSigs: {},      // {objId: 上次成功送出時的內容簽章} → 面板每列顯示「已送/未送」
+    agentReplies: [],  // AI 對某一筆標注的回覆（consumer 經 api.setAgentReplies 灌入；沒灌就是空的）
+    recordFilter: 'all', // 標注紀錄篩選：all / pending / sent / replied（純檢視狀態，不影響送出範圍）
     sentConfirmN: 0,   // 上次成功送出的筆數。outbox 下已送項會離開清單，靠此讓 footer 維持「✅ 已送出（N 筆）」確認，不退回「送給 AI（0）」假失敗態
     sendUnchecked: {}, // {objId: true} → 該列「不納入送出」（預設全勾；新物件預設納入）
     replies: [],       // AI 貼回頁面的方案卡（{n, anchor, text, options, chosen?}）
@@ -205,6 +208,7 @@ export function initDrawLayer(target, opts = {}) {
     if (c.range != null) doc.range = c.range;   // 程式碼範圍註記：{path,startLine,endLine,side,code}
     if (c.endSel != null) doc.endSel = c.endSel; // 範圍結束行錨點（起訖聯集外框用）
     if (c.screenId != null) doc.screenId = c.screenId; // 決策 A：頁面/screen 歸屬（有才帶）
+    if (c.hidden) doc.hidden = true;                   // 眼睛鈕：從畫布隱藏（仍留標注紀錄）
     return doc;
   }
   function saveNote(text, anchor, id) {
@@ -247,6 +251,7 @@ export function initDrawLayer(target, opts = {}) {
     const pins = [];
     state.notes.forEach((c) => {
       if (!onCurrentScreen(c)) return; // 決策 A：不屬當前頁的註記不畫
+      if (c.hidden) return;            // 眼睛鈕關掉 → 不畫在畫布（仍留在標注紀錄）
       if (state.sendUnchecked[c.id]) return;
       pins.push({ c, n: ++n, box: resolveNoteBox(c) });
     });
@@ -575,6 +580,9 @@ export function initDrawLayer(target, opts = {}) {
   // ── P6 側邊標注紀錄面板（右緣 tab + 抽屜）─────────────────────────────────────────
   const recordTab = buildRecordTab(() => { state.recordOpen = !state.recordOpen; renderRecordPanel(); });
   const recordDrawer = buildRecordDrawer(() => { state.recordOpen = false; renderRecordPanel(); });
+  // 篩選列插在標題列與清單之間（只改看得到哪幾列，送出範圍仍由每列勾選框決定）。
+  const recordFilters = buildRecordFilters((v) => { state.recordFilter = v; _recRowSig = null; renderRecordPanel(); });
+  recordDrawer.insertBefore(recordFilters, recordDrawer.querySelector('.pc-draw-rec-list'));
   const drawerSendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
   if (drawerSendBtn) drawerSendBtn.onclick = () => handleDrawerSend();
   // 標注紀錄「送出時納入哪些」勾選集合：unchecked 內的不送（預設全送）。
@@ -597,14 +605,21 @@ export function initDrawLayer(target, opts = {}) {
     objs.forEach(o => { if (o && !o.hidden) { o.hidden = true; o.archivedAt = Date.now(); syncSaveObj(o); changed = true; } });
     if (changed) persistLocalSave();
   }
-  // 標注紀錄「還原到畫布」（單筆）：清 hidden → 重新顯示。保留 sentSigs（已送徽章不變，
+  // 標注紀錄眼睛鈕（單筆）：切換「這一筆畫在不畫在畫布上」。保留 sentSigs（已送徽章不變，
   //   且 checkedObjects 的 !isSent 去重讓已送未改者不會被重複送）。同經 PUT 通道落盤 → 重整保持。
-  function restoreObject(id) {
+  //   吃標注（state.objects）與註記（state.notes）兩種——兩者都在畫布上看得見。
+  function toggleRowHidden(id) {
     const o = findById(state.objects, id);
-    if (!o || !o.hidden) return;
-    delete o.hidden; delete o.archivedAt;
-    syncSaveObj(o); persistLocalSave();
-    render();
+    if (o) {
+      if (o.hidden) { delete o.hidden; delete o.archivedAt; } else { o.hidden = true; o.archivedAt = Date.now(); }
+      syncSaveObj(o); persistLocalSave(); render();
+      return;
+    }
+    const n = state.notes.find(x => x.id === id);
+    if (!n) return;
+    if (n.hidden) delete n.hidden; else n.hidden = true;
+    if (drawStore) { try { drawStore.save(noteToDoc(n)); } catch (_) { } }
+    persistLocalSave(); render();
   }
   const drawerAllBox = recordDrawer.querySelector('.pc-draw-rec-all');
   if (drawerAllBox) drawerAllBox.onchange = () => {
@@ -716,6 +731,7 @@ export function initDrawLayer(target, opts = {}) {
       selector: n.range ? rangeLabel(n.range) : (n.sel || null), // 範圍註記顯示 path:12–18；否則沿用元件 selector
       color: DRAW_UI_COLORS.selection,
       sent: state.sentSigs[n.id] === noteSig(n), isNote: true,
+      archived: !!n.hidden, // 眼睛鈕關掉 → 畫布不畫（仍留清單）
     }));
     const moveRows = state.moves.filter(onCurrentScreen).map((m) => ({
       id: m.id, tool: 'comment', icon: 'move',
@@ -723,19 +739,39 @@ export function initDrawLayer(target, opts = {}) {
       selector: m.sel || null, color: DRAW_UI_COLORS.selection,
       sent: state.sentSigs[m.id] === moveSig(m), isMove: true,
     }));
-    // 標注：送出後改採「收納」→ 已送標注仍留清單（archived，可「還原到畫布」）。
-    // 決策/註記/位移：維持 outbox → 已送（且未再改）者離開清單。
-    const rows = annRows.concat(decRows.filter(r => !r.sent)).concat(noteRows.filter(r => !r.sent)).concat(moveRows.filter(r => !r.sent));
+    // 對話串：四種紀錄都留在清單上（已送的不再消失），由篩選列決定看得到哪幾列。
+    // 「已送」的仍不會被重複送——送出範圍由 checkedObjects/checkedDecisions… 的 !isSent 把關，與這裡無關。
+    const rows = annRows.concat(decRows).concat(noteRows).concat(moveRows);
     // 群組視覺提示：標記屬於 ≥2 成員群組的列（勾選會整組連動，讓使用者預期得到）。
     const groupCount = {};
     rows.forEach(r => { if (r.groupId) groupCount[r.groupId] = (groupCount[r.groupId] || 0) + 1; });
     rows.forEach(r => { r.grouped = !!(r.groupId && groupCount[r.groupId] > 1); });
+    // AI 回覆配對：只認回覆自己聲明的 objId。沒聲明對象的不猜（時間相近≠同一則），
+    // 改列在清單末尾的「未指定標注」區——寧可看得到但沒歸位，也不要安靜地掛錯人。
+    const replyMap = new Map();
+    const orphanReplies = [];
+    const rowIds = new Set(rows.map(r => r.id));
+    state.agentReplies.forEach(r => {
+      if (r.objId == null || !rowIds.has(r.objId)) { orphanReplies.push(r); return; }
+      if (!replyMap.has(r.objId)) replyMap.set(r.objId, []);
+      replyMap.get(r.objId).push(r);
+    });
+    rows.forEach(r => { r.replies = replyMap.get(r.id) || []; });
     // 「待送」＝尚未送出的列（已送/收納者不納入送出計數與全選）。
     const pendingRows = rows.filter(r => !r.sent);
     const checkedRows = pendingRows.filter(r => !state.sendUnchecked[r.id]); // 納入送出的列
     const checkedCount = checkedRows.length;
     const count = recordDrawer.querySelector('.pc-draw-rec-count');
-    if (count) count.textContent = String(rows.length);
+    if (count) count.textContent = String(rows.length); // 標題計數＝紀錄總筆數（語意維持現狀）
+    // 篩選列：四個分類各自的筆數 + 標出目前選中的。純檢視，不動送出範圍。
+    const filterCounts = {
+      all: rows.length,
+      pending: pendingRows.length,
+      sent: rows.length - pendingRows.length,
+      replied: rows.filter(r => r.replies.length).length,
+    };
+    syncRecordFilters(recordFilters, state.recordFilter, filterCounts);
+    const visibleRows = rows.filter(r => matchesRecordFilter(r, state.recordFilter));
     // 全選框：反映「待送」列（全勾→checked、部分→indeterminate、無待送→disabled）。
     const allBox = recordDrawer.querySelector('.pc-draw-rec-all');
     if (allBox) {
@@ -764,28 +800,53 @@ export function initDrawLayer(target, opts = {}) {
     }
     const list = recordDrawer.querySelector('.pc-draw-rec-list');
     if (!list) return;
-    // 狀態 diff：列內容/選取/勾選/已送 皆未變 → 不重建列 DOM（同 pin：避免 refresh 風暴每 tick 整批重繪
-    // 讓還原鈕/勾選框的真人 click 蒸發）。截圖預覽仍在（refreshRecordPreview 就地更新，不受影響）。
-    const rowSig = rows.map(r => [r.id, r.text, r.selector, r.color, r.icon, r.grouped ? 1 : 0, r.sent ? 1 : 0,
-      r.archived ? 1 : 0, isSelected(r.id) ? 1 : 0, state.sendUnchecked[r.id] ? 0 : 1,
-      r.isNote ? 'N' : (r.isDecision ? 'D' : (r.isMove ? 'M' : 'A'))].join(':')).join('|');
-    if (rowSig === _recRowSig) { if (rows.length) refreshRecordPreview(); return; }
+    // 狀態 diff：列內容/選取/勾選/已送/回覆/篩選 皆未變 → 不重建列 DOM（同 pin：避免 refresh 風暴每 tick
+    // 整批重繪讓眼睛鈕/勾選框的真人 click 蒸發）。截圖預覽仍在（refreshRecordPreview 就地更新）。
+    const rowSig = state.recordFilter + '||' + visibleRows.map(r => [r.id, r.text, r.selector, r.color, r.icon,
+      r.grouped ? 1 : 0, r.sent ? 1 : 0, r.archived ? 1 : 0, isSelected(r.id) ? 1 : 0,
+      state.sendUnchecked[r.id] ? 0 : 1, r.replies.map(x => x.id).join('+'),
+      r.isNote ? 'N' : (r.isDecision ? 'D' : (r.isMove ? 'M' : 'A'))].join(':')).join('|')
+      + '||' + orphanReplies.map(x => x.id).join('+');
+    if (rowSig === _recRowSig) { if (visibleRows.length) refreshRecordPreview(); return; }
     _recRowSig = rowSig;
+    renderRecordList(list, visibleRows, orphanReplies, rows.length);
+    if (visibleRows.length) refreshRecordPreview();
+  }
+  // 這一列在目前篩選下看不看得到。純判斷，抽出來讓 renderRecordPanel 維持可讀長度。
+  function matchesRecordFilter(row, filter) {
+    if (filter === 'pending') return !row.sent;
+    if (filter === 'sent') return !!row.sent;
+    if (filter === 'replied') return row.replies.length > 0;
+    return true;
+  }
+  // 清單本體：置頂截圖預覽 → 一條時間軸（每列標注後面接它的 AI 回覆氣泡）→ 未指定對象的回覆。
+  function renderRecordList(list, visibleRows, orphanReplies, totalRows) {
     list.innerHTML = '';
-    if (!rows.length) {
+    if (!visibleRows.length && !orphanReplies.length) {
       const empty = drawHtmlEl('div', 'pc-draw-rec-empty');
-      empty.textContent = '尚無標注';
+      empty.textContent = totalRows ? '這個篩選下沒有標注' : '尚無標注';
       list.appendChild(empty);
       return;
     }
     list.appendChild(recordPreviewEl()); // 置頂：送給 AI 的畫面截圖預覽
-    rows.forEach(row => { list.appendChild(recordRowEl(
-      row, isSelected(row.id), onRecordRowClick, !state.sendUnchecked[row.id], onToggleSendChecked,
-      row.isNote ? removeNote : (row.isDecision ? removeDecision : (row.isMove ? removeMove : null)),
-      // 收納中的標注（已送、畫布隱藏）→ 提供「還原到畫布」單筆操作
-      (row.archived && !row.isNote && !row.isDecision && !row.isMove) ? restoreObject : null
-    )); });
-    refreshRecordPreview();
+    visibleRows.forEach(row => {
+      list.appendChild(recordRowEl(row, {
+        selected: isSelected(row.id),
+        checked: !state.sendUnchecked[row.id],
+        onClick: onRecordRowClick,
+        onToggle: onToggleSendChecked,
+        onRemove: row.isNote ? removeNote : (row.isDecision ? removeDecision : (row.isMove ? removeMove : null)),
+        // 眼睛鈕：只給畫布上真的畫得出東西的列（標注與註記）；決策/位移沒有可隱藏的畫布物件。
+        onToggleHidden: (row.isDecision || row.isMove) ? null : toggleRowHidden,
+      }));
+      row.replies.forEach(rep => { list.appendChild(replyBubbleEl(rep)); });
+    });
+    if (!orphanReplies.length) return;
+    // 沒聲明 objId 的回覆：不猜對象，集中列在最後（看得到但明說沒歸位）。
+    const hd = drawHtmlEl('div', 'pc-draw-rec-orphan-hd');
+    hd.textContent = '未指定標注的回覆';
+    list.appendChild(hd);
+    orphanReplies.forEach(rep => { list.appendChild(replyBubbleEl(rep)); });
   }
   // 標注紀錄頂部「送出畫面」縮圖：顯示 capturePng() 的結果（=送給 AI 的 PNG）。
   let _previewSig = null, _previewUrl = null, _previewTimer = null;
@@ -1385,6 +1446,7 @@ export function initDrawLayer(target, opts = {}) {
           relX: doc.relX, relY: doc.relY, x: doc.x, y: doc.y, label: doc.label || '',
           ...(doc.range != null ? { range: doc.range } : {}),   // 程式碼範圍註記還原
           ...(doc.endSel != null ? { endSel: doc.endSel } : {}),
+          ...(doc.hidden ? { hidden: true } : {}),                 // 眼睛鈕隱藏狀態（重訂閱後保持）
           ...(doc.screenId != null ? { screenId: doc.screenId } : {}) });
         changed = true;
       } else if (doc.geom) {
@@ -2291,6 +2353,30 @@ export function initDrawLayer(target, opts = {}) {
     sendToAgent,                           // async (opts?) → {json, png, sent}；回 payload
     setExportEndpoint: url => { state.exportEndpoint = url; },
     getAnnotationRows: () => annotationRows(state.objects, state.sentSigs), // P6 面板 row 資料（純函式包裝）
+    // ── AI 對某一筆標注的回覆（標注紀錄面板的對話串）───────────────────────────────
+    // 刻意做成 consumer 推進來的 api 方法，不是 initDrawLayer 的參數：
+    //   (1) init 的三個簽名是 CDN 對外合約，能不動就不動；
+    //   (2) 回覆從哪來是各 consumer 自己的事——live-markup 有 /api/agent-reply 可輪詢，
+    //       prototype-flow / prototype-live 沒有那條路。CDN 不該知道任何一方的 API 長相。
+    // 沒有人呼叫這個方法的 consumer，面板照常運作，只是不長出回覆氣泡（清單/篩選/送出都不受影響）。
+    // list = [{ id, text, at?, objId? }]；objId 指向要掛在哪一列（標注/註記/決策/位移的 id）。
+    //   沒帶 objId（或指到不存在的列）→ 不猜對象，列在清單末尾「未指定標注的回覆」。
+    setAgentReplies: (list) => {
+      state.agentReplies = (Array.isArray(list) ? list : [])
+        .filter(r => r && (r.text != null || r.message != null))
+        .map((r, i) => ({
+          id: r.id != null ? r.id : `ar${i}`,
+          text: String(r.text != null ? r.text : r.message),
+          at: r.at != null ? r.at : null,
+          objId: r.objId != null ? r.objId : (r.annotationId != null ? r.annotationId : null),
+        }));
+      _recRowSig = null; // 回覆變動一定要重建列 DOM
+      renderRecordPanel();
+      return state.agentReplies.length;
+    },
+    getAgentReplies: () => state.agentReplies.map(r => ({ ...r })),
+    setRecordFilter: (v) => { state.recordFilter = v; _recRowSig = null; renderRecordPanel(); },
+    getRecordFilter: () => state.recordFilter,
     ingestReplies, // AI 方案卡：注入回覆（poll 收到或測試用）
     getReplies: () => state.replies.slice(),
     getNotes: () => state.notes.slice(),                 // 註記清單（poll / 測試用）
@@ -2339,7 +2425,7 @@ export function initDrawLayer(target, opts = {}) {
     toggleRecordPanel: () => { state.recordOpen = !state.recordOpen; renderRecordPanel(); },
     // 決策 A：外部（如 live-markup 換頁監聽）呼叫 → 依當前 getScreenId() 重畫，只顯示當前頁標注。
     refresh: () => render(),
-    clear: () => { [...moveOrigTransform.keys()].forEach(sel => { resetMoveOf(sel, querySelectorSafe(sel)); }); state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sentConfirmN = 0; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; state.moves = []; render(); persistLocalSave(); persistSentState(); },
+    clear: () => { [...moveOrigTransform.keys()].forEach(sel => { resetMoveOf(sel, querySelectorSafe(sel)); }); state.objects = []; state.draft = null; state.selectedIds = []; state.sentSigs = {}; state.sentConfirmN = 0; state.sendUnchecked = {}; state.replies = []; state.decisions = []; state.notes = []; state.moves = []; state.agentReplies = []; state.recordFilter = 'all'; _recRowSig = null; render(); persistLocalSave(); persistSentState(); },
     destroy: () => {
       stopLive(); // Batch 4：拆掉 live reposition 監聽/rAF/ResizeObserver
       replyPolling = false; // 停掉 AI 方案卡輪詢

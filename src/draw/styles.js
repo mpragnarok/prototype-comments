@@ -329,8 +329,26 @@ export const DRAW_STYLES = `
 .pc-draw-reply-close:hover { color: var(--pc-ink-2); }
 .pc-draw-rec-remove { flex: none; border: none; background: transparent; color: #b0bcc8; font-size: 12px; line-height: 1; cursor: pointer; padding: 2px 4px; }
 .pc-draw-rec-remove:hover { color: var(--pc-danger-hover); }
-.pc-draw-rec-restore { flex: none; border: 1px solid var(--pc-accent); background: rgba(var(--pc-accent-rgb), .06); color: var(--pc-accent-strong); font-size: 11px; font-weight: 600; line-height: 1; cursor: pointer; padding: 3px 7px; border-radius: 6px; white-space: nowrap; }
-.pc-draw-rec-restore:hover { background: rgba(var(--pc-accent-rgb), .14); }
+/* 篩選列（全部／待送／已送／有回覆）：只改看得到哪幾列，不改送出範圍。 */
+.pc-draw-rec-filters { display: flex; gap: 5px; padding: 8px 10px 0; background: var(--pc-surface-muted); }
+.pc-draw-rec-filter { flex: none; cursor: pointer; font: 600 10.5px/1 inherit; padding: 4px 9px; border-radius: 999px;
+  border: 1px solid var(--pc-border-3); background: #fff; color: var(--pc-ink-2); }
+.pc-draw-rec-filter:hover { border-color: var(--pc-accent); color: var(--pc-accent-strong); }
+.pc-draw-rec-filter.is-on { background: var(--pc-accent); border-color: var(--pc-accent); color: #fff; }
+/* 已送出的列留在清單上、視覺變淡；從畫布隱藏的再淡一階。 */
+.pc-draw-rec-row.is-sent-row { background: var(--pc-surface-muted); }
+.pc-draw-rec-row.is-hidden-row { opacity: .58; }
+/* 眼睛鈕：切換這一筆在畫布上顯示/隱藏（與送出勾選框是兩件事）。 */
+.pc-draw-rec-eye { flex: none; border: none; background: transparent; cursor: pointer; font-size: 13px; line-height: 1;
+  padding: 2px 4px; border-radius: 5px; opacity: .85; }
+.pc-draw-rec-eye:hover { background: rgba(var(--pc-accent-rgb), .12); opacity: 1; }
+.pc-draw-rec-eye.is-off { opacity: .35; text-decoration: line-through; }
+/* AI 回覆氣泡：接在它回應的那一列下面，縮排 + 左側細線，讀起來是一條對話串。 */
+.pc-draw-rec-reply { margin: -2px 0 8px 26px; padding: 7px 10px; border-left: 2px solid var(--pc-accent);
+  background: #fff; border-radius: 0 8px 8px 0; }
+.pc-draw-rec-reply-tag { display: block; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; color: var(--pc-accent-strong); margin-bottom: 2px; }
+.pc-draw-rec-reply-text { color: var(--pc-slate); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.pc-draw-rec-orphan-hd { margin: 10px 0 6px; font-size: 10px; font-weight: 700; letter-spacing: .03em; color: var(--pc-muted); }
 .pc-draw-reply-text { margin-bottom: 8px; white-space: pre-wrap; }
 .pc-draw-reply-opts { display: flex; flex-wrap: wrap; gap: 6px; }
 .pc-draw-reply-opts.is-rich { flex-direction: column; flex-wrap: nowrap; gap: 8px; }
