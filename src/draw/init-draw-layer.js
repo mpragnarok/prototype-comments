@@ -623,11 +623,13 @@ export function initDrawLayer(target, opts = {}) {
     if (drawStore) { try { drawStore.save(noteToDoc(n)); } catch (_) { } }
     persistLocalSave(); render();
   }
+  // 全選框的作用範圍＝「可送出的待送列」（renderRecordPanel 每次重算後寫回）。
+  // 隱藏的列不是可送出的 → 全選/取消全選都不碰它，取消隱藏後它保持使用者原本的勾選意思。
+  let sendableRowIds = [];
   const drawerAllBox = recordDrawer.querySelector('.pc-draw-rec-all');
   if (drawerAllBox) drawerAllBox.onchange = () => {
-    state.sendUnchecked = {};
-    // 取消全選：objects + decisions + notes 全部設未勾選（舊版只含 objects → notes/decisions 漏掉）。
-    if (!drawerAllBox.checked) [...state.objects, ...state.decisions, ...state.notes].forEach(x => { state.sendUnchecked[x.id] = true; });
+    const on = drawerAllBox.checked;
+    sendableRowIds.forEach(id => { if (on) delete state.sendUnchecked[id]; else state.sendUnchecked[id] = true; });
     render(); // 用 render（非只 renderRecordPanel）→ 未勾選的 note/物件即時從畫布消失，畫面與截圖一致
   };
   document.body.appendChild(recordDrawer);
@@ -762,7 +764,11 @@ export function initDrawLayer(target, opts = {}) {
     rows.forEach(r => { r.replies = replyMap.get(r.id) || []; });
     // 「待送」＝尚未送出的列（已送/收納者不納入送出計數與全選）。
     const pendingRows = rows.filter(r => !r.sent);
-    const checkedRows = pendingRows.filter(r => !state.sendUnchecked[r.id] && !r.archived); // 納入送出的列（眼睛鈕隱藏者不送 → 不計數）
+    // 可送出的待送列＝未送 且 未被眼睛鈕隱藏（隱藏者不進 payload → 也不該進計數與全選）。
+    // 分子與分母必須是同一組：只排除分子會讓全選框永遠回不到 checked，整顆鈕對使用者失效。
+    const sendableRows = pendingRows.filter(r => !r.archived);
+    sendableRowIds = sendableRows.map(r => r.id); // 交給全選框的 onchange 用
+    const checkedRows = sendableRows.filter(r => !state.sendUnchecked[r.id]); // 納入送出的列
     const checkedCount = checkedRows.length;
     const count = recordDrawer.querySelector('.pc-draw-rec-count');
     if (count) count.textContent = String(rows.length); // 標題計數＝紀錄總筆數（語意維持現狀）
@@ -775,12 +781,12 @@ export function initDrawLayer(target, opts = {}) {
     };
     syncRecordFilters(recordFilters, state.recordFilter, filterCounts);
     const visibleRows = rows.filter(r => matchesRecordFilter(r, state.recordFilter));
-    // 全選框：反映「待送」列（全勾→checked、部分→indeterminate、無待送→disabled）。
+    // 全選框：反映「可送出的待送列」（全勾→checked、部分→indeterminate、無可送→disabled）。
     const allBox = recordDrawer.querySelector('.pc-draw-rec-all');
     if (allBox) {
-      allBox.checked = pendingRows.length > 0 && checkedCount === pendingRows.length;
-      allBox.indeterminate = checkedCount > 0 && checkedCount < pendingRows.length;
-      allBox.disabled = pendingRows.length === 0;
+      allBox.checked = sendableRows.length > 0 && checkedCount === sendableRows.length;
+      allBox.indeterminate = checkedCount > 0 && checkedCount < sendableRows.length;
+      allBox.disabled = sendableRows.length === 0;
     }
     // footer 送出鈕狀態機（outbox：已送項已離開清單，故 checkedCount>0 必為未送 → 可直接送）：
     //   有可送項 → 「送給 AI（N）」可送；剛送完、沒有新可送項 → 持久「✅ 已送出（N 筆）」確認
@@ -1990,7 +1996,10 @@ export function initDrawLayer(target, opts = {}) {
   async function handleDrawerSend() {
     const sendBtn = recordDrawer.querySelector('.pc-draw-rec-send-btn');
     if (!sendBtn || sendBtn.disabled || sendBtn.dataset.inflight) return;
-    const n = checkedObjects().length + checkedDecisions().length + state.notes.filter(x => !state.sendUnchecked[x.id]).length + uncheckedUnsentMoves().length;
+    // 先擷取這批「真的會送出去的東西」（同 handleFeedbackSend）：回執筆數、標已送的集合、
+    // exportPayload 三者必須是同一組，否則回執會報一個 payload 裡沒有的數字。
+    const objs = checkedObjects(), decs = checkedDecisions(), notes = uncheckedUnsentNotes(), moves = uncheckedUnsentMoves();
+    const n = objs.length + decs.length + notes.length + moves.length;
     if (!n) return; // 全沒勾 → 不送
     sendBtn.dataset.inflight = '1';
     sendBtn.disabled = true;
@@ -2001,13 +2010,14 @@ export function initDrawLayer(target, opts = {}) {
       // 分「AI 在線＝立即送達」與「AI 未連線＝已排佇列（之後連上自動收）」，讓使用者看得出狀態。
       sendBtn.textContent = result.listening ? `✅ 已送達 AI（${n} 筆）` : `📥 已排佇列（${n} 筆，AI 未連線）`;
       sendBtn.classList.toggle('pc-draw-rec-queued', !result.listening);
-      // 記下這批「實際送出（勾選）」的標注＋決定簽章 → 面板那幾列標「已送」（改動後簽章變、自動回「未送」）。
-      const sentObjs = checkedObjects(); // 先擷取（標記 sentSigs 後 isSent 會變真、checkedObjects 會清空）
-      sentObjs.forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
-      checkedDecisions().forEach(d => { state.sentSigs[d.id] = decisionSig(d); });
-      uncheckedUnsentNotes().forEach(n => { state.sentSigs[n.id] = noteSig(n); }); // 只標「真的送出去的那批」（隱藏者沒送 → 不標已送）
-      uncheckedUnsentMoves().forEach(m => { state.sentSigs[m.id] = moveSig(m); }); // 位移標記已送（元件維持位移，離開未送清單）
-      archiveObjects(sentObjs); // 送出即收納：從畫布消失、留在標注紀錄（可還原）
+      // 記下這批「實際送出」的標注＋決定簽章 → 面板那幾列標「已送」（改動後簽章變、自動回「未送」）。
+      // 註記用 uncheckedUnsentNotes 擷取的那批：隱藏者沒被送出 → 不能蓋 sentSig，
+      // 否則 noteSig 不含 hidden，取消隱藏後簽章不變、它永遠回不到送出集合。
+      objs.forEach(o => { state.sentSigs[o.id] = annotationSig(o); });
+      decs.forEach(d => { state.sentSigs[d.id] = decisionSig(d); });
+      notes.forEach(nn => { state.sentSigs[nn.id] = noteSig(nn); });
+      moves.forEach(mm => { state.sentSigs[mm.id] = moveSig(mm); }); // 位移標記已送（元件維持位移，離開未送清單）
+      archiveObjects(objs); // 送出即收納：從畫布消失、留在標注紀錄（可還原）
       state.sentConfirmN = n; // outbox 清空清單後，footer 靠此維持「✅ 已送出（N 筆）」確認
       persistSentState(); // 修 bug：持久化「已送」→ 重整/重訂閱後不再把已送標注當未送畫回
       render(); // 立刻更新：畫布隱藏已送標注 + 各列「已送」標記（inflight 仍在 → 不蓋按鈕狀態文字）
