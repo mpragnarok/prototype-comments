@@ -19,6 +19,8 @@ export function createMockFirebase(initial = {}) {
     user: initial.user || null,
     redirectCalls: 0,
     popupCalls: 0,
+    // 設起來之後 updateDoc 一律拋錯，用來驗「寫不進去時畫面上說不說話」。
+    updateError: null,
     // 匿名登入也要記次數：`auth: 'host'` 的合約是「絕不自己發起登入」，
     // 而匿名登入正是它最容易不小心退回去走的那一條——沒有這個計數，
     // 那條合約在測試裡驗不到（畫面看起來一模一樣，只有 uid 悄悄變成匿名的）。
@@ -77,8 +79,13 @@ export function createMockFirebase(initial = {}) {
     serverTimestamp: () => ({ toMillis: () => 0 }),
 
     // ─ firestore ops ─
-    onSnapshot: (q, onChange) => {
-      const l = { cb: onChange, clauses: (q && q.__clauses) || [] };
+    /*
+     * 第三個參數（錯誤回呼）要真的收下來。丟掉它的話，「讀取失敗時畫面上有沒有
+     * 說話」就永遠測不到——而那正是最需要測的一種失敗：讀不到的畫面跟「還沒標過」
+     * 長得一模一樣，靜默的話使用者只會以為自己沒留成。
+     */
+    onSnapshot: (q, onChange, onError) => {
+      const l = { cb: onChange, err: onError, clauses: (q && q.__clauses) || [] };
       state.snapListeners.add(l);
       l.cb({ docs: docsArray(l.clauses) });       // 立即推一次當前狀態
       return () => state.snapListeners.delete(l);
@@ -95,6 +102,7 @@ export function createMockFirebase(initial = {}) {
       emitSnap();
     },
     updateDoc: async (ref, data) => {
+      if (state.updateError) throw state.updateError;
       const cur = state.docs.get(ref.__id) || {};
       state.docs.set(ref.__id, { ...cur, ...data });
       emitSnap();
@@ -146,6 +154,26 @@ export function createMockFirebase(initial = {}) {
       redirect: state.redirectCalls, popup: state.popupCalls, anon: state.anonCalls,
     }),
     __seed: (c) => { const id = c.id || `m${++idSeq}`; state.docs.set(id, { ...c }); emitSnap(); return id; },
+    /**
+     * 讓目前所有訂閱者收到一次讀取錯誤（真 SDK 在 rules 擋掉 read 時就是走這條）。
+     * 回傳實際觸發到的訂閱數——0 代表這支 script 根本沒把錯誤回呼傳進來，
+     * 那時測試要當失敗，不要當「沒有錯誤」。
+     */
+    __failReads: (code = 'permission-denied') => {
+      let fired = 0;
+      state.snapListeners.forEach((l) => {
+        if (!l.err) return;
+        fired += 1;
+        l.err(Object.assign(new Error(`mock-firebase: ${code}`), { code }));
+      });
+      return fired;
+    },
+    /** 設 null 解除。設起來之後 updateDoc 一律失敗（改內容／已處理／取消已處理都會撞到）。 */
+    __failWrites: (code = 'permission-denied') => {
+      state.updateError = code === null
+        ? null
+        : Object.assign(new Error(`mock-firebase: ${code}`), { code });
+    },
     __docs: () => docsArray().map(d => ({ id: d.id, ...d.data() })),
     __state: state,
   };

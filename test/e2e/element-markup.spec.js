@@ -1043,6 +1043,61 @@ const seedMark = (over = {}) => ({
     assert(marking, '身分還原後應該要能進標記模式（等不到就會誤判成沒登入）');
   });
 
+  // ── 失敗要看得見（讀取／改狀態）────────────────────────────────────────────
+  //
+  // 這三條守的是同一件事：後端拒絕時，畫面上要有一句人看得懂的話。
+  // 讀取失敗尤其危險——讀不到的畫面跟「還沒標過」一模一樣，靜默的話使用者
+  // 會以為自己沒留成，然後重標一次、或反覆問「有沒有人看到」。
+
+  await test('讀不到標記時，畫面上要說話（不能只寫 console）', async () => {
+    const page = await fresh(browser, { seed: [seedMark({ id: 'a' })] });
+    const fired = await page.evaluate(() => window.__fb.__failReads());
+    await page.waitForTimeout(300);
+    const toast = await page.evaluate(() => document.querySelector('.em-toast')?.textContent || '');
+    await page.close();
+    assert(fired === 1, `onSnapshot 沒有收下錯誤回呼（觸發到 ${fired} 個訂閱），讀取失敗會整個靜默`);
+    assert(toast !== '', '讀取失敗時畫面上完全沒有提示——使用者只會以為自己沒留成');
+    // 「暫時讀不到你之前留的標記，重新整理看看。」——要說出讀不到，也要給下一步
+    assert(/讀不到/.test(toast), `提示要說出「讀不到」，實際「${toast}」`);
+    assert(/重新整理/.test(toast), `提示要給下一步（重新整理），實際「${toast}」`);
+    // 給人看的話裡不能出現技術名詞：印 Firestore／rules／permission-denied
+    // 對非工程師等於另一種形式的靜默。
+    assert(!/Firestore|rules|permission|denied|Error/i.test(toast),
+      `提示不該有技術錯誤訊息，實際「${toast}」`);
+  });
+
+  await test('讀取一直失敗時只說一次，換頁不會一直跳同一句', async () => {
+    const page = await fresh(browser, { seed: [seedMark({ id: 'a' })] });
+    await page.evaluate(() => window.__fb.__failReads());
+    await page.waitForTimeout(200);
+    await page.evaluate(() => { document.querySelectorAll('.em-toast').forEach((t) => { t.remove(); }); });
+    await page.evaluate(() => window.__fb.__failReads());   // 第二次失敗
+    await page.waitForTimeout(200);
+    const again = await page.evaluate(() => document.querySelectorAll('.em-toast').length);
+    await page.close();
+    assert(again === 0, '同一段持續性的失敗只該說一次，跟著人一直跳就變成噪音');
+  });
+
+  await test('「標成已處理」寫不進去時，畫面上要說話（不能按了沒反應）', async () => {
+    const page = await fresh(browser, { seed: [seedMark({ id: 'a' })], init: { auth: 'google' } });
+    await page.evaluate(() => window.__fb.__failWrites());
+    await page.click('.em-tab');
+    await page.waitForSelector('.em-row .toggle');
+    // 具名模式登入時自己會跳一句「已登入：…」，先清掉，免得驗到的是那一句
+    await page.evaluate(() => { document.querySelectorAll('.em-toast').forEach((t) => { t.remove(); }); });
+    await page.click('.em-row .toggle');
+    await page.waitForTimeout(350);
+    const r = await page.evaluate(() => ({
+      toast: document.querySelector('.em-toast')?.textContent || '',
+      done: document.querySelectorAll('.em-box.done').length,
+      resolved: window.__fb.__docs().find(d => d.id === 'a')?.resolved,
+    }));
+    await page.close();
+    assert(r.toast !== '', '寫不進去時畫面上沒有任何提示——使用者只會覺得按了沒反應而一直按');
+    assert(/改不動/.test(r.toast), `用字要跟編輯失敗一致（改不動），實際「${r.toast}」`);
+    assert(r.done === 0 && r.resolved === false, '寫失敗時不該假裝已處理——那個框會說謊');
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
