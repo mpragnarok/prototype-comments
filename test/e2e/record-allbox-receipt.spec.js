@@ -134,6 +134,51 @@ function payloadN(post) {
     assert(hiddenRow.checked, '全選/取消全選都不該動到被隱藏的列（取消隱藏後要保持原本的勾選意思）');
   });
 
+  // ── 1b. 隱藏列取消隱藏後保持使用者原本的勾選意思（只點全選框一下，不能自我抵銷）───
+  await test('隱藏一列 → 全選框只點一下取消全選 → 取消隱藏該列：仍保持原本已勾的意思', async () => {
+    await page.evaluate(() => { window.__api.clear(); window.__api.setTool('rect'); });
+    await dragDraw(page, 100, 100, 180, 160);
+    await dragDraw(page, 220, 100, 300, 160);
+    await page.waitForTimeout(150);
+    const rows = await rowsOf(page);
+    assert(rows.length === 2, `前提：應有 2 列，實際 ${rows.length}`);
+    const hiddenId = rows[0].id;
+
+    await clickEye(page, hiddenId);
+    await page.waitForTimeout(200);
+
+    // 只點一下：取消全選
+    await page.click('.pc-draw-rec-all');
+    await page.waitForTimeout(250);
+    const b1 = await sendBtnText(page);
+    console.log('     隱藏後點全選框 ×1：sendBtn =', b1);
+    assert(b1.includes('（0）'), `點一下應取消全選 → 送出鈕 0 筆，實際「${b1}」`);
+
+    // 取消隱藏
+    await clickEye(page, hiddenId);
+    await page.waitForTimeout(250);
+    const row = (await rowsOf(page)).find(r => r.id === hiddenId);
+    const btn = await sendBtnText(page);
+    console.log('     取消隱藏後：checked =', row.checked, 'sendBtn =', btn);
+    assert(row.checked, '取消隱藏後該列應保持使用者原本的勾選意思（仍為 checked）');
+    assert(btn.includes('（1）'), `取消隱藏後送出鈕應算回 1 筆，實際「${btn}」`);
+  });
+
+  // ── 1c. 待送列全部隱藏時，全選框必須 disabled ─────────────────────────────────
+  await test('待送列全部被隱藏：全選框 disabled（不能讓使用者點一顆沒反應的鈕）', async () => {
+    await page.evaluate(() => { window.__api.clear(); window.__api.setTool('rect'); });
+    await dragDraw(page, 100, 100, 180, 160);
+    await page.waitForTimeout(150);
+    const rows = await rowsOf(page);
+    assert(rows.length === 1, `前提：應有 1 列，實際 ${rows.length}`);
+
+    await clickEye(page, rows[0].id);
+    await page.waitForTimeout(200);
+    const s = await allBoxState(page);
+    console.log('     唯一一列被隱藏後：allBox =', JSON.stringify(s));
+    assert(s.disabled, `待送列全部隱藏時，全選框應 disabled（分母不能誤用未排除隱藏的 pendingRows），實際 ${JSON.stringify(s)}`);
+  });
+
   // ── 2. 回執筆數 ＝ endpoint 實際收到的筆數 ─────────────────────────────────────
   await test('隱藏註記 + 可見標注：回執筆數 ＝ payload 實際筆數', async () => {
     await page.evaluate(() => {
