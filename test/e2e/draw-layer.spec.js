@@ -1809,7 +1809,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
   });
 
-  await test('收納：送出後該標注仍留清單（已送徽章＋還原鈕）、送出鈕維持「✅ 已送出」；新畫的仍在清單未送、可送', async () => {
+  await test('收納：送出後該標注仍留清單（已送徽章＋眼睛鈕呈已隱藏）、送出鈕維持「✅ 已送出」；新畫的仍在清單未送、可送', async () => {
     await reset('ellipse');
     await dragDraw(page, 110, 80, 210, 160); // 第 1 筆
     await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (!d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); });
@@ -1829,12 +1829,12 @@ async function dragDraw(page, x1, y1, x2, y2) {
     const afterSend = await page.evaluate(() => ({
       rows: document.querySelectorAll('.pc-draw-rec-row').length,
       sent: document.querySelectorAll('.pc-draw-rec-status.is-sent').length,
-      restore: document.querySelectorAll('.pc-draw-rec-restore').length,
+      eyeOff: document.querySelectorAll('.pc-draw-rec-eye.is-off').length,
       btn: document.querySelector('.pc-draw-rec-send-btn').textContent.trim(),
     }));
     console.log('     archive after send:', JSON.stringify(afterSend));
     assert(afterSend.rows === 1, `已送列應仍留清單（收納），實際 rows=${afterSend.rows}`);
-    assert(afterSend.sent === 1 && afterSend.restore === 1, `已送列應顯示已送徽章＋還原鈕，實際 ${JSON.stringify(afterSend)}`);
+    assert(afterSend.sent === 1 && afterSend.eyeOff === 1, `已送列應顯示已送徽章＋眼睛鈕呈已隱藏，實際 ${JSON.stringify(afterSend)}`);
     assert(/已送出/.test(afterSend.btn), `送出後鈕應維持「✅ 已送出（N 筆）」，實際 ${afterSend.btn}`);
     // 再畫第 2 筆 → 清單 2 列（1 已送 + 1 未送）、送出鈕回「送給 AI（1）」可送
     await page.evaluate(() => window.__drawTest.api.setTool('ellipse'));
@@ -2054,7 +2054,7 @@ async function dragDraw(page, x1, y1, x2, y2) {
     await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); window.__drawTest.api.clear(); });
   });
 
-  await test('已送出的標注：畫布隱藏＋仍留清單（收納，含已送徽章＋還原鈕），送出鈕維持「✅ 已送出」', async () => {
+  await test('已送出的標注：畫布隱藏＋仍留清單（收納，含已送徽章＋眼睛鈕呈已隱藏），送出鈕維持「✅ 已送出」', async () => {
     await reset('ellipse');
     await page.evaluate(() => window.__drawTest.api.clear());
     await dragDraw(page, 120, 90, 220, 170);
@@ -2069,25 +2069,25 @@ async function dragDraw(page, x1, y1, x2, y2) {
       canvas: document.querySelectorAll('#pc-draw ellipse').length,
       rows: document.querySelectorAll('.pc-draw-rec-row').length,
       sent: document.querySelectorAll('.pc-draw-rec-status.is-sent').length,
-      restore: document.querySelectorAll('.pc-draw-rec-restore').length,
+      eyeOff: document.querySelectorAll('.pc-draw-rec-eye.is-off').length,
       btn: document.querySelector('.pc-draw-rec-send-btn').textContent.trim(),
     }));
     console.log('     hide-sent:', JSON.stringify(r));
     assert(r.canvas === 0, '送出後畫布應隱藏該標注');
     assert(r.rows === 1, `收納：已送標注應仍留清單，實際 rows=${r.rows}`);
-    assert(r.sent === 1 && r.restore === 1, `收納列應含已送徽章＋還原鈕，實際 ${JSON.stringify(r)}`);
+    assert(r.sent === 1 && r.eyeOff === 1, `收納列應含已送徽章＋眼睛鈕呈已隱藏，實際 ${JSON.stringify(r)}`);
     assert(/已送出/.test(r.btn), `送出後鈕應維持「✅ 已送出（N 筆）」確認，實際 ${r.btn}`);
-    // 點還原 → 畫布重現、仍標已送
-    await page.click('.pc-draw-rec-restore');
+    // 點眼睛鈕 → 畫布重現、仍標已送
+    await page.click('.pc-draw-rec-eye');
     await page.waitForFunction(() => document.querySelectorAll('#pc-draw ellipse').length === 1, { timeout: 3000 });
     const rr = await page.evaluate(() => ({
       canvas: document.querySelectorAll('#pc-draw ellipse').length,
       sent: document.querySelectorAll('.pc-draw-rec-status.is-sent').length,
-      restore: document.querySelectorAll('.pc-draw-rec-restore').length,
+      eyeOff: document.querySelectorAll('.pc-draw-rec-eye.is-off').length,
     }));
     console.log('     restored:', JSON.stringify(rr));
     assert(rr.canvas === 1, `還原後畫布應重現，實際 ${rr.canvas}`);
-    assert(rr.sent === 1 && rr.restore === 0, `還原後仍標已送、還原鈕消失，實際 ${JSON.stringify(rr)}`);
+    assert(rr.sent === 1 && rr.eyeOff === 0, `還原後仍標已送、眼睛鈕回到顯示中，實際 ${JSON.stringify(rr)}`);
     await page.evaluate(() => { const d = document.getElementById('pc-draw-rec-drawer'); if (d.classList.contains('open')) window.__drawTest.api.toggleRecordPanel(); window.__drawTest.api.clear(); });
   });
 

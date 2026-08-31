@@ -135,13 +135,13 @@ const drawnCount = (page) => page.evaluate(() => document.querySelectorAll('#pc-
       rows: document.querySelectorAll('.pc-draw-rec-row').length,
       drawn: document.querySelectorAll('#pc-draw [data-id]').length,
       sentBadge: document.querySelectorAll('.pc-draw-rec-row .pc-draw-rec-status.is-sent').length,
-      restoreBtn: document.querySelectorAll('.pc-draw-rec-row .pc-draw-rec-restore').length,
+      eyeOff: document.querySelectorAll('.pc-draw-rec-row .pc-draw-rec-eye.is-off').length,
       hidden: window.__drawTest.api.getObjects()[0].hidden === true,
     }));
     assert(afterSend.drawn === 0, `送出後畫布應隱藏，實際 drawn=${afterSend.drawn}`);
     assert(afterSend.rows === 1, `送出後標注應仍列在紀錄（收納），實際 rows=${afterSend.rows}`);
     assert(afterSend.sentBadge === 1, `收納列應顯示「已送」徽章，實際 ${afterSend.sentBadge}`);
-    assert(afterSend.restoreBtn === 1, `收納列應有「還原到畫布」鈕，實際 ${afterSend.restoreBtn}`);
+    assert(afterSend.eyeOff === 1, `收納列的眼睛鈕應呈「已隱藏」（is-off），實際 ${afterSend.eyeOff}`);
     assert(afterSend.hidden === true, `物件應標記 hidden，實際 ${afterSend.hidden}`);
     // 模擬「重整 / 重新載入」：destroy 後同 projectId 重建（objects 從 localStorage 還原）
     await page.evaluate(() => { window.__drawTest.api.destroy(); window.__drawTest.api = window.__drawTest.init({ projectId: 'sendpersist' }); });
@@ -157,8 +157,8 @@ const drawnCount = (page) => page.evaluate(() => document.querySelectorAll('#pc-
     await page.evaluate(() => { window.__drawTest.api.destroy(); localStorage.removeItem('pc-draw-local:sendpersist'); localStorage.removeItem('pc-draw-sent:sendpersist'); });
   });
 
-  // ── ④ 還原到畫布：單筆還原 → 畫布重現、保留已送徽章、不重複送；重整後仍顯示 ───────────
-  await test('④ 還原到畫布：送出收納 → 點還原 → 畫布重現＋仍標已送＋送出鈕不重複計數；重整後仍顯示', async () => {
+  // ── ④ 眼睛鈕還原：單筆重現 → 畫布重現、保留已送徽章、不重複送；重整後仍顯示 ─────────
+  await test('④ 眼睛鈕：送出收納 → 點眼睛 → 畫布重現＋仍標已送＋送出鈕不重複計數；重整後仍顯示', async () => {
     await page.evaluate(() => {
       try { if (window.__drawTest.api) window.__drawTest.api.destroy(); } catch (_) {}
       localStorage.removeItem('pc-draw-local:restore');
@@ -174,21 +174,21 @@ const drawnCount = (page) => page.evaluate(() => document.querySelectorAll('#pc-
     });
     await page.click('.pc-draw-rec-send-btn');
     await page.waitForFunction(() => document.querySelectorAll('#pc-draw [data-id]').length === 0, { timeout: 3000 });
-    // 點「還原到畫布」
-    await page.click('.pc-draw-rec-restore');
+    // 點眼睛鈕 → 重新顯示在畫布
+    await page.click('.pc-draw-rec-eye');
     await page.waitForFunction(() => document.querySelectorAll('#pc-draw [data-id]').length === 1, { timeout: 3000 });
     const afterRestore = await page.evaluate(() => ({
       drawn: document.querySelectorAll('#pc-draw [data-id]').length,
       rows: document.querySelectorAll('.pc-draw-rec-row').length,
       sentBadge: document.querySelectorAll('.pc-draw-rec-row .pc-draw-rec-status.is-sent').length,
-      restoreBtn: document.querySelectorAll('.pc-draw-rec-row .pc-draw-rec-restore').length,
+      eyeOff: document.querySelectorAll('.pc-draw-rec-row .pc-draw-rec-eye.is-off').length,
       hidden: window.__drawTest.api.getObjects()[0].hidden === true,
       sendBtn: (document.querySelector('.pc-draw-rec-send-btn') || {}).textContent || '',
     }));
     assert(afterRestore.drawn === 1, `還原後畫布應重現該標注，實際 drawn=${afterRestore.drawn}`);
     assert(afterRestore.rows === 1, `還原後紀錄仍列該標注，實際 rows=${afterRestore.rows}`);
     assert(afterRestore.sentBadge === 1, `還原後仍保留「已送」徽章，實際 ${afterRestore.sentBadge}`);
-    assert(afterRestore.restoreBtn === 0, `還原後不再顯示還原鈕（已在畫布），實際 ${afterRestore.restoreBtn}`);
+    assert(afterRestore.eyeOff === 0, `還原後眼睛鈕應回到「顯示中」，實際 is-off=${afterRestore.eyeOff}`);
     assert(afterRestore.hidden === false, `還原後 hidden 應清除，實際 ${afterRestore.hidden}`);
     assert(!/送給 AI（1）/.test(afterRestore.sendBtn), `還原（已送未改）不應被重複計入送出，送出鈕文字=${afterRestore.sendBtn}`);
     // 重整：destroy 後同 projectId 重建 → 還原狀態（可見）保持
