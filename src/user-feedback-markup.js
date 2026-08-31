@@ -394,10 +394,25 @@ async function start(opts) {
   });
 
   // ── 資料 ────────────────────────────────────────────────────────────────────
+  /*
+   * 讀不到的時候要在**畫面上**說，而且只說一次。
+   *
+   * 只寫 console 的後果不是「少了什麼」，是「我標過的框都不見了」——讀不到的畫面
+   * 跟「還沒標過」長得一模一樣，所以使用者會合理地以為自己根本沒留成，然後重標
+   * 一次、或者反覆問「有沒有人看到」。送出失敗早就有畫面提示，讀取失敗沒有，
+   * 是漏掉的那半邊。
+   *
+   * 只說一次：換頁（onRoute）會重新訂閱，rules 沒開 read 這種持續性的失敗每換
+   * 一頁就再跳一次，同一句話跟著人跑反而變成噪音。收到任何一次成功的快照就把
+   * 旗標放掉——下一次再壞，那是新的一次，該說。
+   */
+  let readFailureAnnounced = false;
+
   function subscribe() {
     state.unsub?.();
     const q = fb.query(col, fb.where('screenId', '==', page()));
     state.unsub = fb.onSnapshot(q, (snap) => {
+      readFailureAnnounced = false;
       state.marks = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
         .filter(m => m.selector && !m.parentId)
@@ -406,6 +421,14 @@ async function start(opts) {
     }, (error) => {
       // 靜默失敗＝「我標了但沒人收到」，所以一定要吭聲。
       console.error('[element-markup] 讀取標記失敗（多半是 Firestore rules 沒開 read）', error);
+      if (readFailureAnnounced) return;
+      readFailureAnnounced = true;
+      /*
+       * 給人看的話：不提 Firestore、不提 rules、不把 error 印出來。讀的人可能是
+       * 醫師或設計師，技術錯誤訊息對他們只是另一種形式的靜默。要讓他知道的只有
+       * 兩件事：不是你沒留成、以及接下來可以做什麼。
+       */
+      toast('暫時讀不到你之前留的標記，重新整理看看。');
     });
   }
 
@@ -471,9 +494,16 @@ async function start(opts) {
     if (!user) return;
     const next = !mark.resolved;
     const by = anonymous ? (savedName() || '未署名') : (user.displayName || user.email);
-    await fb.updateDoc(docRef(mark.id), next
-      ? { resolved: true, resolvedBy: by, resolvedByUid: user.uid, resolvedAt: fb.serverTimestamp() }
-      : { resolved: false, resolvedBy: '', resolvedByUid: '', resolvedAt: null });
+    try {
+      await fb.updateDoc(docRef(mark.id), next
+        ? { resolved: true, resolvedBy: by, resolvedByUid: user.uid, resolvedAt: fb.serverTimestamp() }
+        : { resolved: false, resolvedBy: '', resolvedByUid: '', resolvedAt: null });
+    } catch (error) {
+      // 沒接住的話：框的顏色不變、console 以外沒有任何線索，使用者只會覺得
+      // 「按了沒反應」而一直按。用字跟改不動／刪不掉同一套，不另立一種說法。
+      console.error('[element-markup] 已處理狀態改不動', error);
+      toast('改不動，重新整理後再試一次。');
+    }
   }
 
   // ── 標記模式 ────────────────────────────────────────────────────────────────

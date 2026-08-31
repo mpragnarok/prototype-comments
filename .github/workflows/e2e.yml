@@ -34,6 +34,14 @@ jobs:
         run: npm run test:e2e
         timeout-minutes: 5
 
+      # user-feedback-markup.js 是 CDN 直出的檔案（/src/user-feedback-markup.js），
+      # 沒有 build 步驟擋在前面——push main 就上線。它的行為只有這一支在守，
+      # 卻一直不在 CI 的清單裡：測試檔存在、也會過，但 merge 前沒有人跑到。
+      # 同樣用 in-memory mock、無網路，跨平台一致，可以當硬 gate。
+      - name: e2e (element markup — CDN 直出檔案)
+        run: npm run test:e2e:markup
+        timeout-minutes: 5
+
       # 視覺 regression：baseline 在 macOS 產生，CI(Linux) 的字型 / emoji 字形渲染本質不同，
       # pixelmatch threshold 無法吸收（非單純 subpixel）。因此在 CI 設為「informational」：
       # 不擋 PR，改上傳截圖 + diff PNG 供人眼審。要讓它變硬 gate 需在同一 Linux 容器重產 baseline。
