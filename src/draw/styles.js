@@ -300,7 +300,7 @@ export const DRAW_STYLES = `
 .pc-draw-rec-close:hover { color: var(--pc-ink-2); }
 .pc-draw-rec-list { padding: 10px; overflow-y: auto; flex: 1; background: var(--pc-surface-muted); }
 .pc-draw-rec-row {
-  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 9px; width: 100%; box-sizing: border-box; text-align: left;
   background: #fff; border: 1px solid var(--pc-border-3); border-radius: 7px; padding: 8px 10px;
   margin-bottom: 8px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04);
 }
