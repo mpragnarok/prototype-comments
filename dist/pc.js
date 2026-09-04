@@ -1,4 +1,4 @@
-/* pc.js 405bc66 2026-08-29T13:51:55Z */
+/* pc.js c548499 2026-09-04T03:37:49Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -2265,7 +2265,7 @@ const DRAW_STYLES = `
 .pc-draw-rec-close:hover { color: var(--pc-ink-2); }
 .pc-draw-rec-list { padding: 10px; overflow-y: auto; flex: 1; background: var(--pc-surface-muted); }
 .pc-draw-rec-row {
-  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 9px; width: 100%; box-sizing: border-box; text-align: left;
   background: #fff; border: 1px solid var(--pc-border-3); border-radius: 7px; padding: 8px 10px;
   margin-bottom: 8px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04);
 }
@@ -3955,14 +3955,14 @@ function initDrawLayer(target, opts = {}) {
     if (_previewUrl) {
       const img = drawHtmlEl('img', 'pc-draw-rec-preview');
       img.alt = '送給 AI 的畫面預覽';
-      img.style.cssText = 'display:block;width:100%;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;';
+      img.style.cssText = 'display:block;width:100%;box-sizing:border-box;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;';
       img.src = _previewUrl;
       return img;
     }
     // 截圖尚未備好 → 顯示 placeholder（避免空 src <img> 被瀏覽器畫成破圖）
     const ph = drawHtmlEl('div', 'pc-draw-rec-preview');
     ph.textContent = '產生預覽中…';
-    ph.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;color:#8a9099;font-size:12px;';
+    ph.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;box-sizing:border-box;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;color:#8a9099;font-size:12px;';
     return ph;
   }
   function refreshRecordPreview() {
@@ -5609,7 +5609,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = '405bc66';
+export const PC_VERSION = 'c548499';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';

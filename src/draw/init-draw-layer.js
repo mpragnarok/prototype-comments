@@ -867,14 +867,14 @@ export function initDrawLayer(target, opts = {}) {
     if (_previewUrl) {
       const img = drawHtmlEl('img', 'pc-draw-rec-preview');
       img.alt = '送給 AI 的畫面預覽';
-      img.style.cssText = 'display:block;width:100%;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;';
+      img.style.cssText = 'display:block;width:100%;box-sizing:border-box;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;';
       img.src = _previewUrl;
       return img;
     }
     // 截圖尚未備好 → 顯示 placeholder（避免空 src <img> 被瀏覽器畫成破圖）
     const ph = drawHtmlEl('div', 'pc-draw-rec-preview');
     ph.textContent = '產生預覽中…';
-    ph.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;color:#8a9099;font-size:12px;';
+    ph.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;box-sizing:border-box;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;color:#8a9099;font-size:12px;';
     return ph;
   }
   function refreshRecordPreview() {

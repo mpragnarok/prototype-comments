@@ -91,6 +91,21 @@ const snap = page => page.evaluate(() => ({
     assert(s.filters[0].t.includes('3') && s.filters[1].t.includes('3'), `全部/待送 都應是 3，實際 ${s.filters[0].t} / ${s.filters[1].t}`);
   });
 
+  await test('清單不橫向溢出：每一列都塞得進抽屜寬度（列尾的鈕不會被切掉）', async () => {
+    const m = await page.evaluate(() => {
+      const list = document.querySelector('.pc-draw-rec-list');
+      const row = document.querySelector('.pc-draw-rec-row');
+      return {
+        listScrollW: list.scrollWidth, listClientW: list.clientWidth,
+        rowW: row ? row.getBoundingClientRect().width : null,
+        rowBox: row ? getComputedStyle(row).boxSizing : null,
+      };
+    });
+    console.log('     list scrollWidth/clientWidth:', m.listScrollW, '/', m.listClientW, '| row width:', m.rowW, '| box-sizing:', m.rowBox);
+    assert(m.listScrollW === m.listClientW,
+      `清單有橫向溢出：scrollWidth ${m.listScrollW} > clientWidth ${m.listClientW}（列寬 ${m.rowW}px、box-sizing: ${m.rowBox}）`);
+  });
+
   // ── 送出 ────────────────────────────────────────────────────────────────────
   await page.click('.pc-draw-rec-send-btn');
   await page.waitForTimeout(600);
