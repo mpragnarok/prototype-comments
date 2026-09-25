@@ -644,7 +644,9 @@ async function start(opts) {
   // （視窗是 fixed 的——absolute 會把頁面撐寬，見 positionPopover 的說明）。
   const reflow = () => { render(); positionPopover(ui); };
   addEventListener('resize', reflow);
-  addEventListener('scroll', reflow, { passive: true });
+  // capture：頁面裡任何一格在捲都要聽到。scroll 事件不會冒泡，只在 window 上聽的話，
+  // 投影片 deck、側邊欄、modal 這種「頁面裡一格在捲」的情況，內容跑了框還停在原地。
+  addEventListener('scroll', reflow, { passive: true, capture: true });
   // 點到 popover 以外的地方就收起來——包含頁面本身與別的標記
   const onDocClick = (e) => {
     if (!ui.pop.classList.contains('show')) return;
@@ -769,7 +771,7 @@ async function start(opts) {
     destroy: () => {
       state.unsub?.();
       removeEventListener('resize', reflow);
-      removeEventListener('scroll', reflow);
+      removeEventListener('scroll', reflow, { capture: true });  // 要跟 add 的 capture 一致才拆得掉
       document.removeEventListener('click', onDocClick, true);
       document.removeEventListener('keydown', onEsc);
       removeEventListener('hashchange', onRoute);

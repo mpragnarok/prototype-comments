@@ -469,6 +469,37 @@ const seedMark = (over = {}) => ({
       `視窗要跟著框走，捲動前後的相對位置應不變（before ${JSON.stringify(before)} after ${JSON.stringify(after)}）`);
   });
 
+  // 捲動的不是整個網頁、而是頁面裡的一格（投影片 deck、側邊欄、modal 都是這樣）時，
+  // scroll 事件不會冒泡到 window。只在 window 上聽的話，內容跑了、框還停在原地——
+  // 2026-09-25 秋冬星空 deck 實測：內容上移 480px，框一動不動。
+  await test('頁面裡某一格在捲（不是整頁）時，框也要跟著內容走', async () => {
+    const page = await fresh(browser, { user: null });
+    await page.evaluate(() => {
+      const wrap = document.createElement('div');
+      wrap.id = 'nested-scroller';
+      wrap.style.cssText = 'height:220px;overflow:auto;border:1px solid #ccc';
+      wrap.innerHTML = '<div style="height:60px"></div>'
+        + '<button class="app" id="nested-target">捲動區裡的按鈕</button>'
+        + '<div style="height:800px"></div>';
+      document.body.prepend(wrap);
+    });
+    await markOn(page, '#nested-target', '捲動區裡的標記');
+    await page.click('.em-fab').catch(() => {});
+    await page.waitForTimeout(200);
+    const gap = () => page.evaluate(() => {
+      const box = document.querySelector('.em-box').getBoundingClientRect();
+      const el = document.querySelector('#nested-target').getBoundingClientRect();
+      return Math.round(box.top - el.top);
+    });
+    const before = await gap();
+    await page.evaluate(() => { document.getElementById('nested-scroller').scrollTop = 120; });
+    await page.waitForTimeout(400);
+    const after = await gap();
+    await page.close();
+    assert(Math.abs(after - before) <= 2,
+      `框要跟著捲動區裡的內容走，框與目標的垂直距離應不變（捲前 ${before}px，捲後 ${after}px）`);
+  });
+
   await test('視窗顯示中的那則被刪掉 → 視窗收起來', async () => {
     const page = await fresh(browser, { user: null });
     await markOn(page, '#btn-step', '刪掉之後視窗要消失');
