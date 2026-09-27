@@ -640,13 +640,40 @@ async function start(opts) {
     lastSignature = anchorSignature();
   }
 
-  // 捲動／改變視窗：重畫框，並讓留言視窗重新對準它那個框
+  // 改變視窗：重畫框，並讓留言視窗重新對準它那個框
   // （視窗是 fixed 的——absolute 會把頁面撐寬，見 positionPopover 的說明）。
   const reflow = () => { render(); positionPopover(ui); };
   addEventListener('resize', reflow);
+
+  /**
+   * 捲動只讓框的「位置」過期，不改變有哪幾則、畫不畫得出來，所以只挪框，不走 render()。
+   * render() 會重建右側清單：使用者正在編輯的那一列會連同打到一半的字與焦點一起被換掉。
+   * 對不上的情況（框對應的標記或元素不見了）才退回整份重畫——那時清單本來就該更新。
+   * 挪完要把簽章對齊現況：巢狀捲動會改變元素的文件座標，不對齊的話下一次無關的
+   * DOM 變動會被當成「位置變了」而整份重畫，繞回同一個問題。
+   */
+  const repositionBoxes = () => {
+    for (const box of document.querySelectorAll('.em-box')) {
+      const mark = state.marks.find(m => String(m.id) === box.dataset.markId);
+      const node = mark ? resolveAnchor(mark).node : null;
+      if (!node?.getClientRects().length) return reflow();
+      placeBox(box, node);
+    }
+    positionPopover(ui);
+    lastSignature = anchorSignature();
+  };
   // capture：頁面裡任何一格在捲都要聽到。scroll 事件不會冒泡，只在 window 上聽的話，
   // 投影片 deck、側邊欄、modal 這種「頁面裡一格在捲」的情況，內容跑了框還停在原地。
-  addEventListener('scroll', reflow, { passive: true, capture: true });
+  // 代價是也會收到工具自己 UI 的捲動（紀錄清單、編輯框），那些跟框的位置無關，略過——
+  // 與 MutationObserver、animationend 用同一條判準（工具的 DOM 一律帶 data-em）。
+  // 不同捲動區一幀可以各來一個事件，用 requestAnimationFrame 收成一幀最多挪一次。
+  let scrollRaf = null;
+  const onScroll = (e) => {
+    if (e.target instanceof Element && e.target.closest('[data-em]')) return;   // target 是 document 時照常處理
+    if (scrollRaf !== null) return;
+    scrollRaf = requestAnimationFrame(() => { scrollRaf = null; repositionBoxes(); });
+  };
+  addEventListener('scroll', onScroll, { passive: true, capture: true });
   // 點到 popover 以外的地方就收起來——包含頁面本身與別的標記
   const onDocClick = (e) => {
     if (!ui.pop.classList.contains('show')) return;
@@ -771,7 +798,7 @@ async function start(opts) {
     destroy: () => {
       state.unsub?.();
       removeEventListener('resize', reflow);
-      removeEventListener('scroll', reflow, { capture: true });  // 要跟 add 的 capture 一致才拆得掉
+      removeEventListener('scroll', onScroll, { capture: true });  // 要跟 add 的 capture 一致才拆得掉
       document.removeEventListener('click', onDocClick, true);
       document.removeEventListener('keydown', onEsc);
       removeEventListener('hashchange', onRoute);
@@ -782,6 +809,7 @@ async function start(opts) {
       observer?.disconnect();
       if (reflowRaf !== null) cancelAnimationFrame(reflowRaf);
       if (settleRaf !== null) cancelAnimationFrame(settleRaf);
+      if (scrollRaf !== null) cancelAnimationFrame(scrollRaf);
       document.querySelectorAll('.em-box').forEach(n => n.remove());
       document.body.classList.remove('em-marking');
       ui.destroy();

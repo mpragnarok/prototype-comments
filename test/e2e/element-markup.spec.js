@@ -500,6 +500,118 @@ const seedMark = (over = {}) => ({
       `框要跟著捲動區裡的內容走，框與目標的垂直距離應不變（捲前 ${before}px，捲後 ${after}px）`);
   });
 
+  // capture 聽捲動會連工具自己的 UI 一起收到。若那也觸發整份重畫，清單會被重建，
+  // 使用者正在編輯的那一列連同打到一半的字與焦點一起消失——不會報錯，只是字不見了。
+  const ownMarks = (n) => Array.from({ length: n }, (_, i) => seedMark({
+    id: `own-${i}`, body: `第 ${i} 則`, authorUid: USER.uid, authorName: 'Mina',
+  }));
+  const editState = (page) => page.evaluate(() => {
+    const ta = document.querySelector('.em-edit');
+    return { editing: !!ta, value: ta?.value, focused: !!ta && document.activeElement === ta };
+  });
+
+  await test('編輯到一半捲動紀錄清單 → 打到一半的字與焦點都還在', async () => {
+    const page = await fresh(browser, { seed: ownMarks(30), init: { auth: 'google' } });
+    await page.click('.em-tab');
+    await page.locator('.em-row .em-acts .edit').first().click();
+    await page.waitForSelector('.em-edit');
+    await page.fill('.em-edit', '打到一半的修改');
+    const b = await page.locator('.em-list').boundingBox();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    for (let i = 0; i < 3; i++) { await page.mouse.wheel(0, 100); await page.waitForTimeout(60); }
+    await page.waitForTimeout(300);
+    const r = { ...(await editState(page)),
+      scrollTop: await page.evaluate(() => document.querySelector('.em-list').scrollTop) };
+    await page.close();
+    assert(r.scrollTop > 0, `清單要真的有捲動到，這條才有測到東西（scrollTop ${r.scrollTop}）`);
+    assert(r.editing && r.value === '打到一半的修改', `捲清單不該把編輯框清掉，實際 ${JSON.stringify(r)}`);
+    assert(r.focused, `捲清單不該把焦點弄丟，實際 ${JSON.stringify(r)}`);
+  });
+
+  await test('編輯框裡打字打到它自己捲動 → 內容與焦點都還在', async () => {
+    const page = await fresh(browser, { seed: ownMarks(3), init: { auth: 'google' } });
+    await page.click('.em-tab');
+    await page.locator('.em-row .em-acts .edit').first().click();
+    await page.waitForSelector('.em-edit');
+    await page.focus('.em-edit');
+    await page.keyboard.type('一行\n'.repeat(15), { delay: 5 });
+    await page.waitForTimeout(300);
+    const r = { ...(await editState(page)),
+      scrollTop: await page.evaluate(() => document.querySelector('.em-edit')?.scrollTop ?? -1) };
+    await page.close();
+    assert(r.editing && r.value?.startsWith('第 0 則一行'), `打字途中編輯框不該被重建，實際 ${JSON.stringify(r)}`);
+    assert(r.scrollTop > 0, `編輯框要真的捲動過，這條才有測到東西（scrollTop ${r.scrollTop}）`);
+    assert(r.focused, `打字途中焦點不該跑掉，實際 ${JSON.stringify(r)}`);
+  });
+
+  // 巢狀捲動的事件一幀可以來好幾個（不同捲動區各一個）。每個都整份重畫的話，
+  // 清單重建＋每則 getBoundingClientRect 強制排版，一幀做好幾遍。
+  await test('巢狀捲動連捲 60 次：不整份重畫，框的重新定位一幀最多一次', async () => {
+    const page = await fresh(browser, { user: null });
+    await page.evaluate(() => {
+      const make = (id, inner) => {
+        const wrap = document.createElement('div');
+        wrap.id = id;
+        wrap.style.cssText = 'height:160px;overflow:auto;border:1px solid #ccc';
+        wrap.innerHTML = `<div style="height:40px"></div>${inner}<div style="height:2000px"></div>`;
+        document.body.prepend(wrap);
+      };
+      make('other-scroller', '<p>另一格</p>');
+      make('nested-scroller', '<button class="app" id="nested-target">捲動區裡的按鈕</button>');
+    });
+    await markOn(page, '#nested-target', '捲動區裡的標記');
+    await page.click('.em-fab').catch(() => {});
+    await page.waitForTimeout(200);
+    const r = await page.evaluate(async () => {
+      const nested = document.getElementById('nested-scroller');
+      const other = document.getElementById('other-scroller');
+      const target = document.getElementById('nested-target');
+      let renders = 0, listRebuilds = 0, boxStyleWrites = 0, scrollEvents = 0, frames = 0, measures = 0;
+      // 數被標記那個元素被量了幾次（getBoundingClientRect 會強制排版），代表排版成本
+      const realRect = Element.prototype.getBoundingClientRect;
+      Element.prototype.getBoundingClientRect = function () { if (this === target) measures++; return realRect.call(this); };
+      const mo = new MutationObserver((recs) => {
+        for (const rec of recs) {
+          if (rec.type === 'attributes' && rec.target.classList?.contains('em-box')) boxStyleWrites++;
+          for (const n of rec.removedNodes) {
+            if (n.nodeType !== 1) continue;
+            if (n.classList.contains('em-box')) renders++;
+            if (rec.target.classList?.contains('em-list')) listRebuilds++;
+          }
+        }
+      });
+      mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
+      const count = () => { scrollEvents++; };
+      addEventListener('scroll', count, { capture: true, passive: true });
+      const frame = () => new Promise(res => requestAnimationFrame(() => { frames++; res(); }));
+      const gap = () => Math.round(document.querySelector('.em-box').getBoundingClientRect().top
+        - target.getBoundingClientRect().top);
+      const gapBefore = gap();
+      measures = 0;
+      for (let i = 1; i <= 60; i++) {
+        nested.scrollTop = i * 3;
+        other.scrollTop = i * 3;
+        await frame();
+      }
+      await frame(); await frame();
+      await new Promise(res => setTimeout(res, 50));
+      mo.disconnect();
+      Element.prototype.getBoundingClientRect = realRect;
+      removeEventListener('scroll', count, { capture: true });
+      // 值沒變的 style 寫入不產生紀錄，所以這是「框真的被挪動」的次數
+      return { renders, listRebuilds, boxStyleWrites, measures, scrollEvents, frames,
+        gapBefore, gapAfter: gap() };
+    });
+    await page.close();
+    console.log('     ', JSON.stringify(r));
+    assert(r.scrollEvents >= 100, `要真的有一幀多個捲動事件，這條才有測到節流（實際 ${r.scrollEvents}）`);
+    assert(r.renders === 0 && r.listRebuilds === 0, `捲動只該挪框，不該整份重畫或重建清單，實際 ${JSON.stringify(r)}`);
+    assert(r.boxStyleWrites <= r.frames, `框的重新定位一幀最多一次，實際 ${r.boxStyleWrites} 次／${r.frames} 幀`);
+    // 每次挪框量兩次：placeBox 一次、對齊簽章一次。沒節流時是「每個捲動事件」各兩次以上
+    assert(r.measures <= 2 * r.frames, `排版量測應受每幀節流限制，實際量了 ${r.measures} 次／${r.frames} 幀`);
+    assert(Math.abs(r.gapAfter - r.gapBefore) <= 2, `框仍要跟著內容走，實際 ${JSON.stringify(r)}`);
+  });
+
   await test('視窗顯示中的那則被刪掉 → 視窗收起來', async () => {
     const page = await fresh(browser, { user: null });
     await markOn(page, '#btn-step', '刪掉之後視窗要消失');
