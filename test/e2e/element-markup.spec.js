@@ -612,6 +612,63 @@ const seedMark = (over = {}) => ({
     assert(Math.abs(r.gapAfter - r.gapBefore) <= 2, `框仍要跟著內容走，實際 ${JSON.stringify(r)}`);
   });
 
+  // 捲動時只挪框，前提是「有哪幾則畫得出來」沒變。頁面自己的捲動處理若順手讓被標記的
+  // 元素出現（捲到才展開），那則要補畫上去；不然它永遠沒有框，抽屜還說它「在看不到的地方」。
+  const revealOnScroll = async (page) => {
+    const r = await page.evaluate(() => ({
+      boxes: [...document.querySelectorAll('.em-box')].map(b => b.dataset.markId).sort(),
+      lateVisible: document.getElementById('late').getClientRects().length > 0,
+      hiddenNote: [...document.querySelectorAll('.em-note')].some(n => /看不到的地方/.test(n.textContent)),
+    }));
+    return r;
+  };
+  const lateMarks = [seedMark({ id: 'v' }), seedMark({ id: 'late', selector: '#late', body: '捲到才出現的' })];
+
+  await test('頁面裡一格捲動時讓被標記的元素出現 → 那則要補畫框', async () => {
+    const page = await fresh(browser, { user: null, seed: lateMarks });
+    await page.evaluate(() => {
+      const w = document.createElement('div');
+      w.id = 'reveal-scroller';
+      w.style.cssText = 'height:200px;overflow:auto';
+      w.innerHTML = '<div style="height:40px"></div><button id="late" hidden>捲到才出現</button><div style="height:900px"></div>';
+      document.body.prepend(w);
+      w.addEventListener('scroll', () => { if (w.scrollTop > 30) document.getElementById('late').hidden = false; });
+    });
+    await page.waitForTimeout(400);
+    const before = await revealOnScroll(page);
+    await page.evaluate(() => { document.getElementById('reveal-scroller').scrollTop = 50; });
+    await page.waitForTimeout(600);
+    const after = await revealOnScroll(page);
+    await page.close();
+    assert(!before.lateVisible && before.boxes.join() === 'v', `前置：一開始只該有 1 個框，實際 ${JSON.stringify(before)}`);
+    assert(after.lateVisible, '前置：捲動後元素要真的出現，這條才有測到東西');
+    assert(after.boxes.join() === 'late,v', `出現的那則要補畫框，實際 ${JSON.stringify(after)}`);
+    assert(!after.hiddenNote, `已經畫出來了，抽屜不該再說它在看不到的地方，實際 ${JSON.stringify(after)}`);
+  });
+
+  await test('整頁捲動時讓被標記的元素出現 → 那則要補畫框', async () => {
+    const page = await fresh(browser, { user: null, seed: lateMarks });
+    await page.evaluate(() => {
+      const b = document.createElement('button');
+      b.id = 'late'; b.hidden = true; b.textContent = '捲到才出現';
+      document.querySelector('main').append(b);
+      const pad = document.createElement('div');
+      pad.style.height = '2000px';
+      document.body.append(pad);
+      addEventListener('scroll', () => { if (scrollY > 30) document.getElementById('late').hidden = false; });
+    });
+    await page.waitForTimeout(400);
+    const before = await revealOnScroll(page);
+    await page.evaluate(() => { window.scrollTo(0, 50); });
+    await page.waitForTimeout(600);
+    const after = await revealOnScroll(page);
+    await page.close();
+    assert(!before.lateVisible && before.boxes.join() === 'v', `前置：一開始只該有 1 個框，實際 ${JSON.stringify(before)}`);
+    assert(after.lateVisible, '前置：捲動後元素要真的出現，這條才有測到東西');
+    assert(after.boxes.join() === 'late,v', `出現的那則要補畫框，實際 ${JSON.stringify(after)}`);
+    assert(!after.hiddenNote, `已經畫出來了，抽屜不該再說它在看不到的地方，實際 ${JSON.stringify(after)}`);
+  });
+
   await test('視窗顯示中的那則被刪掉 → 視窗收起來', async () => {
     const page = await fresh(browser, { user: null });
     await markOn(page, '#btn-step', '刪掉之後視窗要消失');

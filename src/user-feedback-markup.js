@@ -629,8 +629,22 @@ async function start(opts) {
 
   let lastSignature = '';
 
+  /**
+   * 每則標記此刻是哪一種：畫得出來（drawn）／元素在但看不到（hidden）／找不到元素（gone）。
+   * 框、清單與底下那兩句補充說明都由這個決定，所以它一變就必須整份重畫。
+   * lastDrawKey 記的是上次 render() 當下的樣子，捲動時拿來判斷「只挪框」還成不成立。
+   */
+  const drawStates = () => state.marks.map((mark) => {
+    const { node } = resolveAnchor(mark);
+    if (!node) return { mark, node, kind: 'gone' };
+    return { mark, node, kind: node.getClientRects().length ? 'drawn' : 'hidden' };
+  });
+  const drawKey = (states) => states.map(s => `${s.mark.id}:${s.kind}`).join('|');
+  let lastDrawKey = '';
+
   function render() {
     renderMarks(ui, state.marks, handlers());
+    lastDrawKey = drawKey(drawStates());
     // 視窗顯示的那則若已經不在了（自己刪掉、或別人刪的），就收起來——
     // 不然它會停在畫面上說著一則不存在的留言。檢查放在這裡而不是捲動事件裡，
     // 因為刪除走的是 snapshot 更新，不是捲動。
@@ -646,17 +660,24 @@ async function start(opts) {
   addEventListener('resize', reflow);
 
   /**
-   * 捲動只讓框的「位置」過期，不改變有哪幾則、畫不畫得出來，所以只挪框，不走 render()。
-   * render() 會重建右側清單：使用者正在編輯的那一列會連同打到一半的字與焦點一起被換掉。
-   * 對不上的情況（框對應的標記或元素不見了）才退回整份重畫——那時清單本來就該更新。
-   * 挪完要把簽章對齊現況：巢狀捲動會改變元素的文件座標，不對齊的話下一次無關的
-   * DOM 變動會被當成「位置變了」而整份重畫，繞回同一個問題。
+   * 捲動通常只讓框的「位置」過期，這時只挪框，不走 render()——render() 會重建右側清單，
+   * 使用者正在編輯的那一列會連同打到一半的字與焦點一起被換掉。
+   *
+   * 但頁面自己的捲動處理可能順手讓某個被標記的元素出現或消失（捲到才展開、捲到才載入）。
+   * 那時「有哪幾則畫得出來」變了，只挪框會漏畫新出現的那則；而且挪完若照樣對齊簽章，
+   * MutationObserver 那條會以為位置沒變而跳過，那則就永遠沒有框。所以先比對 drawKey，
+   * 有任何一則的狀態變了就整份重畫（render 會自己對齊簽章與 drawKey）。
+   * 狀態沒變才只挪框，這時框與現況一致，才可以把簽章對齊（否則巢狀捲動改了元素的文件
+   * 座標，下一次無關的 DOM 變動會被當成位置變了而整份重畫）。
    */
   const repositionBoxes = () => {
-    for (const box of document.querySelectorAll('.em-box')) {
-      const mark = state.marks.find(m => String(m.id) === box.dataset.markId);
-      const node = mark ? resolveAnchor(mark).node : null;
-      if (!node?.getClientRects().length) return reflow();
+    const states = drawStates();
+    if (drawKey(states) !== lastDrawKey) return reflow();
+    const boxes = new Map([...document.querySelectorAll('.em-box')].map(b => [b.dataset.markId, b]));
+    for (const { mark, node, kind } of states) {
+      if (kind !== 'drawn') continue;
+      const box = boxes.get(String(mark.id));
+      if (!box) return reflow();   // 狀態說該有框卻沒有：DOM 被外力動過，不猜，整份重畫
       placeBox(box, node);
     }
     positionPopover(ui);
