@@ -316,6 +316,51 @@ const listInfo = page => page.evaluate(() => ({
     await page.close();
   });
 
+  await test('圖片預覽的 object URL：存檔、取消、點外面、切到別張卡、上傳中關卡都會釋放', async () => {
+    const page = await boot(true);
+    await page.evaluate(() => {
+      window.__made = []; window.__revoked = [];
+      const mk = URL.createObjectURL.bind(URL), rv = URL.revokeObjectURL.bind(URL);
+      URL.createObjectURL = (b) => { const u = mk(b); window.__made.push(u); return u; };
+      URL.revokeObjectURL = (u) => { window.__revoked.push(u); rv(u); };
+    });
+    const leaked = () => page.evaluate(() => window.__made.filter(u => !window.__revoked.includes(u)));
+    const made = () => page.evaluate(() => window.__made.length);
+    // 1) 存紀錄
+    await openCard(page, '#t1');
+    await page.fill('.pc-note-card textarea', '存檔');
+    await pasteImage(page, 'a.png');
+    await page.click('.pc-note-card .pc-note-row button:has-text("存紀錄")');
+    await page.waitForTimeout(60);
+    // 2) 取消
+    await openCard(page, '#t2');
+    await pasteImage(page, 'b.png');
+    await page.click('.pc-note-card .pc-note-row button:has-text("取消")');
+    // 3) 點外面（有字 → 自動存檔後關）
+    await openCard(page, '#t3');
+    await page.fill('.pc-note-card textarea', '點外面');
+    await pasteImage(page, 'c.png');
+    await page.mouse.click(860, 660);
+    await page.waitForTimeout(60);
+    // 4) 切到別張卡（點另一個元件開新卡）
+    await openCard(page, '#t4');
+    await pasteImage(page, 'd.png');
+    await openCard(page, '#t5');
+    await page.click('.pc-note-card .pc-note-row button:has-text("取消")');
+    // 5) 上傳中按 ✕ 關卡
+    await page.evaluate(() => { window.__uploadMode = 'hold'; });
+    await openCard(page, '#t2');
+    await pasteImage(page, 'e.png');
+    await page.click('.pc-note-card .pc-note-card-head button');
+    await page.evaluate(() => window.__release());
+    await page.waitForTimeout(60);
+    assert(await made() === 5, `應建了 5 個預覽網址，實際 ${await made()}`);
+    const left = await leaked();
+    assert(left.length === 0, `有 ${left.length} 個預覽網址沒釋放`);
+    assert(!page.__errors.length, 'page errors: ' + page.__errors.join('; '));
+    await page.close();
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

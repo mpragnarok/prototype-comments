@@ -145,6 +145,8 @@ export function createAttachmentTray({ upload, initial = [] }) {
     failedCount: () => t.items.filter(i => i.status === 'failed').length,
     count: () => t.items.length,
     onChange: fn => { t.listeners.push(fn); },
+    // 卡片拆掉時呼叫：釋放所有圖片預覽的 object URL。之後才回來的上傳結果一律丟掉。
+    dispose: () => { t.items.forEach(attachRevokePreview); t.items = []; t.listeners = []; },
   };
 }
 // 加檔：逐一檢查上限，超過的就近顯示紅框，不加入；其餘加入並開始上傳。
@@ -187,8 +189,12 @@ async function trayUpload(t, item) {
 }
 function trayRemove(t, item) {
   t.items = t.items.filter(i => i !== item);
-  if (item.preview && URL.revokeObjectURL) URL.revokeObjectURL(item.preview);
+  attachRevokePreview(item);
   trayRender(t);
+}
+function attachRevokePreview(item) {
+  if (item.preview && typeof URL !== 'undefined' && URL.revokeObjectURL) URL.revokeObjectURL(item.preview);
+  item.preview = null;
 }
 function trayRender(t) {
   t.listEl.innerHTML = '';

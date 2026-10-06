@@ -247,7 +247,7 @@ export function initDrawLayer(target, opts = {}) {
     state.tombstones[id] = Date.now(); // 墓碑：記下刪除時間 → 舊快照回寫無法復活
     if (focusNoteId === id) focusNoteId = null;
     const card = noteLayer.querySelector(`.pc-note-card[data-note-id="${id}"]`);
-    if (card) card.remove();
+    if (card) dropNoteCard(card);
     renderNotes();
     renderRecordPanel(); // 同步標注紀錄面板：卡片『刪除』鈕直呼此函式，漏此行則已刪 note 殘留在紀錄側欄
     if (drawStore) { try { syncTombstone(id); } catch (_) { } }
@@ -376,8 +376,17 @@ export function initDrawLayer(target, opts = {}) {
   }
 
   // ── 對話卡（H：prompt 在上、AI 方案卡在下，整段貼著元件）──
+  // 拆掉一張註記卡的唯一出口：先收掉輸入中的附件列（釋放圖片預覽的 object URL），再移除 DOM。
+  // 存檔、取消、Esc、點外面、✕、切到別張卡、刪除、destroy 都走這裡。
+  function dropNoteCard(card) {
+    if (activeNoteEditor && activeNoteEditor.tray && card.contains(activeNoteEditor.tray.listEl)) {
+      activeNoteEditor.tray.dispose();
+      activeNoteEditor = null;
+    }
+    card.remove();
+  }
   function closeAllNoteCards() {
-    noteLayer.querySelectorAll('.pc-note-card').forEach(n => { n.remove(); });
+    noteLayer.querySelectorAll('.pc-note-card').forEach(n => { dropNoteCard(n); });
     // 關卡同時清掉 spotlight/dim 高亮（原本只清 focusNoteId 變數、沒清 DOM class → ✕ 關閉/點外面關閉後
     // 標記仍殘留高亮）。她的原話：「高亮時，應該點旁邊就要可以取消高亮」。
     noteLayer.querySelectorAll('.pc-note-mark').forEach(m => { m.classList.remove('is-spotlight', 'is-dim'); });
@@ -489,8 +498,8 @@ export function initDrawLayer(target, opts = {}) {
       if (tray && tray.isUploading()) return; // 上傳中不能存（按鈕也是 disabled），免得附件掉一半
       const saved = saveNote(ta.value, isEdit ? null : pendingAnchor, c.id || null, tray ? tray.attachments() : undefined);
       if (!saved) return;
-      const currentCard = body.closest('.pc-note-card'); if (currentCard) currentCard.remove();
-      const failed = tray ? tray.failedCount() : 0;
+      const failed = tray ? tray.failedCount() : 0; // 拆卡前先數（拆卡會收掉附件列）
+      const currentCard = body.closest('.pc-note-card'); if (currentCard) dropNoteCard(currentCard);
       // 編輯 → 存完重開 VIEW 卡看結果；新增 → 存完關閉（marker 已放好，要看再點）。
       // 有附件沒傳上去 → 也重開 VIEW 卡，在卡上說一聲「n 個附件沒存到」（留言本身照存）。
       if (isEdit || failed) openNoteCard(saved); else closeNoteCard();
@@ -515,7 +524,7 @@ export function initDrawLayer(target, opts = {}) {
   }
   // 取消／Esc：編輯既有 → 回 VIEW 卡；新增 → 關卡。
   function cancelNoteInput(body, c) {
-    if (c.id) { const cur = body.closest('.pc-note-card'); if (cur) cur.remove(); openNoteCard(c); }
+    if (c.id) { const cur = body.closest('.pc-note-card'); if (cur) dropNoteCard(cur); openNoteCard(c); }
     else closeNoteCard();
   }
   // 把附件列掛上卡片：迴紋針＋計數在按鈕列左邊、附件與錯誤在輸入框下方；⌘V 貼檔、拖檔進卡片都進附件。
@@ -2516,6 +2525,7 @@ export function initDrawLayer(target, opts = {}) {
       replyPolling = false; // 停掉 AI 方案卡輪詢
       [...moveOrigTransform.keys()].forEach(sel => { resetMoveOf(sel, querySelectorSafe(sel)); }); // 還原被拖過的真實元件 transform
       svg.remove(); toolbar.remove(); contextMenu.remove(); replyLayer.remove();
+      closeAllNoteCards(); // 先走拆卡出口（釋放附件預覽）
       noteLayer.remove(); moveLayer.remove(); closeNotePanel(); // 留言層 + 拖曳層 + 放大面板/遮罩
       recordTab.remove(); recordDrawer.remove();
       removeFeedbackBox();
