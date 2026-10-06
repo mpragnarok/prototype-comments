@@ -1,4 +1,4 @@
-/* pc.js 01e5598 2026-10-06T12:32:17Z */
+/* pc.js a1446bc 2026-10-06T13:35:06Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -2134,8 +2134,11 @@ const DRAW_STYLES = `
 .pc-att-err b { font-weight: 700; }
 .pc-att-err button { margin-left: auto; flex: none; border: none; background: none; color: var(--pc-danger-ink); font: inherit; font-weight: 700; cursor: pointer; padding: 0; }
 .pc-note-prompt-att { white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--pc-border); }
-.pc-note-prompt-att .pc-att-thumb { width: 46px; height: 46px; cursor: zoom-in; }
-.pc-note-prompt-att .pc-att-file { padding-right: 7px; cursor: pointer; }
+.pc-note-prompt-att .pc-att-thumb { width: 46px; height: 46px; }
+.pc-note-prompt-att .pc-att-thumb.is-link { cursor: zoom-in; }
+.pc-note-prompt-att .pc-att-file { padding-right: 7px; }
+.pc-note-prompt-att .pc-att-file.is-link { cursor: pointer; }
+.pc-att-thumb .img.is-empty { background: var(--pc-border-3); } /* 網址不安全／讀不到 → 灰底占位 */
 @media (prefers-reduced-motion: reduce) {
   .pc-attach-list .is-new, .pc-att-bar i { animation: none; }
 }
@@ -3247,9 +3250,17 @@ function isFileDrag(ev) {
   const types = (ev && ev.dataTransfer && ev.dataTransfer.types) || [];
   return [...types].includes('Files');
 }
-// 附件網址 → 可開的絕對網址（相對網址照頁面 base 解析）。
-function attachHref(url) {
-  try { return new URL(String(url), document.baseURI).href; } catch (_) { return String(url || ''); }
+// 附件網址 → 可開的絕對網址（相對網址照頁面 base 解析）。只放行 http／https／blob：
+// 附件 url 來自註記 doc（可能是共享或被竄改的資料），javascript:／data: 這類網址交給 window.open 或 <img src>
+// 等於讓別人在這頁跑東西。解析失敗或協議不在白名單 → 回空字串，呼叫端就不開視窗、不設 src。
+const ATTACH_SAFE_PROTOCOLS = ['http:', 'https:', 'blob:'];
+function attachDocBase() { try { return document.baseURI; } catch (_) { return undefined; } }
+function attachHref(url, base = attachDocBase()) {
+  if (url == null || url === '') return '';
+  try {
+    const u = new URL(String(url), base);
+    return ATTACH_SAFE_PROTOCOLS.includes(u.protocol) ? u.href : '';
+  } catch (_) { return ''; }
 }
 
 // ── DOM：錯誤提示、已存附件、輸入中的附件列 ─────────────────────────────────────
@@ -3269,7 +3280,9 @@ function attachThumbEl(name, size, src) {
   const el = drawHtmlEl('div', 'pc-att-thumb');
   el.title = size != null ? `${name} · ${formatAttachBytes(size)}` : name;
   const box = drawHtmlEl('div', 'img'); const img = document.createElement('img');
-  img.alt = name; img.src = src; box.appendChild(img); el.appendChild(box);
+  if (src) { img.alt = name; img.src = src; box.appendChild(img); } // 沒有安全網址 → 留灰底占位，不設 src
+  else box.classList.add('is-empty');
+  el.appendChild(box);
   return el;
 }
 // 檔案條（非圖片、上傳中或失敗的圖片）：副檔名＋檔名＋狀態文字。
@@ -3288,13 +3301,17 @@ function attachmentViewEl(list) {
   (list || []).forEach(a => {
     const href = attachHref(a.url);
     const el = isImageAttachment(a) ? attachThumbEl(a.name, a.size, href) : attachFileEl(a.name, formatAttachBytes(a.size));
-    el.classList.add('is-link'); el.tabIndex = 0; el.setAttribute('role', 'link');
-    const openIt = () => { try { window.open(href, '_blank', 'noopener'); } catch (_) { } };
-    el.onclick = openIt;
-    el.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); openIt(); } };
+    if (href) attachMakeLink(el, href); // 網址不安全／解析不了 → 只顯示檔名或占位，不當連結
     wrap.appendChild(el);
   });
   return wrap;
+}
+// 讓已存的附件可點：新分頁開 href（呼叫前已確認是 http／https／blob）。
+function attachMakeLink(el, href) {
+  el.classList.add('is-link'); el.tabIndex = 0; el.setAttribute('role', 'link');
+  const openIt = () => { try { window.open(href, '_blank', 'noopener'); } catch (_) { } };
+  el.onclick = openIt;
+  el.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); openIt(); } };
 }
 // 拖曳中的虛線遮罩。
 function attachDropVeilEl() {
@@ -5978,7 +5995,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = '01e5598';
+export const PC_VERSION = 'a1446bc';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';

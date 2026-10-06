@@ -7,7 +7,7 @@
 import {
   NOTE_ATTACH_MAX, NOTE_ATTACH_MAX_BYTES, attachLimitLabel, formatAttachBytes, attachExt,
   isImageAttachment, checkAttachAdd, cleanAttachment, attachmentsForDoc, isAttachTooLargeError,
-  attachFilesFromTransfer, isFileDrag,
+  attachFilesFromTransfer, isFileDrag, attachHref,
 } from '../src/draw/attachments.js';
 import { noteSig } from '../src/draw/selectors.js';
 
@@ -91,6 +91,26 @@ test('isFileDrag：types 含 Files 才算拖檔', () => {
   assert(isFileDrag({ dataTransfer: { types: ['Files'] } }));
   assert(!isFileDrag({ dataTransfer: { types: ['text/plain'] } }));
   assert(!isFileDrag({}));
+});
+const BASE = 'http://127.0.0.1:8732/s/abc/';
+test('attachHref：javascript:／大寫／空白前綴／data:／vbscript: 一律回空字串', () => {
+  for (const u of ['javascript:alert(1)', 'JAVASCRIPT:alert(1)', ' javascript:alert(1)', '\tjavascript:alert(1)',
+    'data:text/html,<script>alert(1)</script>', 'vbscript:msgbox(1)', 'file:///etc/passwd']) {
+    eq(attachHref(u, BASE), '', `不安全的網址 ${JSON.stringify(u)} 應回空字串`);
+  }
+});
+test('attachHref：解析失敗、null、空字串 → 空字串', () => {
+  eq(attachHref('http://[bad', BASE), '');
+  eq(attachHref(null, BASE), '');
+  eq(attachHref('', BASE), '');
+});
+test('attachHref：相對 uploads/x.png 照頁面 base 解析成 http 網址', () => {
+  eq(attachHref('uploads/x.png', BASE), 'http://127.0.0.1:8732/s/abc/uploads/x.png');
+});
+test('attachHref：http／https／blob 放行', () => {
+  eq(attachHref('http://127.0.0.1:8732/s/abc/uploads/a.png', BASE), 'http://127.0.0.1:8732/s/abc/uploads/a.png');
+  eq(attachHref('https://example.com/a.png', BASE), 'https://example.com/a.png');
+  eq(attachHref('blob:http://127.0.0.1:8732/1234-5678', BASE), 'blob:http://127.0.0.1:8732/1234-5678');
 });
 test('noteSig：沒附件的註記簽章與加功能前一模一樣（不會被誤判成未送）', () => {
   const n = { text: 'hi', sel: '#a', objId: null, range: undefined };

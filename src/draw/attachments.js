@@ -64,9 +64,17 @@ export function isFileDrag(ev) {
   const types = (ev && ev.dataTransfer && ev.dataTransfer.types) || [];
   return [...types].includes('Files');
 }
-// 附件網址 → 可開的絕對網址（相對網址照頁面 base 解析）。
-export function attachHref(url) {
-  try { return new URL(String(url), document.baseURI).href; } catch (_) { return String(url || ''); }
+// 附件網址 → 可開的絕對網址（相對網址照頁面 base 解析）。只放行 http／https／blob：
+// 附件 url 來自註記 doc（可能是共享或被竄改的資料），javascript:／data: 這類網址交給 window.open 或 <img src>
+// 等於讓別人在這頁跑東西。解析失敗或協議不在白名單 → 回空字串，呼叫端就不開視窗、不設 src。
+const ATTACH_SAFE_PROTOCOLS = ['http:', 'https:', 'blob:'];
+function attachDocBase() { try { return document.baseURI; } catch (_) { return undefined; } }
+export function attachHref(url, base = attachDocBase()) {
+  if (url == null || url === '') return '';
+  try {
+    const u = new URL(String(url), base);
+    return ATTACH_SAFE_PROTOCOLS.includes(u.protocol) ? u.href : '';
+  } catch (_) { return ''; }
 }
 
 // ── DOM：錯誤提示、已存附件、輸入中的附件列 ─────────────────────────────────────
@@ -86,7 +94,9 @@ function attachThumbEl(name, size, src) {
   const el = drawHtmlEl('div', 'pc-att-thumb');
   el.title = size != null ? `${name} · ${formatAttachBytes(size)}` : name;
   const box = drawHtmlEl('div', 'img'); const img = document.createElement('img');
-  img.alt = name; img.src = src; box.appendChild(img); el.appendChild(box);
+  if (src) { img.alt = name; img.src = src; box.appendChild(img); } // 沒有安全網址 → 留灰底占位，不設 src
+  else box.classList.add('is-empty');
+  el.appendChild(box);
   return el;
 }
 // 檔案條（非圖片、上傳中或失敗的圖片）：副檔名＋檔名＋狀態文字。
@@ -105,13 +115,17 @@ export function attachmentViewEl(list) {
   (list || []).forEach(a => {
     const href = attachHref(a.url);
     const el = isImageAttachment(a) ? attachThumbEl(a.name, a.size, href) : attachFileEl(a.name, formatAttachBytes(a.size));
-    el.classList.add('is-link'); el.tabIndex = 0; el.setAttribute('role', 'link');
-    const openIt = () => { try { window.open(href, '_blank', 'noopener'); } catch (_) { } };
-    el.onclick = openIt;
-    el.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); openIt(); } };
+    if (href) attachMakeLink(el, href); // 網址不安全／解析不了 → 只顯示檔名或占位，不當連結
     wrap.appendChild(el);
   });
   return wrap;
+}
+// 讓已存的附件可點：新分頁開 href（呼叫前已確認是 http／https／blob）。
+function attachMakeLink(el, href) {
+  el.classList.add('is-link'); el.tabIndex = 0; el.setAttribute('role', 'link');
+  const openIt = () => { try { window.open(href, '_blank', 'noopener'); } catch (_) { } };
+  el.onclick = openIt;
+  el.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); openIt(); } };
 }
 // 拖曳中的虛線遮罩。
 export function attachDropVeilEl() {

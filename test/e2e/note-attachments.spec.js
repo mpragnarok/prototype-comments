@@ -361,6 +361,44 @@ const listInfo = page => page.evaluate(() => ({
     await page.close();
   });
 
+  await test('note doc 帶 javascript:／data: 網址：縮圖不設 src、點了不呼叫 window.open、卡片照常顯示', async () => {
+    const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+    page.__errors = [];
+    page.on('pageerror', e => page.__errors.push(e.message));
+    await page.goto(`http://localhost:${PORT}/test/e2e/note-attachments-harness.html`);
+    await page.waitForFunction(() => window.__h && window.__h.ready);
+    await page.evaluate(() => {
+      window.__h.init({ withUploader: true });
+      window.__opened = [];
+      window.open = (...a) => { window.__opened.push(a[0]); return null; };
+      window.__fb.__seed({ id: 'evil-1', kind: 'note', text: '被竄改的留言', sel: '#para', relX: 0.5, relY: 0.5, x: 10, y: 10, label: 'para', updatedAt: 2,
+        attachments: [
+          { name: 'x.png', type: 'image/png', size: 10, url: 'javascript:window.__pwned=1', path: '/tmp/x.png' },
+          { name: 'y.pdf', type: 'application/pdf', size: 10, url: ' data:text/html,<script>window.__pwned=1</script>', path: '/tmp/y.pdf' },
+        ] });
+    });
+    await page.waitForTimeout(80);
+    await page.evaluate(() => window.__api.setMode('note'));
+    await page.click('.pc-note-mark[data-note-id="evil-1"] .pc-note-tab');
+    await page.waitForSelector('.pc-note-card .pc-note-prompt-att');
+    const st = await page.evaluate(() => ({
+      thumbs: document.querySelectorAll('.pc-note-prompt-att .pc-att-thumb').length,
+      files: document.querySelectorAll('.pc-note-prompt-att .pc-att-file').length,
+      srcs: [...document.querySelectorAll('.pc-note-prompt-att img')].map(i => i.getAttribute('src')),
+    }));
+    assert(st.thumbs === 1 && st.files === 1, `兩個附件都要顯示（不壞版），實際 ${JSON.stringify(st)}`);
+    assert(!st.srcs.some(s => s && /^\s*(javascript|data):/i.test(s)), `縮圖不該設不安全的 src：${JSON.stringify(st.srcs)}`);
+    await page.click('.pc-note-prompt-att .pc-att-thumb');
+    await page.click('.pc-note-prompt-att .pc-att-file');
+    await page.focus('.pc-note-prompt-att .pc-att-file').catch(() => {});
+    await page.keyboard.press('Enter');
+    const res = await page.evaluate(() => ({ opened: window.__opened, pwned: window.__pwned || null }));
+    assert(res.opened.length === 0, `不該呼叫 window.open，實際 ${JSON.stringify(res.opened)}`);
+    assert(res.pwned === null, '不該執行到 javascript: 網址');
+    assert(!page.__errors.length, 'page errors: ' + page.__errors.join('; '));
+    await page.close();
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

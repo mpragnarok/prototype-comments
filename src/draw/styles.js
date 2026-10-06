@@ -167,8 +167,11 @@ export const DRAW_STYLES = `
 .pc-att-err b { font-weight: 700; }
 .pc-att-err button { margin-left: auto; flex: none; border: none; background: none; color: var(--pc-danger-ink); font: inherit; font-weight: 700; cursor: pointer; padding: 0; }
 .pc-note-prompt-att { white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--pc-border); }
-.pc-note-prompt-att .pc-att-thumb { width: 46px; height: 46px; cursor: zoom-in; }
-.pc-note-prompt-att .pc-att-file { padding-right: 7px; cursor: pointer; }
+.pc-note-prompt-att .pc-att-thumb { width: 46px; height: 46px; }
+.pc-note-prompt-att .pc-att-thumb.is-link { cursor: zoom-in; }
+.pc-note-prompt-att .pc-att-file { padding-right: 7px; }
+.pc-note-prompt-att .pc-att-file.is-link { cursor: pointer; }
+.pc-att-thumb .img.is-empty { background: var(--pc-border-3); } /* 網址不安全／讀不到 → 灰底占位 */
 @media (prefers-reduced-motion: reduce) {
   .pc-attach-list .is-new, .pc-att-bar i { animation: none; }
 }
