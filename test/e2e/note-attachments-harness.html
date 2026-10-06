@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<!--
+  note-attachments-harness.html — 註記卡附件 e2e 用。
+  init({ withUploader }) → initDrawLayer(#canvas)，persist 走 mock firebase（讀得到寫進去的 doc）。
+  withUploader=true 時傳一支假的 uploadAttachment，行為由 window.__uploadMode 控制：
+    'ok'（預設）回 {name,type,size,url,path}；'fail' 丟錯；'too_large' 丟 413；'hold' 等 __release() 才回。
+  預先 seed 一則「沒附件的舊註記」old-1，驗「沒碰過的不會變」。
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>note attachments harness</title>
+<style>
+  html, body { margin: 0; }
+  #canvas { position: relative; width: 900px; height: 700px; background: #f3f4f6; }
+  #para { position: absolute; left: 60px; top: 80px; width: 300px; font: 16px system-ui; }
+  #btn { position: absolute; left: 520px; top: 80px; font: 16px system-ui; }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <p id="para">這是一段可被標注的說明文字，點了會開註記卡。</p>
+  <button id="btn" type="button">送出按鈕</button>
+</div>
+<script type="module">
+  import { initDrawLayer } from '/src/draw-layer.js';
+  import { createMockFirebase } from '/test/mock-firebase.js';
+
+  window.__uploadMode = 'ok';
+  window.__uploads = [];
+  let release = null;
+  window.__release = () => { if (release) release(); };
+  async function fakeUpload(file) {
+    window.__uploads.push(file.name);
+    const mode = window.__uploadMode;
+    if (mode === 'hold') await new Promise(r => { release = r; });
+    if (mode === 'fail') throw new Error('network down');
+    if (mode === 'too_large') { const e = new Error('too_large'); e.status = 413; e.error = 'too_large'; throw e; }
+    const stored = Date.now() + '-' + file.name;
+    return { name: file.name, type: file.type, size: file.size, url: 'uploads/' + encodeURIComponent(stored), path: '/tmp/ws/uploads/' + stored };
+  }
+  window.__h = {
+    init: ({ withUploader }) => {
+      const projectId = 'att';
+      const fb = createMockFirebase({ user: { uid: 'local', displayName: '我' } });
+      window.__fb = fb;
+      fb.__seed({ id: 'old-1', kind: 'note', text: '舊的註記', sel: '#btn', relX: 0.5, relY: 0.5, x: 60, y: 12, label: '送出按鈕', updatedAt: 1 });
+      const opts = { mode: 'off', projectId, persist: { fb, db: fb.getFirestore(), projectId } };
+      if (withUploader) opts.uploadAttachment = fakeUpload;
+      window.__api = initDrawLayer('#canvas', opts);
+      return true;
+    },
+    docs: () => window.__fb.__docs(),
+    ready: true,
+  };
+</script>
+</body>
+</html>

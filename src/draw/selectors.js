@@ -114,7 +114,9 @@ export function decisionSig(d) {
   return JSON.stringify({ replyId: d.replyId, optionId: d.optionId, optionLabel: d.optionLabel });
 }
 export function noteSig(n) {
-  return JSON.stringify({ text: n.text, sel: n.sel, objId: n.objId, range: n.range });
+  // attachments 只在有附件時進簽章（undefined 會被 JSON.stringify 略過）→ 沒附件的舊註記簽章不變、不會被誤判成未送。
+  const atts = Array.isArray(n.attachments) && n.attachments.length ? n.attachments.map(a => a.path || a.url) : undefined;
+  return JSON.stringify({ text: n.text, sel: n.sel, objId: n.objId, range: n.range, attachments: atts });
 }
 // 元件位移紀錄簽章：改拖曳量（dx/dy）或換元件（sel）→ 簽章變 → 視為未送（與 annotationSig 同語意）。
 export function moveSig(m) {
