@@ -2,7 +2,7 @@
 
 > **單一事實來源（SSOT）**。本檔記錄留言系統 (pc.js) 與 ui-flow 工具鏈的所有「已完成 / 待辦 / 評估」，避免長 session 中斷後失去脈絡。
 > 跨兩個 repo：本 repo `prototype-comments`（pc.js 原始碼）與消費端專案的 `docs/design/`（ui-flow、設計文件、pc.js bundle）。
-> 最後更新：2026-06-01（盤點對帳：B3 標完成、B2 標部分、補 B10）
+> 最後更新：2026-10-07（補 B12 註記卡附件）
 >
 > ⚠️ 本 repo 為公開 repo。具體部署識別碼（netlify site id、內部 demo 站 URL、密碼）一律不寫入本檔，改記於私有部署筆記。
 
@@ -59,6 +59,8 @@
 - **✅ B10 全部留言面板：主留言控制項移到最外層 — DONE 2026-06-01**（使用者回報「點開後第一個留言出現兩次」，附圖，授權「做完」）：B7 已不重複作者＋內容，但 `renderInlineNoteThread` 仍以 `buildCommentItem(root,true,{compact:true})` 把 root 渲成一張**獨立卡**，視覺上仍像「第一則留言又出現一次」。**修法**：`renderInlineNoteThread` → `renderExpandedNote(item, root)`——root 的控制項（reactions／resolve／回覆／決議）包一層 `.pc-panel-root-ctrl` 掛到 **panel item 本身（最外層）**，展開區（`.pc-panel-inline-thread`）只列**回覆**。item.onclick guard 改 `closest('.pc-panel-inline-thread, .pc-panel-root-ctrl')` → 點控制項不會誤收合（決議鍵原本就有 `stopPropagation`）。`.pc-panel-root-ctrl` 加虛線分隔、compact 扁平呈現。**測試**：legacy e2e source-check 改鎖「`renderExpandedNote` 把 ctrl 掛 item、`compact:true` 只出現一次、回覆 `parentId===root.id`、guard 含 root-ctrl」（33/0）；mock e2e 8/0；視覺 regression 加 B10 fixture 樣本、baseline 更新、deterministic 0px。bundle rebuild + `node --check` OK。
 
 - **✅ B11 留言 overlay 移除決議 UI（採用/不採用/待議）— DONE 2026-06-01**（使用者：「留言這邊不需要採用、不採用、待議」，附圖）：B9 在 pc.js 留言 popover/thread/panel 都加了三鍵＋badge＋註記，但使用者只想在**留言上單純討論**、決議改到 **report.html** 做。**修法**：移除 `buildCommentItem` 的決議 badge＋決議列＋`onDecision` 參數、三處 caller（positional popover／note thread／panel `renderExpandedNote`）的 `onDecision` 接線、`DECISION_META`/`DECISION_ORDER` const、`styles.js` 的 `.pc-ci-dec-*` CSS。**保留**：`decision`/`decisionNote` 仍是 Firestore 欄位、**report.html 仍可下決議**（決議改成 report-only）。對應 mock e2e 決議測試移除（8→7）、visual fixture 移除決議樣本（baseline 更新、0px）、legacy e2e 33/0。rebuild + `node --check` OK。
+
+- **✅ B12 draw 註記卡附件（圖片或檔案）— DONE 2026-10-07**（PR #83）：註記卡（點元件後跳出「對這個元件說…」那張）可以附圖片或檔案。三種附法：按鈕列左邊的迴紋針選檔、在輸入框 ⌘V 貼圖、把檔案拖進卡片。一則最多 3 個（`NOTE_ATTACH_MAX`）、單檔 10MB（`NOTE_ATTACH_MAX_BYTES`）；圖片顯示縮圖，其他檔顯示副檔名＋檔名＋大小；存好後附件列在「我的 prompt」下方；太大、附滿或沒傳上去就近紅框提示，失敗的可「重試」。**合約**：選用 `opts.uploadAttachment: async (file) → {name,type,size,url,path}`，失敗 throw（HTTP 413 `{error:'too_large'}` 視為太大）；**沒傳這個選項就不出現迴紋針**，舊資料形狀不變（沒有附件就不寫 `attachments` 欄位）。附件網址只放行 http／https／blob。目前只有 live-markup 傳了 `uploadAttachment`（本機 server 收檔，存進該 session 的 `uploads/`，agent poll 時拿到每個附件的檔名與絕對路徑）；prototype-flow／prototype-live 沒有。**程式**：`src/draw/attachments.js`（新）、`src/draw/init-draw-layer.js`。**測試**：`test/note-attachments.unit.spec.js`、`test/e2e/note-attachments.spec.js`、`test/e2e/element-markup.spec.js`。
 
 ### B. 文件
 - **✅ B1 guide v2 更新** — DONE 2026-05-30：`prototype-comments-guide.html` 新增「留言功能一覽」章節（表情回應 8 顆 + 桌機 hover／手機長按看名單、@提及 teal 高亮、搜尋／狀態 tab／類型 chip／tag chip／排序、單層回覆與 resolve toggle、紅 pin #BA1A1A／已解決灰 pin #6b7280 + pc-pin-flash）。同步：移除 setup 範例的 `authBarTarget:'.header'`（改說明省略＝浮右下角，對齊現行 3 處 init）、參數表補 `authBarTarget` 新語意 + `scrollContainer`、Firestore schema 補 `reactions` map 欄位、nav + TL;DR 更新、日期 2026-05-30。HTML tag 平衡已驗。
