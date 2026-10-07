@@ -669,7 +669,7 @@
       <span class="mono-pill">SSOT</span>
     </div>
     <div class="date-meta">
-      最後更新：2026-06-01 &nbsp;&middot;&nbsp;
+      最後更新：2026-10-07 &nbsp;&middot;&nbsp;
       <code>prototype-comments</code> &amp; 消費端 <code>docs/design/</code>
     </div>
   </header>
@@ -677,9 +677,9 @@
   <!-- Summary grid -->
   <div class="summary-band">
     <div class="stat-card accent-olive">
-      <div class="stat-num olive">22</div>
+      <div class="stat-num olive">23</div>
       <div class="stat-label">已完成項</div>
-      <div class="stat-sub">A1 A2 A3 A4 A6 A7 #4 B1 B3 B5 B6 B7 B8 B9 B10 B11 C2 C3 C4 C5 e2e-gate F1-F5</div>
+      <div class="stat-sub">A1 A2 A3 A4 A6 A7 #4 B1 B3 B5 B6 B7 B8 B9 B10 B11 B12 C2 C3 C4 C5 e2e-gate F1-F5</div>
     </div>
     <div class="stat-card accent-clay">
       <div class="stat-num clay">3</div>
@@ -687,9 +687,9 @@
       <div class="stat-sub">B2（部分）B4 C1</div>
     </div>
     <div class="stat-card accent-teal">
-      <div class="stat-num teal">2026-06-01</div>
+      <div class="stat-num teal">2026-10-07</div>
       <div class="stat-label">最後更新</div>
-      <div class="stat-sub">盤點對帳 session</div>
+      <div class="stat-sub">補 B12 註記卡附件</div>
     </div>
   </div>
 
@@ -882,6 +882,11 @@
       <div class="tl-item">
         <div><span class="tl-id">B11</span><span class="tl-done-badge">DONE</span><span class="tl-title">留言 overlay 移除決議 UI（採用/不採用/待議）</span></div>
         <div class="tl-desc">使用者：「留言這邊不需要採用、不採用、待議」（附圖）——只想在留言上單純討論，決議改到 <code>report.html</code> 做。移除 <code>buildCommentItem</code> 的決議 badge＋決議列＋<code>onDecision</code>、三處 caller 接線、<code>DECISION_META</code>/<code>DECISION_ORDER</code> const、<code>.pc-ci-dec-*</code> CSS。保留 <code>decision</code>/<code>decisionNote</code> Firestore 欄位 + <b>report.html 仍可下決議</b>（決議改 report-only）。測試：mock e2e 8→7（移除決議測試）、視覺 fixture 移除決議樣本（0px）、legacy 33/0。rebuild + node --check OK。</div>
+      </div>
+
+      <div class="tl-item">
+        <div><span class="tl-id">B12</span><span class="tl-done-badge">DONE</span><span class="tl-title">draw 註記卡附件（圖片或檔案）</span></div>
+        <div class="tl-desc">PR #83（2026-10-07）。註記卡（點元件後跳出「對這個元件說…」那張）可以附圖片或檔案：按鈕列左邊的迴紋針選檔、在輸入框 ⌘V 貼圖、把檔案拖進卡片。一則最多 3 個（<code>NOTE_ATTACH_MAX</code>）、單檔 10MB（<code>NOTE_ATTACH_MAX_BYTES</code>）；圖片顯示縮圖，其他檔顯示副檔名＋檔名＋大小；存好後附件列在「我的 prompt」下方；太大、附滿或沒傳上去就近紅框提示，失敗的可「重試」。<b>合約</b>：選用 <code>opts.uploadAttachment: async (file) → {name,type,size,url,path}</code>，失敗 throw（HTTP 413 <code>{error:'too_large'}</code> 視為太大）；<b>沒傳就不出現迴紋針</b>，舊資料形狀不變。附件網址只放行 http／https／blob。目前只有 live-markup 傳了 <code>uploadAttachment</code>（本機 server 收檔，agent poll 時拿到每個附件的檔名與絕對路徑）；prototype-flow／prototype-live 沒有。程式：<code>src/draw/attachments.js</code>（新）、<code>src/draw/init-draw-layer.js</code>。測試：<code>test/note-attachments.unit.spec.js</code>、<code>test/e2e/note-attachments.spec.js</code>、<code>test/e2e/element-markup.spec.js</code>。</div>
       </div>
 
     </div>
@@ -1118,7 +1123,7 @@
   </section>
 
   <footer>
-    SSOT &middot; prototype-comments + 消費端 docs/design/ &nbsp;&mdash;&nbsp; 最後更新 2026-06-01
+    SSOT &middot; prototype-comments + 消費端 docs/design/ &nbsp;&mdash;&nbsp; 最後更新 2026-10-07
   </footer>
 
 </div>
