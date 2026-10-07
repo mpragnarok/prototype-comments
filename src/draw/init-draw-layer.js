@@ -47,6 +47,10 @@ import {
   buildRecordTab, buildRecordDrawer, buildRecordFilters, syncRecordFilters,
   recordRowEl, replyBubbleEl, replyCardEl,
 } from './record-panel.js';
+import {
+  createAttachmentTray, attachmentsForDoc, attachmentViewEl, attachNoticeEl, attachDropVeilEl,
+  attachFilesFromTransfer, isFileDrag,
+} from './attachments.js';
 
 function resolveTarget(target) {
   if (!target) return document.body;
@@ -114,6 +118,9 @@ export function initDrawLayer(target, opts = {}) {
     tombstones: {}, // 墓碑 {id: deletedAt(ms)}：刪除不移除紀錄、改記墓碑 → 舊快照回寫無法復活已刪項
   };
   const history = makeUndoStack();
+  // 註記卡附件（選用 opts.uploadAttachment：async (file) → {name,type,size,url,path}，失敗 throw）。
+  // 沒傳 → 卡片不出現迴紋針、不攔貼上/拖放，跟加這個功能前完全一樣。
+  const uploadAttachment = typeof opts.uploadAttachment === 'function' ? opts.uploadAttachment : null;
   // ── 決策 A：頁面/screen 歸屬（選用 opts.getScreenId）──────────────────────────
   // 傳入 getScreenId() → 新標注/註記存檔時打上當前 screenId；render/清單只顯示當前 screen
   // 的項目（不刪物件，換頁只是不畫、換回還在）。未傳 → currentScreenId()=null → 一律全畫（向後相容）。
@@ -209,9 +216,12 @@ export function initDrawLayer(target, opts = {}) {
     if (c.endSel != null) doc.endSel = c.endSel; // 範圍結束行錨點（起訖聯集外框用）
     if (c.screenId != null) doc.screenId = c.screenId; // 決策 A：頁面/screen 歸屬（有才帶）
     if (c.hidden) doc.hidden = true;                   // 眼睛鈕：從畫布隱藏（仍留標注紀錄）
+    const atts = attachmentsForDoc(c.attachments);     // 附件：有才寫，沒附件的舊資料形狀不變
+    if (atts) doc.attachments = atts;
     return doc;
   }
-  function saveNote(text, anchor, id) {
+  // attachments：undefined＝不動附件（沒有附件列的卡、點外面自動存檔的舊路徑）；陣列＝整組換成這些（空陣列＝全拿掉）。
+  function saveNote(text, anchor, id, attachments) {
     const t = String(text || '').trim();
     if (!t) return null;
     const existing = id && state.notes.find(c => c.id === id);
@@ -221,6 +231,10 @@ export function initDrawLayer(target, opts = {}) {
       c = Object.assign({ id: nextDrawId(), kind: 'note', text: t }, anchor || {});
       if (typeof opts.getScreenId === 'function' && c.screenId == null) c.screenId = currentScreenId(); // 決策 A：新註記歸屬當前 screen
       state.notes.push(c);
+    }
+    if (attachments !== undefined) {
+      const atts = attachmentsForDoc(attachments);
+      if (atts) c.attachments = atts; else delete c.attachments;
     }
     renderNotes();
     renderRecordPanel(); // 加/改 note 後同步標注紀錄面板（新列 + 全選框 checked/indeterminate 狀態）
@@ -233,7 +247,7 @@ export function initDrawLayer(target, opts = {}) {
     state.tombstones[id] = Date.now(); // 墓碑：記下刪除時間 → 舊快照回寫無法復活
     if (focusNoteId === id) focusNoteId = null;
     const card = noteLayer.querySelector(`.pc-note-card[data-note-id="${id}"]`);
-    if (card) card.remove();
+    if (card) dropNoteCard(card);
     renderNotes();
     renderRecordPanel(); // 同步標注紀錄面板：卡片『刪除』鈕直呼此函式，漏此行則已刪 note 殘留在紀錄側欄
     if (drawStore) { try { syncTombstone(id); } catch (_) { } }
@@ -362,8 +376,17 @@ export function initDrawLayer(target, opts = {}) {
   }
 
   // ── 對話卡（H：prompt 在上、AI 方案卡在下，整段貼著元件）──
+  // 拆掉一張註記卡的唯一出口：先收掉輸入中的附件列（釋放圖片預覽的 object URL），再移除 DOM。
+  // 存檔、取消、Esc、點外面、✕、切到別張卡、刪除、destroy 都走這裡。
+  function dropNoteCard(card) {
+    if (activeNoteEditor && activeNoteEditor.tray && card.contains(activeNoteEditor.tray.listEl)) {
+      activeNoteEditor.tray.dispose();
+      activeNoteEditor = null;
+    }
+    card.remove();
+  }
   function closeAllNoteCards() {
-    noteLayer.querySelectorAll('.pc-note-card').forEach(n => { n.remove(); });
+    noteLayer.querySelectorAll('.pc-note-card').forEach(n => { dropNoteCard(n); });
     // 關卡同時清掉 spotlight/dim 高亮（原本只清 focusNoteId 變數、沒清 DOM class → ✕ 關閉/點外面關閉後
     // 標記仍殘留高亮）。她的原話：「高亮時，應該點旁邊就要可以取消高亮」。
     noteLayer.querySelectorAll('.pc-note-mark').forEach(m => { m.classList.remove('is-spotlight', 'is-dim'); });
@@ -427,9 +450,9 @@ export function initDrawLayer(target, opts = {}) {
     if (!card) { unbindNoteOutsideClose(); return; }
     if (card.contains(e.target)) return; // 點在卡片本身 → 交回卡內各自 handler，不處理
     if (activeNoteEditor) {
-      const { ta, c, isEdit } = activeNoteEditor;
+      const { ta, c, isEdit, tray } = activeNoteEditor;
       const text = ta.value.trim();
-      if (text) saveNote(ta.value, isEdit ? null : pendingAnchor, c.id || null); // 有內容 → 自動存檔
+      if (text) saveNote(ta.value, isEdit ? null : pendingAnchor, c.id || null, tray ? tray.attachments() : undefined); // 有內容 → 自動存檔（已傳好的附件一起存）
       // 空白 → 不存（不留空紀錄）；不論是否存檔，點外面一律直接關閉（不像 Cancel 鈕會重開 view 卡）。
     }
     closeAllNoteCards();
@@ -447,6 +470,7 @@ export function initDrawLayer(target, opts = {}) {
     const pr = drawHtmlEl('div', 'pc-note-prompt-text');
     const lb = drawHtmlEl('div', 'pc-note-prompt-lbl'); lb.textContent = '我的 prompt';
     pr.appendChild(lb); pr.appendChild(document.createTextNode(c.text)); body.appendChild(pr);
+    if (c.attachments && c.attachments.length) pr.appendChild(attachmentViewEl(c.attachments)); // 附件在泡泡內、虛線下方
     const row = drawHtmlEl('div', 'pc-note-row');
     const edit = drawHtmlEl('button', 'ghost'); edit.textContent = '編輯'; edit.onclick = () => renderCardInput(body, c, c.text);
     const del = drawHtmlEl('button', 'danger'); del.textContent = '刪除'; del.onclick = () => deleteNote(c.id);
@@ -467,32 +491,82 @@ export function initDrawLayer(target, opts = {}) {
     const send = drawHtmlEl('button'); send.textContent = c.id ? '更新' : '存紀錄'; // 存進標注紀錄佇列（非直接送 AI）
     const cancel = drawHtmlEl('button', 'ghost'); cancel.textContent = '取消';
     const isEdit = !!c.id;
+    // 附件列：只有 consumer 傳了 uploadAttachment 才建（編輯既有註記時，已存的附件回到可拿掉／補上的狀態）。
+    const tray = uploadAttachment ? createAttachmentTray({ upload: uploadAttachment, initial: c.attachments || [] }) : null;
     // 存 note；alsoSend=true → 存完直接送 AI（隨批送出目前已勾選那批，含這則）。
     const submit = (alsoSend) => {
-      const saved = saveNote(ta.value, isEdit ? null : pendingAnchor, c.id || null);
+      if (tray && tray.isUploading()) return; // 上傳中不能存（按鈕也是 disabled），免得附件掉一半
+      const saved = saveNote(ta.value, isEdit ? null : pendingAnchor, c.id || null, tray ? tray.attachments() : undefined);
       if (!saved) return;
-      const currentCard = body.closest('.pc-note-card'); if (currentCard) currentCard.remove();
+      const failed = tray ? tray.failedCount() : 0; // 拆卡前先數（拆卡會收掉附件列）
+      const currentCard = body.closest('.pc-note-card'); if (currentCard) dropNoteCard(currentCard);
       // 編輯 → 存完重開 VIEW 卡看結果；新增 → 存完關閉（marker 已放好，要看再點）。
-      if (isEdit) openNoteCard(saved); else closeNoteCard();
+      // 有附件沒傳上去 → 也重開 VIEW 卡，在卡上說一聲「n 個附件沒存到」（留言本身照存）。
+      if (isEdit || failed) openNoteCard(saved); else closeNoteCard();
+      if (failed) showNoteCardNotice(saved.id, `${failed} 個附件沒存到`);
       if (alsoSend) sendToAgent();
     };
     send.onclick = () => submit(false);
-    cancel.onclick = () => {
-      if (c.id) { const currentCard = body.closest('.pc-note-card'); if (currentCard) currentCard.remove(); openNoteCard(c); }
-      else closeNoteCard();
-    };
+    cancel.onclick = () => cancelNoteInput(body, c);
     row.append(cancel, send); body.append(ta, row);
+    if (tray) mountAttachTray(body, ta, row, send, tray);
     ta.addEventListener('keydown', ev => {
       if (ev.isComposing || ev.keyCode === 229) return; // 注音/IME 組字中的 Enter（含 Safari/舊 WebKit keyCode 229）→ 放行給輸入法選字，不觸發送出/存檔
       if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); submit(true); }      // ⌘/Ctrl+Enter → 送 AI
       else if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); submit(false); }              // Enter → 存標注紀錄
-      else if (ev.key === 'Escape') { ev.preventDefault(); if (c.id) { const cur = body.closest('.pc-note-card'); if (cur) cur.remove(); openNoteCard(c); } else closeNoteCard(); }
+      else if (ev.key === 'Escape') { ev.preventDefault(); cancelNoteInput(body, c); }
       // Shift+Enter → 換行（不攔截，textarea 預設行為）
     });
     autoGrowTextarea(ta); // 多行輸入自動長高（封頂 max-height，見 styles.js），初始跑一次吃已有內容（編輯既有多行 note）
     ta.addEventListener('input', () => autoGrowTextarea(ta));
     ta.focus();
-    activeNoteEditor = { ta, c, isEdit }; // 供 onNoteOutsidePointer 讀取，判斷點外面時是否要自動存檔
+    activeNoteEditor = { ta, c, isEdit, tray }; // 供 onNoteOutsidePointer 讀取，判斷點外面時是否要自動存檔
+  }
+  // 取消／Esc：編輯既有 → 回 VIEW 卡；新增 → 關卡。
+  function cancelNoteInput(body, c) {
+    if (c.id) { const cur = body.closest('.pc-note-card'); if (cur) dropNoteCard(cur); openNoteCard(c); }
+    else closeNoteCard();
+  }
+  // 把附件列掛上卡片：迴紋針＋計數在按鈕列左邊、附件與錯誤在輸入框下方；⌘V 貼檔、拖檔進卡片都進附件。
+  function mountAttachTray(body, ta, row, send, tray) {
+    row.prepend(tray.clip, tray.countEl, drawHtmlEl('span', 'spacer'));
+    body.insertBefore(tray.listEl, row); body.insertBefore(tray.errEl, row); body.appendChild(tray.input);
+    tray.onChange(() => { send.disabled = tray.isUploading(); }); // 上傳中「存紀錄」不能按
+    // 只在輸入框有焦點時攔檔案貼上；純文字貼上照舊。畫布的「貼圖成參考圖」本來就在打字時不動作。
+    ta.addEventListener('paste', ev => {
+      const files = attachFilesFromTransfer(ev.clipboardData);
+      if (!files.length) return;
+      ev.preventDefault(); tray.addFiles(files);
+    });
+    const card = body.closest('.pc-note-card');
+    if (card) bindCardFileDrop(card, body, tray);
+  }
+  // 拖檔進卡片：卡框變色＋虛線遮罩，放開才加入。用 on* 屬性（不是 addEventListener）→ 重開編輯時直接覆蓋、不累積；
+  // 卡片切回 VIEW 後附件列已不在 body 裡，handler 自己失效（不攔，交回瀏覽器/畫布原本的行為）。
+  function bindCardFileDrop(card, body, tray) {
+    let depth = 0, veil = null;
+    const live = ev => isFileDrag(ev) && body.contains(tray.listEl);
+    const clear = () => { depth = 0; card.classList.remove('is-dragover'); if (veil) { veil.remove(); veil = null; } };
+    card.ondragenter = ev => {
+      if (!live(ev)) return;
+      ev.preventDefault(); depth++;
+      if (!veil) { veil = attachDropVeilEl(); body.appendChild(veil); card.classList.add('is-dragover'); }
+    };
+    card.ondragover = ev => { if (live(ev)) { ev.preventDefault(); ev.dataTransfer.dropEffect = 'copy'; } };
+    card.ondragleave = ev => { if (live(ev) && --depth <= 0) clear(); };
+    card.ondrop = ev => {
+      if (!live(ev)) return;
+      ev.preventDefault(); ev.stopPropagation(); clear();
+      tray.addFiles(attachFilesFromTransfer(ev.dataTransfer));
+    };
+  }
+  // 在某則註記的卡上就近顯示一行提示（例：附件沒存到）。
+  function showNoteCardNotice(noteId, text) {
+    const card = noteLayer.querySelector(`.pc-note-card[data-note-id="${noteId}"]`);
+    const body = card && card.querySelector('.pc-note-card-body');
+    if (!body) return;
+    const row = body.querySelector('.pc-note-row');
+    body.insertBefore(attachNoticeEl('', text), row || null);
   }
   // note 編輯器自動長高：height 先 reset 再吃 scrollHeight，CSS max-height 封頂後交回 overflow-y 內部捲動。
   function autoGrowTextarea(ta) {
@@ -520,6 +594,7 @@ export function initDrawLayer(target, opts = {}) {
     const pr = drawHtmlEl('div', 'pc-note-prompt-text');
     const lb = drawHtmlEl('div', 'pc-note-prompt-lbl'); lb.textContent = '我的 prompt';
     pr.appendChild(lb); pr.appendChild(document.createTextNode(c.text)); pbody.appendChild(pr);
+    if (c.attachments && c.attachments.length) pr.appendChild(attachmentViewEl(c.attachments));
     if (rep) { const slot = drawHtmlEl('div', 'pc-note-reply-slot'); slot.appendChild(replyCardInline(rep)); pbody.appendChild(slot); }
     panel.append(head, pbody); host.append(back, panel);
   }
@@ -1460,6 +1535,7 @@ export function initDrawLayer(target, opts = {}) {
           ...(doc.range != null ? { range: doc.range } : {}),   // 程式碼範圍註記還原
           ...(doc.endSel != null ? { endSel: doc.endSel } : {}),
           ...(doc.hidden ? { hidden: true } : {}),                 // 眼睛鈕隱藏狀態（重訂閱後保持）
+          ...(attachmentsForDoc(doc.attachments) ? { attachments: attachmentsForDoc(doc.attachments) } : {}), // 附件（有才帶）
           ...(doc.screenId != null ? { screenId: doc.screenId } : {}) });
         changed = true;
       } else if (doc.geom) {
@@ -1863,6 +1939,7 @@ export function initDrawLayer(target, opts = {}) {
       selector: n.sel || null, objId: n.objId != null ? n.objId : null,
       x: n.x, y: n.y,
       ...(n.range != null ? { range: n.range } : {}), // 程式碼範圍：{path,startLine,endLine,side,code}→ AI 拿到完整脈絡
+      ...(attachmentsForDoc(n.attachments) ? { attachments: attachmentsForDoc(n.attachments) } : {}), // 附件：AI 用 path 直接讀檔
     }));
     // 元件位移：AI/agent 讀回 {selector, dx, dy, rect} → 對照改 code/mockup（設計討論閉環）。
     const checkedMv = uncheckedUnsentMoves();
@@ -2448,6 +2525,7 @@ export function initDrawLayer(target, opts = {}) {
       replyPolling = false; // 停掉 AI 方案卡輪詢
       [...moveOrigTransform.keys()].forEach(sel => { resetMoveOf(sel, querySelectorSafe(sel)); }); // 還原被拖過的真實元件 transform
       svg.remove(); toolbar.remove(); contextMenu.remove(); replyLayer.remove();
+      closeAllNoteCards(); // 先走拆卡出口（釋放附件預覽）
       noteLayer.remove(); moveLayer.remove(); closeNotePanel(); // 留言層 + 拖曳層 + 放大面板/遮罩
       recordTab.remove(); recordDrawer.remove();
       removeFeedbackBox();

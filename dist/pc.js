@@ -1,4 +1,4 @@
-/* pc.js c548499 2026-09-04T03:37:49Z */
+/* pc.js a1446bc 2026-10-06T13:35:06Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -1647,7 +1647,9 @@ function decisionSig(d) {
   return JSON.stringify({ replyId: d.replyId, optionId: d.optionId, optionLabel: d.optionLabel });
 }
 function noteSig(n) {
-  return JSON.stringify({ text: n.text, sel: n.sel, objId: n.objId, range: n.range });
+  // attachments 只在有附件時進簽章（undefined 會被 JSON.stringify 略過）→ 沒附件的舊註記簽章不變、不會被誤判成未送。
+  const atts = Array.isArray(n.attachments) && n.attachments.length ? n.attachments.map(a => a.path || a.url) : undefined;
+  return JSON.stringify({ text: n.text, sel: n.sel, objId: n.objId, range: n.range, attachments: atts });
 }
 // 元件位移紀錄簽章：改拖曳量（dx/dy）或換元件（sel）→ 簽章變 → 視為未送（與 annotationSig 同語意）。
 function moveSig(m) {
@@ -2086,6 +2088,60 @@ const DRAW_STYLES = `
 .pc-note-row button.danger { background: #fff; color: var(--pc-danger-ink); border-color: var(--pc-danger-ink); }
 .pc-note-reply-slot { margin-top: 9px; }
 .pc-note-expand { margin-top: 8px; font-size: 11.5px; color: var(--pc-ink); font-weight: 700; cursor: pointer; background: none; border: none; padding: 0; text-decoration: underline; }
+/* ── 註記卡附件（只有 consumer 傳 uploadAttachment 才會出現）：迴紋針在按鈕列左邊、附件在輸入框下方 ── */
+.pc-note-card-body { position: relative; } /* 拖曳遮罩以卡片內容區為定位基準 */
+.pc-note-row .spacer { flex: 1; }
+.pc-note-row button:disabled { opacity: .45; cursor: not-allowed; }
+.pc-note-row button.pc-attach-btn { display: inline-flex; align-items: center; padding: 4px 7px; background: #fff; color: var(--pc-ink); }
+.pc-attach-btn svg { width: 14px; height: 14px; }
+.pc-attach-count { font-size: 11px; color: var(--pc-ink-3); align-self: center; }
+.pc-attach-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.pc-attach-list:empty, .pc-att-err-slot:empty { display: none; }
+.pc-att-thumb { position: relative; width: 52px; height: 52px; box-sizing: border-box; border: 1.5px solid var(--pc-ink); border-radius: 7px 5px 8px 4px; background: #fff; }
+.pc-att-thumb .img { position: absolute; inset: 2px; border-radius: 4px; overflow: hidden; }
+.pc-att-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pc-att-thumb.is-uploading .img { opacity: .55; }
+.pc-att-thumb .pc-att-bar { position: absolute; left: 5px; right: 5px; bottom: 5px; margin: 0; }
+.pc-att-x { position: absolute; top: -7px; right: -7px; width: 18px; height: 18px; border-radius: 50%; box-sizing: border-box;
+  border: 1.5px solid var(--pc-ink); background: #fff; color: var(--pc-ink); font-size: 10px; line-height: 1;
+  display: grid; place-items: center; cursor: pointer; padding: 0; font-family: inherit; }
+.pc-att-x:hover { background: var(--pc-ink-strong); color: #fff; }
+.pc-att-file { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; flex: 1 1 100%; box-sizing: border-box;
+  border: 1.5px solid var(--pc-ink); border-radius: 7px 5px 8px 4px; background: #fff; padding: 5px 24px 5px 7px; }
+.pc-att-file .ico { flex: none; width: 22px; height: 26px; box-sizing: border-box; border: 1.5px solid var(--pc-ink-2); border-radius: 2px 6px 2px 2px;
+  font-size: 7.5px; font-weight: 800; color: var(--pc-ink-2); display: grid; place-items: end center; padding-bottom: 2px; letter-spacing: .02em; }
+.pc-att-file .meta { min-width: 0; flex: 1; line-height: 1.3; }
+.pc-att-file .nm { font-size: 11.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.pc-att-file .sz { font-size: 10.5px; color: var(--pc-ink-3); }
+.pc-att-file .pc-att-x { top: 50%; right: 4px; transform: translateY(-50%); }
+.pc-att-file.is-uploading .sz { color: var(--pc-accent); }
+.pc-att-file.is-failed { border-color: var(--pc-danger-ink); }
+.pc-att-file.is-failed .sz { color: var(--pc-danger-ink); font-weight: 600; }
+.pc-att-file .retry { border: none; background: none; padding: 0; font: inherit; font-size: 10.5px; color: var(--pc-danger-ink); text-decoration: underline; cursor: pointer; font-weight: 700; }
+.pc-att-bar { height: 3px; background: var(--pc-border-3); border-radius: 2px; margin-top: 3px; overflow: hidden; }
+.pc-att-bar i { display: block; height: 100%; width: 40%; background: var(--pc-accent); animation: pc-att-indet 1.1s ease-in-out infinite; }
+@keyframes pc-att-indet { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+/* 只有剛加進來的那一個淡入；之後重畫（別的附件傳完）不再重播，免得整排閃一下 */
+.pc-attach-list .is-new { animation: pc-att-in 180ms cubic-bezier(.16,1,.3,1); }
+@keyframes pc-att-in { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
+.pc-note-card.is-dragover { border-color: var(--pc-accent); }
+.pc-drop-veil { position: absolute; inset: 4px; border: 2px dashed var(--pc-accent); border-radius: 9px 7px 10px 6px; z-index: 2;
+  background: #f1eff8; display: grid; place-items: center; line-height: 1.35; text-align: center; pointer-events: none;
+  color: var(--pc-accent-strong); font-weight: 700; font-size: 12.5px; padding: 8px; }
+.pc-drop-veil small { display: block; font-weight: 400; color: var(--pc-ink-2); font-size: 11px; }
+.pc-att-err { display: flex; gap: 6px; align-items: flex-start; margin-top: 7px; padding: 6px 8px; font-size: 11.5px; line-height: 1.45;
+  color: var(--pc-danger-ink); background: rgba(var(--pc-danger-rgb), .06); border: 1.5px solid var(--pc-danger-ink); border-radius: 7px 5px 8px 4px; }
+.pc-att-err b { font-weight: 700; }
+.pc-att-err button { margin-left: auto; flex: none; border: none; background: none; color: var(--pc-danger-ink); font: inherit; font-weight: 700; cursor: pointer; padding: 0; }
+.pc-note-prompt-att { white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--pc-border); }
+.pc-note-prompt-att .pc-att-thumb { width: 46px; height: 46px; }
+.pc-note-prompt-att .pc-att-thumb.is-link { cursor: zoom-in; }
+.pc-note-prompt-att .pc-att-file { padding-right: 7px; }
+.pc-note-prompt-att .pc-att-file.is-link { cursor: pointer; }
+.pc-att-thumb .img.is-empty { background: var(--pc-border-3); } /* 網址不安全／讀不到 → 灰底占位 */
+@media (prefers-reduced-motion: reduce) {
+  .pc-attach-list .is-new, .pc-att-bar i { animation: none; }
+}
 /* 兩段式：放大成置中大面板（複雜圖文好讀） */
 .pc-note-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 2147483646; }
 .pc-note-panel { position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); z-index: 2147483647;
@@ -3130,6 +3186,262 @@ function replyCardEl(reply, onChoose, onClose, onRechoose) {
 }
 
 /**
+ * draw/attachments — 註記卡附件：上限常數、純函式（可單測）與輸入狀態的附件列（DOM）。
+ * 只有 initDrawLayer 收到 opts.uploadAttachment 時才會建附件列；沒傳就完全不出現（舊行為不變）。
+ * 附件本身不進註記 doc，doc 只記 {name,type,size,url,path}——檔案由 consumer 的 uploadAttachment 存放。
+ * ⚠️ bundle 會把各模組串成同一個 scope：這裡的 top-level 名稱一律帶 attach 字樣，避免和別的模組撞名。
+ */
+
+// 一則留言最多幾個附件、單檔多大（使用者 2026-10-06 定案）。全 CDN 只在這裡定義。
+const NOTE_ATTACH_MAX = 3;
+const NOTE_ATTACH_MAX_BYTES = 10 * 1024 * 1024;
+const ATTACH_FIELDS = ['name', 'type', 'size', 'url', 'path'];
+const ATTACH_CLIP_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>';
+
+// ── 純函式 ────────────────────────────────────────────────────────────────────
+// 上限文字（「10MB」）從常數算，不另外手寫。
+function attachLimitLabel(maxBytes = NOTE_ATTACH_MAX_BYTES) {
+  return Math.round(maxBytes / (1024 * 1024)) + 'MB';
+}
+// 位元組 → 人看的大小：380 KB、1.2 MB、48 MB。
+function formatAttachBytes(n) {
+  const b = Math.max(0, Number(n) || 0);
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return Math.round(b / 1024) + ' KB';
+  const mb = b / (1024 * 1024);
+  return (mb < 10 ? mb.toFixed(1) : String(Math.round(mb))) + ' MB';
+}
+// 副檔名大寫（檔案圖示上那幾個字）；沒有副檔名 → FILE。
+function attachExt(name) {
+  const m = /\.([A-Za-z0-9]{1,5})$/.exec(String(name || ''));
+  return m ? m[1].toUpperCase() : 'FILE';
+}
+function isImageAttachment(a) { return !!a && /^image\//.test(String(a.type || '')); }
+// 能不能再加一個：回 null（可以）、'full'（已滿）、'too_large'（單檔超過上限）。
+function checkAttachAdd(count, file, max = NOTE_ATTACH_MAX, maxBytes = NOTE_ATTACH_MAX_BYTES) {
+  if (count >= max) return 'full';
+  if (file && Number(file.size) > maxBytes) return 'too_large';
+  return null;
+}
+// 只留合約欄位（{name,type,size,url,path}），丟掉其他東西。
+function cleanAttachment(a) {
+  const out = {};
+  ATTACH_FIELDS.forEach(k => { if (a && a[k] != null) out[k] = a[k]; });
+  return out;
+}
+// 寫進 doc 的附件陣列：沒有可用附件 → null（呼叫端就不寫這個欄位，舊資料形狀不變）。
+function attachmentsForDoc(list) {
+  const out = (Array.isArray(list) ? list : []).filter(a => a && (a.path || a.url)).map(cleanAttachment);
+  return out.length ? out : null;
+}
+// uploadAttachment 丟出來的錯誤是不是「檔案太大」（HTTP 413 帶 {error:'too_large'}）。
+function isAttachTooLargeError(e) {
+  if (!e) return false;
+  return e.status === 413 || e.error === 'too_large' || e.code === 'too_large' || /too_large/.test(String(e.message || ''));
+}
+// 從剪貼簿／拖放事件取出檔案（沒有就回空陣列）。
+function attachFilesFromTransfer(dt) {
+  if (!dt) return [];
+  const files = [...(dt.files || [])];
+  if (files.length) return files;
+  return [...(dt.items || [])].filter(it => it.kind === 'file').map(it => it.getAsFile()).filter(Boolean);
+}
+function isFileDrag(ev) {
+  const types = (ev && ev.dataTransfer && ev.dataTransfer.types) || [];
+  return [...types].includes('Files');
+}
+// 附件網址 → 可開的絕對網址（相對網址照頁面 base 解析）。只放行 http／https／blob：
+// 附件 url 來自註記 doc（可能是共享或被竄改的資料），javascript:／data: 這類網址交給 window.open 或 <img src>
+// 等於讓別人在這頁跑東西。解析失敗或協議不在白名單 → 回空字串，呼叫端就不開視窗、不設 src。
+const ATTACH_SAFE_PROTOCOLS = ['http:', 'https:', 'blob:'];
+function attachDocBase() { try { return document.baseURI; } catch (_) { return undefined; } }
+function attachHref(url, base = attachDocBase()) {
+  if (url == null || url === '') return '';
+  try {
+    const u = new URL(String(url), base);
+    return ATTACH_SAFE_PROTOCOLS.includes(u.protocol) ? u.href : '';
+  } catch (_) { return ''; }
+}
+
+// ── DOM：錯誤提示、已存附件、輸入中的附件列 ─────────────────────────────────────
+// 紅框提示（太大／滿了／沒存到）。strong＝粗體開頭（檔名與大小），rest＝後面說明；✕ 收掉。
+function attachNoticeEl(strong, rest) {
+  const box = drawHtmlEl('div', 'pc-att-err'); box.setAttribute('role', 'alert');
+  const msg = drawHtmlEl('span');
+  if (strong) { const b = drawHtmlEl('b'); b.textContent = strong; msg.appendChild(b); }
+  msg.appendChild(document.createTextNode(rest || ''));
+  const x = drawHtmlEl('button'); x.type = 'button'; x.textContent = '✕'; x.setAttribute('aria-label', '關閉提示');
+  x.onclick = () => box.remove();
+  box.append(msg, x);
+  return box;
+}
+// 縮圖（圖片）。src 可以是本機預覽網址或上傳後的網址。
+function attachThumbEl(name, size, src) {
+  const el = drawHtmlEl('div', 'pc-att-thumb');
+  el.title = size != null ? `${name} · ${formatAttachBytes(size)}` : name;
+  const box = drawHtmlEl('div', 'img'); const img = document.createElement('img');
+  if (src) { img.alt = name; img.src = src; box.appendChild(img); } // 沒有安全網址 → 留灰底占位，不設 src
+  else box.classList.add('is-empty');
+  el.appendChild(box);
+  return el;
+}
+// 檔案條（非圖片、上傳中或失敗的圖片）：副檔名＋檔名＋狀態文字。
+function attachFileEl(name, statusText) {
+  const el = drawHtmlEl('div', 'pc-att-file');
+  const ico = drawHtmlEl('span', 'ico'); ico.textContent = attachExt(name);
+  const meta = drawHtmlEl('span', 'meta');
+  const nm = drawHtmlEl('span', 'nm'); nm.textContent = name; nm.title = name;
+  const sz = drawHtmlEl('span', 'sz'); sz.textContent = statusText;
+  meta.append(nm, sz); el.append(ico, meta);
+  return el;
+}
+// 已存狀態（view 卡）：放在「我的 prompt」泡泡內、虛線下方；點一下用新分頁開檔案。
+function attachmentViewEl(list) {
+  const wrap = drawHtmlEl('div', 'pc-note-prompt-att');
+  (list || []).forEach(a => {
+    const href = attachHref(a.url);
+    const el = isImageAttachment(a) ? attachThumbEl(a.name, a.size, href) : attachFileEl(a.name, formatAttachBytes(a.size));
+    if (href) attachMakeLink(el, href); // 網址不安全／解析不了 → 只顯示檔名或占位，不當連結
+    wrap.appendChild(el);
+  });
+  return wrap;
+}
+// 讓已存的附件可點：新分頁開 href（呼叫前已確認是 http／https／blob）。
+function attachMakeLink(el, href) {
+  el.classList.add('is-link'); el.tabIndex = 0; el.setAttribute('role', 'link');
+  const openIt = () => { try { window.open(href, '_blank', 'noopener'); } catch (_) { } };
+  el.onclick = openIt;
+  el.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); openIt(); } };
+}
+// 拖曳中的虛線遮罩。
+function attachDropVeilEl() {
+  const veil = drawHtmlEl('div', 'pc-drop-veil');
+  const inner = drawHtmlEl('div'); inner.textContent = '放開就加入附件';
+  const small = drawHtmlEl('small'); small.textContent = `圖片或檔案，單檔 ${attachLimitLabel()} 以內`;
+  inner.appendChild(small); veil.appendChild(inner);
+  return veil;
+}
+
+// 輸入狀態的附件列。items：{ status:'uploading'|'done'|'failed', file?, preview?, att? }。
+// 回傳要掛到卡片上的元素（clip／countEl／listEl／errEl／input）與查詢方法。
+function createAttachmentTray({ upload, initial = [] }) {
+  const t = {
+    upload, items: (initial || []).map(a => ({ status: 'done', att: cleanAttachment(a) })), listeners: [],
+    listEl: drawHtmlEl('div', 'pc-attach-list'), errEl: drawHtmlEl('div', 'pc-att-err-slot'),
+    clip: drawHtmlEl('button', 'pc-attach-btn'), countEl: drawHtmlEl('span', 'pc-attach-count'),
+    input: document.createElement('input'),
+  };
+  t.clip.type = 'button'; t.clip.title = '附加圖片或檔案'; t.clip.setAttribute('aria-label', '附加圖片或檔案');
+  t.clip.innerHTML = ATTACH_CLIP_SVG;
+  t.input.type = 'file'; t.input.multiple = true; t.input.hidden = true; t.input.className = 'pc-attach-input';
+  t.clip.onclick = () => t.input.click();
+  t.input.onchange = () => { trayAddFiles(t, [...(t.input.files || [])]); t.input.value = ''; };
+  trayRender(t);
+  return {
+    clip: t.clip, countEl: t.countEl, listEl: t.listEl, errEl: t.errEl, input: t.input,
+    addFiles: files => trayAddFiles(t, files),
+    attachments: () => t.items.filter(i => i.status === 'done').map(i => i.att),
+    isUploading: () => t.items.some(i => i.status === 'uploading'),
+    failedCount: () => t.items.filter(i => i.status === 'failed').length,
+    count: () => t.items.length,
+    onChange: fn => { t.listeners.push(fn); },
+    // 卡片拆掉時呼叫：釋放所有圖片預覽的 object URL。之後才回來的上傳結果一律丟掉。
+    dispose: () => { t.items.forEach(attachRevokePreview); t.items = []; t.listeners = []; },
+  };
+}
+// 加檔：逐一檢查上限，超過的就近顯示紅框，不加入；其餘加入並開始上傳。
+function trayAddFiles(t, files) {
+  t.errEl.innerHTML = '';
+  for (const file of files || []) {
+    const why = checkAttachAdd(t.items.length, file);
+    if (why === 'full') { trayShowFull(t); break; }
+    if (why === 'too_large') { trayShowTooLarge(t, file); continue; }
+    const item = { status: 'uploading', file };
+    if (isImageAttachment(file) && typeof URL !== 'undefined' && URL.createObjectURL) item.preview = URL.createObjectURL(file);
+    t.items.push(item);
+    trayUpload(t, item);
+  }
+  trayRender(t);
+}
+function trayShowTooLarge(t, file) {
+  t.errEl.innerHTML = '';
+  t.errEl.appendChild(attachNoticeEl(`${file.name} 有 ${formatAttachBytes(file.size)}`, `，超過單檔 ${attachLimitLabel()}。可以先壓縮，或改貼截圖。`));
+}
+function trayShowFull(t) {
+  t.errEl.innerHTML = '';
+  t.errEl.appendChild(attachNoticeEl('', `一則留言最多 ${NOTE_ATTACH_MAX} 個附件，多的沒加進去。`));
+}
+// 上傳一個（也給「重試」用）。上傳途中被 ✕ 拿掉的，結果直接丟掉。
+async function trayUpload(t, item) {
+  item.status = 'uploading';
+  trayRender(t);
+  try {
+    const r = await t.upload(item.file);
+    if (!t.items.includes(item)) return;
+    item.att = cleanAttachment(Object.assign({ name: item.file.name, type: item.file.type, size: item.file.size }, r));
+    item.status = 'done';
+  } catch (e) {
+    if (!t.items.includes(item)) return;
+    if (isAttachTooLargeError(e)) { trayRemove(t, item); trayShowTooLarge(t, item.file); return; }
+    item.status = 'failed';
+  }
+  trayRender(t);
+}
+function trayRemove(t, item) {
+  t.items = t.items.filter(i => i !== item);
+  attachRevokePreview(item);
+  trayRender(t);
+}
+function attachRevokePreview(item) {
+  if (item.preview && typeof URL !== 'undefined' && URL.revokeObjectURL) URL.revokeObjectURL(item.preview);
+  item.preview = null;
+}
+function trayRender(t) {
+  t.listEl.innerHTML = '';
+  t.items.forEach(item => { t.listEl.appendChild(trayItemEl(t, item)); });
+  const n = t.items.length;
+  t.countEl.textContent = n ? `${n}／${NOTE_ATTACH_MAX}` : '';
+  t.clip.disabled = n >= NOTE_ATTACH_MAX;
+  t.listeners.forEach(fn => { fn(); });
+}
+// 單一附件：完成的圖片＝縮圖；其餘（非圖片、上傳中檔案、失敗）＝檔案條。右上／右側 ✕ 拿掉。
+function trayItemEl(t, item) {
+  const name = item.att ? item.att.name : item.file.name;
+  const size = item.att ? item.att.size : item.file.size;
+  const isImg = isImageAttachment(item.att || item.file);
+  let el;
+  if (isImg && item.status !== 'failed') {
+    el = attachThumbEl(name, size, item.preview || attachHref(item.att.url));
+    if (item.status === 'uploading') { el.classList.add('is-uploading'); el.appendChild(attachBarEl()); }
+  } else el = trayFileEl(t, item, name, size);
+  const x = drawHtmlEl('button', 'pc-att-x'); x.type = 'button'; x.textContent = '✕';
+  x.setAttribute('aria-label', item.status === 'uploading' ? '取消上傳' : '移除附件');
+  x.onclick = ev => { ev.stopPropagation(); trayRemove(t, item); };
+  el.appendChild(x);
+  if (!item.shown) { item.shown = true; el.classList.add('is-new'); } // 只有第一次畫出來時淡入
+  return el;
+}
+function trayFileEl(t, item, name, size) {
+  if (item.status === 'done') return attachFileEl(name, formatAttachBytes(size));
+  if (item.status === 'uploading') {
+    const el = attachFileEl(name, `上傳中… ${formatAttachBytes(size)}`);
+    el.classList.add('is-uploading'); el.querySelector('.meta').appendChild(attachBarEl());
+    return el;
+  }
+  const el = attachFileEl(name, '沒傳上去 · ');
+  el.classList.add('is-failed');
+  const retry = drawHtmlEl('button', 'retry'); retry.type = 'button'; retry.textContent = '重試';
+  retry.onclick = ev => { ev.stopPropagation(); trayUpload(t, item); };
+  el.querySelector('.sz').appendChild(retry);
+  return el;
+}
+// 上傳中的進度條（fetch 拿不到上傳進度，所以是來回跑的不定進度條）。
+function attachBarEl() {
+  const bar = drawHtmlEl('div', 'pc-att-bar'); bar.appendChild(drawHtmlEl('i'));
+  return bar;
+}
+
+/**
  * draw/init-draw-layer — 繪圖層的組裝與生命週期核心：initDrawLayer 建立 SVG/工具列/面板、
  * 綁定事件、管理 mode 狀態機與 undo/團隊同步，並把 draw/* 各模組（幾何/模型/渲染/工具列/面板）
  * 接線在一起。resolveTarget / resolveDrawStore 為其私有 wiring。public API 與 DOM 結構、class 名、
@@ -3202,6 +3514,9 @@ function initDrawLayer(target, opts = {}) {
     tombstones: {}, // 墓碑 {id: deletedAt(ms)}：刪除不移除紀錄、改記墓碑 → 舊快照回寫無法復活已刪項
   };
   const history = makeUndoStack();
+  // 註記卡附件（選用 opts.uploadAttachment：async (file) → {name,type,size,url,path}，失敗 throw）。
+  // 沒傳 → 卡片不出現迴紋針、不攔貼上/拖放，跟加這個功能前完全一樣。
+  const uploadAttachment = typeof opts.uploadAttachment === 'function' ? opts.uploadAttachment : null;
   // ── 決策 A：頁面/screen 歸屬（選用 opts.getScreenId）──────────────────────────
   // 傳入 getScreenId() → 新標注/註記存檔時打上當前 screenId；render/清單只顯示當前 screen
   // 的項目（不刪物件，換頁只是不畫、換回還在）。未傳 → currentScreenId()=null → 一律全畫（向後相容）。
@@ -3297,9 +3612,12 @@ function initDrawLayer(target, opts = {}) {
     if (c.endSel != null) doc.endSel = c.endSel; // 範圍結束行錨點（起訖聯集外框用）
     if (c.screenId != null) doc.screenId = c.screenId; // 決策 A：頁面/screen 歸屬（有才帶）
     if (c.hidden) doc.hidden = true;                   // 眼睛鈕：從畫布隱藏（仍留標注紀錄）
+    const atts = attachmentsForDoc(c.attachments);     // 附件：有才寫，沒附件的舊資料形狀不變
+    if (atts) doc.attachments = atts;
     return doc;
   }
-  function saveNote(text, anchor, id) {
+  // attachments：undefined＝不動附件（沒有附件列的卡、點外面自動存檔的舊路徑）；陣列＝整組換成這些（空陣列＝全拿掉）。
+  function saveNote(text, anchor, id, attachments) {
     const t = String(text || '').trim();
     if (!t) return null;
     const existing = id && state.notes.find(c => c.id === id);
@@ -3309,6 +3627,10 @@ function initDrawLayer(target, opts = {}) {
       c = Object.assign({ id: nextDrawId(), kind: 'note', text: t }, anchor || {});
       if (typeof opts.getScreenId === 'function' && c.screenId == null) c.screenId = currentScreenId(); // 決策 A：新註記歸屬當前 screen
       state.notes.push(c);
+    }
+    if (attachments !== undefined) {
+      const atts = attachmentsForDoc(attachments);
+      if (atts) c.attachments = atts; else delete c.attachments;
     }
     renderNotes();
     renderRecordPanel(); // 加/改 note 後同步標注紀錄面板（新列 + 全選框 checked/indeterminate 狀態）
@@ -3321,7 +3643,7 @@ function initDrawLayer(target, opts = {}) {
     state.tombstones[id] = Date.now(); // 墓碑：記下刪除時間 → 舊快照回寫無法復活
     if (focusNoteId === id) focusNoteId = null;
     const card = noteLayer.querySelector(`.pc-note-card[data-note-id="${id}"]`);
-    if (card) card.remove();
+    if (card) dropNoteCard(card);
     renderNotes();
     renderRecordPanel(); // 同步標注紀錄面板：卡片『刪除』鈕直呼此函式，漏此行則已刪 note 殘留在紀錄側欄
     if (drawStore) { try { syncTombstone(id); } catch (_) { } }
@@ -3450,8 +3772,17 @@ function initDrawLayer(target, opts = {}) {
   }
 
   // ── 對話卡（H：prompt 在上、AI 方案卡在下，整段貼著元件）──
+  // 拆掉一張註記卡的唯一出口：先收掉輸入中的附件列（釋放圖片預覽的 object URL），再移除 DOM。
+  // 存檔、取消、Esc、點外面、✕、切到別張卡、刪除、destroy 都走這裡。
+  function dropNoteCard(card) {
+    if (activeNoteEditor && activeNoteEditor.tray && card.contains(activeNoteEditor.tray.listEl)) {
+      activeNoteEditor.tray.dispose();
+      activeNoteEditor = null;
+    }
+    card.remove();
+  }
   function closeAllNoteCards() {
-    noteLayer.querySelectorAll('.pc-note-card').forEach(n => { n.remove(); });
+    noteLayer.querySelectorAll('.pc-note-card').forEach(n => { dropNoteCard(n); });
     // 關卡同時清掉 spotlight/dim 高亮（原本只清 focusNoteId 變數、沒清 DOM class → ✕ 關閉/點外面關閉後
     // 標記仍殘留高亮）。她的原話：「高亮時，應該點旁邊就要可以取消高亮」。
     noteLayer.querySelectorAll('.pc-note-mark').forEach(m => { m.classList.remove('is-spotlight', 'is-dim'); });
@@ -3515,9 +3846,9 @@ function initDrawLayer(target, opts = {}) {
     if (!card) { unbindNoteOutsideClose(); return; }
     if (card.contains(e.target)) return; // 點在卡片本身 → 交回卡內各自 handler，不處理
     if (activeNoteEditor) {
-      const { ta, c, isEdit } = activeNoteEditor;
+      const { ta, c, isEdit, tray } = activeNoteEditor;
       const text = ta.value.trim();
-      if (text) saveNote(ta.value, isEdit ? null : pendingAnchor, c.id || null); // 有內容 → 自動存檔
+      if (text) saveNote(ta.value, isEdit ? null : pendingAnchor, c.id || null, tray ? tray.attachments() : undefined); // 有內容 → 自動存檔（已傳好的附件一起存）
       // 空白 → 不存（不留空紀錄）；不論是否存檔，點外面一律直接關閉（不像 Cancel 鈕會重開 view 卡）。
     }
     closeAllNoteCards();
@@ -3535,6 +3866,7 @@ function initDrawLayer(target, opts = {}) {
     const pr = drawHtmlEl('div', 'pc-note-prompt-text');
     const lb = drawHtmlEl('div', 'pc-note-prompt-lbl'); lb.textContent = '我的 prompt';
     pr.appendChild(lb); pr.appendChild(document.createTextNode(c.text)); body.appendChild(pr);
+    if (c.attachments && c.attachments.length) pr.appendChild(attachmentViewEl(c.attachments)); // 附件在泡泡內、虛線下方
     const row = drawHtmlEl('div', 'pc-note-row');
     const edit = drawHtmlEl('button', 'ghost'); edit.textContent = '編輯'; edit.onclick = () => renderCardInput(body, c, c.text);
     const del = drawHtmlEl('button', 'danger'); del.textContent = '刪除'; del.onclick = () => deleteNote(c.id);
@@ -3555,32 +3887,82 @@ function initDrawLayer(target, opts = {}) {
     const send = drawHtmlEl('button'); send.textContent = c.id ? '更新' : '存紀錄'; // 存進標注紀錄佇列（非直接送 AI）
     const cancel = drawHtmlEl('button', 'ghost'); cancel.textContent = '取消';
     const isEdit = !!c.id;
+    // 附件列：只有 consumer 傳了 uploadAttachment 才建（編輯既有註記時，已存的附件回到可拿掉／補上的狀態）。
+    const tray = uploadAttachment ? createAttachmentTray({ upload: uploadAttachment, initial: c.attachments || [] }) : null;
     // 存 note；alsoSend=true → 存完直接送 AI（隨批送出目前已勾選那批，含這則）。
     const submit = (alsoSend) => {
-      const saved = saveNote(ta.value, isEdit ? null : pendingAnchor, c.id || null);
+      if (tray && tray.isUploading()) return; // 上傳中不能存（按鈕也是 disabled），免得附件掉一半
+      const saved = saveNote(ta.value, isEdit ? null : pendingAnchor, c.id || null, tray ? tray.attachments() : undefined);
       if (!saved) return;
-      const currentCard = body.closest('.pc-note-card'); if (currentCard) currentCard.remove();
+      const failed = tray ? tray.failedCount() : 0; // 拆卡前先數（拆卡會收掉附件列）
+      const currentCard = body.closest('.pc-note-card'); if (currentCard) dropNoteCard(currentCard);
       // 編輯 → 存完重開 VIEW 卡看結果；新增 → 存完關閉（marker 已放好，要看再點）。
-      if (isEdit) openNoteCard(saved); else closeNoteCard();
+      // 有附件沒傳上去 → 也重開 VIEW 卡，在卡上說一聲「n 個附件沒存到」（留言本身照存）。
+      if (isEdit || failed) openNoteCard(saved); else closeNoteCard();
+      if (failed) showNoteCardNotice(saved.id, `${failed} 個附件沒存到`);
       if (alsoSend) sendToAgent();
     };
     send.onclick = () => submit(false);
-    cancel.onclick = () => {
-      if (c.id) { const currentCard = body.closest('.pc-note-card'); if (currentCard) currentCard.remove(); openNoteCard(c); }
-      else closeNoteCard();
-    };
+    cancel.onclick = () => cancelNoteInput(body, c);
     row.append(cancel, send); body.append(ta, row);
+    if (tray) mountAttachTray(body, ta, row, send, tray);
     ta.addEventListener('keydown', ev => {
       if (ev.isComposing || ev.keyCode === 229) return; // 注音/IME 組字中的 Enter（含 Safari/舊 WebKit keyCode 229）→ 放行給輸入法選字，不觸發送出/存檔
       if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); submit(true); }      // ⌘/Ctrl+Enter → 送 AI
       else if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); submit(false); }              // Enter → 存標注紀錄
-      else if (ev.key === 'Escape') { ev.preventDefault(); if (c.id) { const cur = body.closest('.pc-note-card'); if (cur) cur.remove(); openNoteCard(c); } else closeNoteCard(); }
+      else if (ev.key === 'Escape') { ev.preventDefault(); cancelNoteInput(body, c); }
       // Shift+Enter → 換行（不攔截，textarea 預設行為）
     });
     autoGrowTextarea(ta); // 多行輸入自動長高（封頂 max-height，見 styles.js），初始跑一次吃已有內容（編輯既有多行 note）
     ta.addEventListener('input', () => autoGrowTextarea(ta));
     ta.focus();
-    activeNoteEditor = { ta, c, isEdit }; // 供 onNoteOutsidePointer 讀取，判斷點外面時是否要自動存檔
+    activeNoteEditor = { ta, c, isEdit, tray }; // 供 onNoteOutsidePointer 讀取，判斷點外面時是否要自動存檔
+  }
+  // 取消／Esc：編輯既有 → 回 VIEW 卡；新增 → 關卡。
+  function cancelNoteInput(body, c) {
+    if (c.id) { const cur = body.closest('.pc-note-card'); if (cur) dropNoteCard(cur); openNoteCard(c); }
+    else closeNoteCard();
+  }
+  // 把附件列掛上卡片：迴紋針＋計數在按鈕列左邊、附件與錯誤在輸入框下方；⌘V 貼檔、拖檔進卡片都進附件。
+  function mountAttachTray(body, ta, row, send, tray) {
+    row.prepend(tray.clip, tray.countEl, drawHtmlEl('span', 'spacer'));
+    body.insertBefore(tray.listEl, row); body.insertBefore(tray.errEl, row); body.appendChild(tray.input);
+    tray.onChange(() => { send.disabled = tray.isUploading(); }); // 上傳中「存紀錄」不能按
+    // 只在輸入框有焦點時攔檔案貼上；純文字貼上照舊。畫布的「貼圖成參考圖」本來就在打字時不動作。
+    ta.addEventListener('paste', ev => {
+      const files = attachFilesFromTransfer(ev.clipboardData);
+      if (!files.length) return;
+      ev.preventDefault(); tray.addFiles(files);
+    });
+    const card = body.closest('.pc-note-card');
+    if (card) bindCardFileDrop(card, body, tray);
+  }
+  // 拖檔進卡片：卡框變色＋虛線遮罩，放開才加入。用 on* 屬性（不是 addEventListener）→ 重開編輯時直接覆蓋、不累積；
+  // 卡片切回 VIEW 後附件列已不在 body 裡，handler 自己失效（不攔，交回瀏覽器/畫布原本的行為）。
+  function bindCardFileDrop(card, body, tray) {
+    let depth = 0, veil = null;
+    const live = ev => isFileDrag(ev) && body.contains(tray.listEl);
+    const clear = () => { depth = 0; card.classList.remove('is-dragover'); if (veil) { veil.remove(); veil = null; } };
+    card.ondragenter = ev => {
+      if (!live(ev)) return;
+      ev.preventDefault(); depth++;
+      if (!veil) { veil = attachDropVeilEl(); body.appendChild(veil); card.classList.add('is-dragover'); }
+    };
+    card.ondragover = ev => { if (live(ev)) { ev.preventDefault(); ev.dataTransfer.dropEffect = 'copy'; } };
+    card.ondragleave = ev => { if (live(ev) && --depth <= 0) clear(); };
+    card.ondrop = ev => {
+      if (!live(ev)) return;
+      ev.preventDefault(); ev.stopPropagation(); clear();
+      tray.addFiles(attachFilesFromTransfer(ev.dataTransfer));
+    };
+  }
+  // 在某則註記的卡上就近顯示一行提示（例：附件沒存到）。
+  function showNoteCardNotice(noteId, text) {
+    const card = noteLayer.querySelector(`.pc-note-card[data-note-id="${noteId}"]`);
+    const body = card && card.querySelector('.pc-note-card-body');
+    if (!body) return;
+    const row = body.querySelector('.pc-note-row');
+    body.insertBefore(attachNoticeEl('', text), row || null);
   }
   // note 編輯器自動長高：height 先 reset 再吃 scrollHeight，CSS max-height 封頂後交回 overflow-y 內部捲動。
   function autoGrowTextarea(ta) {
@@ -3608,6 +3990,7 @@ function initDrawLayer(target, opts = {}) {
     const pr = drawHtmlEl('div', 'pc-note-prompt-text');
     const lb = drawHtmlEl('div', 'pc-note-prompt-lbl'); lb.textContent = '我的 prompt';
     pr.appendChild(lb); pr.appendChild(document.createTextNode(c.text)); pbody.appendChild(pr);
+    if (c.attachments && c.attachments.length) pr.appendChild(attachmentViewEl(c.attachments));
     if (rep) { const slot = drawHtmlEl('div', 'pc-note-reply-slot'); slot.appendChild(replyCardInline(rep)); pbody.appendChild(slot); }
     panel.append(head, pbody); host.append(back, panel);
   }
@@ -4548,6 +4931,7 @@ function initDrawLayer(target, opts = {}) {
           ...(doc.range != null ? { range: doc.range } : {}),   // 程式碼範圍註記還原
           ...(doc.endSel != null ? { endSel: doc.endSel } : {}),
           ...(doc.hidden ? { hidden: true } : {}),                 // 眼睛鈕隱藏狀態（重訂閱後保持）
+          ...(attachmentsForDoc(doc.attachments) ? { attachments: attachmentsForDoc(doc.attachments) } : {}), // 附件（有才帶）
           ...(doc.screenId != null ? { screenId: doc.screenId } : {}) });
         changed = true;
       } else if (doc.geom) {
@@ -4951,6 +5335,7 @@ function initDrawLayer(target, opts = {}) {
       selector: n.sel || null, objId: n.objId != null ? n.objId : null,
       x: n.x, y: n.y,
       ...(n.range != null ? { range: n.range } : {}), // 程式碼範圍：{path,startLine,endLine,side,code}→ AI 拿到完整脈絡
+      ...(attachmentsForDoc(n.attachments) ? { attachments: attachmentsForDoc(n.attachments) } : {}), // 附件：AI 用 path 直接讀檔
     }));
     // 元件位移：AI/agent 讀回 {selector, dx, dy, rect} → 對照改 code/mockup（設計討論閉環）。
     const checkedMv = uncheckedUnsentMoves();
@@ -5536,6 +5921,7 @@ function initDrawLayer(target, opts = {}) {
       replyPolling = false; // 停掉 AI 方案卡輪詢
       [...moveOrigTransform.keys()].forEach(sel => { resetMoveOf(sel, querySelectorSafe(sel)); }); // 還原被拖過的真實元件 transform
       svg.remove(); toolbar.remove(); contextMenu.remove(); replyLayer.remove();
+      closeAllNoteCards(); // 先走拆卡出口（釋放附件預覽）
       noteLayer.remove(); moveLayer.remove(); closeNotePanel(); // 留言層 + 拖曳層 + 放大面板/遮罩
       recordTab.remove(); recordDrawer.remove();
       removeFeedbackBox();
@@ -5609,7 +5995,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = 'c548499';
+export const PC_VERSION = 'a1446bc';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';

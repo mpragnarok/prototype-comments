@@ -121,6 +121,60 @@ export const DRAW_STYLES = `
 .pc-note-row button.danger { background: #fff; color: var(--pc-danger-ink); border-color: var(--pc-danger-ink); }
 .pc-note-reply-slot { margin-top: 9px; }
 .pc-note-expand { margin-top: 8px; font-size: 11.5px; color: var(--pc-ink); font-weight: 700; cursor: pointer; background: none; border: none; padding: 0; text-decoration: underline; }
+/* ── 註記卡附件（只有 consumer 傳 uploadAttachment 才會出現）：迴紋針在按鈕列左邊、附件在輸入框下方 ── */
+.pc-note-card-body { position: relative; } /* 拖曳遮罩以卡片內容區為定位基準 */
+.pc-note-row .spacer { flex: 1; }
+.pc-note-row button:disabled { opacity: .45; cursor: not-allowed; }
+.pc-note-row button.pc-attach-btn { display: inline-flex; align-items: center; padding: 4px 7px; background: #fff; color: var(--pc-ink); }
+.pc-attach-btn svg { width: 14px; height: 14px; }
+.pc-attach-count { font-size: 11px; color: var(--pc-ink-3); align-self: center; }
+.pc-attach-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.pc-attach-list:empty, .pc-att-err-slot:empty { display: none; }
+.pc-att-thumb { position: relative; width: 52px; height: 52px; box-sizing: border-box; border: 1.5px solid var(--pc-ink); border-radius: 7px 5px 8px 4px; background: #fff; }
+.pc-att-thumb .img { position: absolute; inset: 2px; border-radius: 4px; overflow: hidden; }
+.pc-att-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pc-att-thumb.is-uploading .img { opacity: .55; }
+.pc-att-thumb .pc-att-bar { position: absolute; left: 5px; right: 5px; bottom: 5px; margin: 0; }
+.pc-att-x { position: absolute; top: -7px; right: -7px; width: 18px; height: 18px; border-radius: 50%; box-sizing: border-box;
+  border: 1.5px solid var(--pc-ink); background: #fff; color: var(--pc-ink); font-size: 10px; line-height: 1;
+  display: grid; place-items: center; cursor: pointer; padding: 0; font-family: inherit; }
+.pc-att-x:hover { background: var(--pc-ink-strong); color: #fff; }
+.pc-att-file { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; flex: 1 1 100%; box-sizing: border-box;
+  border: 1.5px solid var(--pc-ink); border-radius: 7px 5px 8px 4px; background: #fff; padding: 5px 24px 5px 7px; }
+.pc-att-file .ico { flex: none; width: 22px; height: 26px; box-sizing: border-box; border: 1.5px solid var(--pc-ink-2); border-radius: 2px 6px 2px 2px;
+  font-size: 7.5px; font-weight: 800; color: var(--pc-ink-2); display: grid; place-items: end center; padding-bottom: 2px; letter-spacing: .02em; }
+.pc-att-file .meta { min-width: 0; flex: 1; line-height: 1.3; }
+.pc-att-file .nm { font-size: 11.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.pc-att-file .sz { font-size: 10.5px; color: var(--pc-ink-3); }
+.pc-att-file .pc-att-x { top: 50%; right: 4px; transform: translateY(-50%); }
+.pc-att-file.is-uploading .sz { color: var(--pc-accent); }
+.pc-att-file.is-failed { border-color: var(--pc-danger-ink); }
+.pc-att-file.is-failed .sz { color: var(--pc-danger-ink); font-weight: 600; }
+.pc-att-file .retry { border: none; background: none; padding: 0; font: inherit; font-size: 10.5px; color: var(--pc-danger-ink); text-decoration: underline; cursor: pointer; font-weight: 700; }
+.pc-att-bar { height: 3px; background: var(--pc-border-3); border-radius: 2px; margin-top: 3px; overflow: hidden; }
+.pc-att-bar i { display: block; height: 100%; width: 40%; background: var(--pc-accent); animation: pc-att-indet 1.1s ease-in-out infinite; }
+@keyframes pc-att-indet { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+/* 只有剛加進來的那一個淡入；之後重畫（別的附件傳完）不再重播，免得整排閃一下 */
+.pc-attach-list .is-new { animation: pc-att-in 180ms cubic-bezier(.16,1,.3,1); }
+@keyframes pc-att-in { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
+.pc-note-card.is-dragover { border-color: var(--pc-accent); }
+.pc-drop-veil { position: absolute; inset: 4px; border: 2px dashed var(--pc-accent); border-radius: 9px 7px 10px 6px; z-index: 2;
+  background: #f1eff8; display: grid; place-items: center; line-height: 1.35; text-align: center; pointer-events: none;
+  color: var(--pc-accent-strong); font-weight: 700; font-size: 12.5px; padding: 8px; }
+.pc-drop-veil small { display: block; font-weight: 400; color: var(--pc-ink-2); font-size: 11px; }
+.pc-att-err { display: flex; gap: 6px; align-items: flex-start; margin-top: 7px; padding: 6px 8px; font-size: 11.5px; line-height: 1.45;
+  color: var(--pc-danger-ink); background: rgba(var(--pc-danger-rgb), .06); border: 1.5px solid var(--pc-danger-ink); border-radius: 7px 5px 8px 4px; }
+.pc-att-err b { font-weight: 700; }
+.pc-att-err button { margin-left: auto; flex: none; border: none; background: none; color: var(--pc-danger-ink); font: inherit; font-weight: 700; cursor: pointer; padding: 0; }
+.pc-note-prompt-att { white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--pc-border); }
+.pc-note-prompt-att .pc-att-thumb { width: 46px; height: 46px; }
+.pc-note-prompt-att .pc-att-thumb.is-link { cursor: zoom-in; }
+.pc-note-prompt-att .pc-att-file { padding-right: 7px; }
+.pc-note-prompt-att .pc-att-file.is-link { cursor: pointer; }
+.pc-att-thumb .img.is-empty { background: var(--pc-border-3); } /* 網址不安全／讀不到 → 灰底占位 */
+@media (prefers-reduced-motion: reduce) {
+  .pc-attach-list .is-new, .pc-att-bar i { animation: none; }
+}
 /* 兩段式：放大成置中大面板（複雜圖文好讀） */
 .pc-note-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 2147483646; }
 .pc-note-panel { position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); z-index: 2147483647;
