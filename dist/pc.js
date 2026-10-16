@@ -1,4 +1,4 @@
-/* pc.js 0264f39 2026-10-16T08:51:40Z */
+/* pc.js 0ba4ea8 2026-10-16T16:08:24Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -2160,6 +2160,12 @@ const DRAW_STYLES = `
   background: var(--pc-surface-dark); padding: 6px; border-radius: 12px;
   box-shadow: 0 6px 24px rgba(0,0,0,.35); font-family: system-ui, -apple-system, sans-serif;
 }
+/* 標注紀錄抽屜（300px＋1px 邊框，貼右緣）打開時，工具列改在抽屜左邊剩下的區域置中。
+   不這樣做，視窗窄於約 1500px 時工具列右段（移動、收合鈕）會被抽屜蓋住點不到。
+   用 % 不用 vw：fixed 元素的 % 不含捲軸寬，跟抽屜的 right:0 對齊。窄於 640px 抽屜佔掉大半畫面，維持全寬置中。 */
+@media (min-width: 640px) {
+  .pc-draw-toolbar.pc-draw-beside-record { left: calc((100% - 301px) / 2); max-width: calc(100% - 301px - 16px); }
+}
 .pc-draw-tool {
   position: relative;
   width: 34px; height: 34px; border: none; border-radius: 8px; cursor: pointer;
@@ -4194,6 +4200,7 @@ function initDrawLayer(target, opts = {}) {
   function renderRecordPanel() {
     recordTab.classList.toggle('show', !state.recordOpen);
     recordDrawer.classList.toggle('open', state.recordOpen);
+    toolbar.classList.toggle('pc-draw-beside-record', state.recordOpen); // 工具列讓出抽屜的位置（見 styles.js）
     // 佇列＝畫的標注 + 在方案卡上做的「決定」，兩者都可勾選/送出/標已送。
     // 決策 A：清單也依當前 screen 過濾（與畫布一致）；決策卡為全域 AI 產物，不分頁。
     const annRows = annotationRows(state.objects.filter(onCurrentScreen), state.sentSigs);
@@ -5996,7 +6003,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = '0264f39';
+export const PC_VERSION = '0ba4ea8';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';

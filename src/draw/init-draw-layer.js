@@ -798,6 +798,7 @@ export function initDrawLayer(target, opts = {}) {
   function renderRecordPanel() {
     recordTab.classList.toggle('show', !state.recordOpen);
     recordDrawer.classList.toggle('open', state.recordOpen);
+    toolbar.classList.toggle('pc-draw-beside-record', state.recordOpen); // 工具列讓出抽屜的位置（見 styles.js）
     // 佇列＝畫的標注 + 在方案卡上做的「決定」，兩者都可勾選/送出/標已送。
     // 決策 A：清單也依當前 screen 過濾（與畫布一致）；決策卡為全域 AI 產物，不分頁。
     const annRows = annotationRows(state.objects.filter(onCurrentScreen), state.sentSigs);

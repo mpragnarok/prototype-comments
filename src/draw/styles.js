@@ -193,6 +193,12 @@ export const DRAW_STYLES = `
   background: var(--pc-surface-dark); padding: 6px; border-radius: 12px;
   box-shadow: 0 6px 24px rgba(0,0,0,.35); font-family: system-ui, -apple-system, sans-serif;
 }
+/* 標注紀錄抽屜（300px＋1px 邊框，貼右緣）打開時，工具列改在抽屜左邊剩下的區域置中。
+   不這樣做，視窗窄於約 1500px 時工具列右段（移動、收合鈕）會被抽屜蓋住點不到。
+   用 % 不用 vw：fixed 元素的 % 不含捲軸寬，跟抽屜的 right:0 對齊。窄於 640px 抽屜佔掉大半畫面，維持全寬置中。 */
+@media (min-width: 640px) {
+  .pc-draw-toolbar.pc-draw-beside-record { left: calc((100% - 301px) / 2); max-width: calc(100% - 301px - 16px); }
+}
 .pc-draw-tool {
   position: relative;
   width: 34px; height: 34px; border: none; border-radius: 8px; cursor: pointer;

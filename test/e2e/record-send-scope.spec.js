@@ -261,6 +261,31 @@ const clickEye = (page, id) => page.click(`.pc-draw-rec-row[data-id="${id}"] .pc
     await page4.close();
   });
 
+  // ── 5c. 視窗不夠寬時，打開標注紀錄不能蓋住工具列右段 ───────────────────────────
+  await test('967px 寬打開標注紀錄：工具列整條在抽屜左邊，關掉抽屜後回到置中', async () => {
+    const page5 = await browser.newPage({ viewport: { width: 967, height: 900 } });
+    await page5.goto(`http://localhost:${PORT}/test/e2e/draw-layer-harness.html`);
+    await page5.waitForFunction(() => window.__drawTest && window.__drawTest.ready);
+    await page5.evaluate(() => { window.__api = window.__drawTest.init({ mode: 'draw' }); });
+    const rect = sel => page5.evaluate(s => {
+      const b = document.querySelector(s).getBoundingClientRect();
+      return { left: Math.round(b.left), right: Math.round(b.right) };
+    }, sel);
+    await page5.evaluate(() => window.__api.toggleRecordPanel());
+    await page5.waitForTimeout(400); // 抽屜滑入動畫 .22s
+    const bar = await rect('#pc-draw-toolbar');
+    const drawer = await rect('#pc-draw-rec-drawer');
+    console.log('     抽屜打開:', JSON.stringify({ bar, drawer }));
+    assert(bar.right <= drawer.left, `工具列右緣 ${bar.right} 應在抽屜左緣 ${drawer.left} 左邊`);
+    assert(bar.left >= 0, `工具列左緣 ${bar.left} 不可跑出視窗`);
+    await page5.evaluate(() => window.__api.toggleRecordPanel());
+    await page5.waitForTimeout(400);
+    const closed = await rect('#pc-draw-toolbar');
+    const center = (closed.left + closed.right) / 2;
+    assert(Math.abs(center - 967 / 2) <= 2, `抽屜關掉後工具列應回到置中，中心 ${center}`);
+    await page5.close();
+  });
+
   // ── 附帶：註記的隱藏狀態要落盤（noteToDoc），重新訂閱後仍隱藏 ────────────────────
   await test('註記隱藏落盤：寫進 store 的 doc 帶 hidden，重新訂閱後仍是隱藏', async () => {
     const page2 = await browser.newPage({ viewport: { width: 800, height: 600 } });
