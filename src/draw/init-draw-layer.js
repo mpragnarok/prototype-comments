@@ -942,7 +942,8 @@ export function initDrawLayer(target, opts = {}) {
     if (_previewUrl) {
       const img = drawHtmlEl('img', 'pc-draw-rec-preview');
       img.alt = '送給 AI 的畫面預覽';
-      img.style.cssText = 'display:block;width:100%;box-sizing:border-box;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;';
+      // 整頁截圖可能高上萬 px：限高只露頁首，否則縮圖會把下面的標注列全擠出清單。
+      img.style.cssText = 'display:block;width:100%;box-sizing:border-box;min-height:48px;max-height:160px;object-fit:cover;object-position:top;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;';
       img.src = _previewUrl;
       return img;
     }

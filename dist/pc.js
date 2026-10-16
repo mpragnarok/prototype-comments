@@ -1,4 +1,4 @@
-/* pc.js a1446bc 2026-10-06T13:35:06Z */
+/* pc.js 0264f39 2026-10-16T08:51:40Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -4338,7 +4338,8 @@ function initDrawLayer(target, opts = {}) {
     if (_previewUrl) {
       const img = drawHtmlEl('img', 'pc-draw-rec-preview');
       img.alt = '送給 AI 的畫面預覽';
-      img.style.cssText = 'display:block;width:100%;box-sizing:border-box;min-height:48px;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;';
+      // 整頁截圖可能高上萬 px：限高只露頁首，否則縮圖會把下面的標注列全擠出清單。
+      img.style.cssText = 'display:block;width:100%;box-sizing:border-box;min-height:48px;max-height:160px;object-fit:cover;object-position:top;border:1px solid #e1e4e8;border-radius:8px;margin:0 0 10px;background:#fafbfc;';
       img.src = _previewUrl;
       return img;
     }
@@ -5995,7 +5996,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = 'a1446bc';
+export const PC_VERSION = '0264f39';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';

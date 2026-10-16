@@ -227,6 +227,40 @@ const clickEye = (page, id) => page.click(`.pc-draw-rec-row[data-id="${id}"] .pc
     await page3.close();
   });
 
+  // ── 5b. 長頁面的整頁截圖不能把標注列擠出清單 ─────────────────────────────────────
+  await test('長頁面截圖預覽限高，第一筆標注列仍在清單可視範圍內', async () => {
+    const page4 = await browser.newPage({ viewport: { width: 800, height: 600 } });
+    const errs = [];
+    page4.on('pageerror', e => errs.push('pageerror: ' + e.message));
+    await page4.goto(`http://localhost:${PORT}/test/e2e/draw-layer-harness.html`);
+    await page4.waitForFunction(() => window.__drawTest && window.__drawTest.ready);
+    await page4.evaluate(() => {
+      const tall = document.createElement('div');
+      tall.style.cssText = 'height:12000px;background:linear-gradient(#fff,#ddd);';
+      document.body.appendChild(tall);
+      window.__api = window.__drawTest.init({ mode: 'draw' });
+      window.__api.setTool('rect');
+    });
+    await dragDraw(page4, 320, 200, 400, 260);
+    await page4.evaluate(() => window.__api.toggleRecordPanel());
+    await page4.waitForFunction(() => {
+      const img = document.querySelector('img.pc-draw-rec-preview');
+      return !!(img && img.complete && img.naturalHeight > 0);
+    }, null, { timeout: 20000 });
+    const m = await page4.evaluate(() => {
+      const img = document.querySelector('img.pc-draw-rec-preview');
+      const list = document.querySelector('.pc-draw-rec-list').getBoundingClientRect();
+      const row = document.querySelector('.pc-draw-rec-row').getBoundingClientRect();
+      return { natW: img.naturalWidth, natH: img.naturalHeight, h: img.getBoundingClientRect().height, rowTop: row.top, listBottom: list.bottom };
+    });
+    console.log('     長頁面預覽:', JSON.stringify(m));
+    assert(m.natH > m.natW * 3, `前提：截圖要是長圖，實際 ${m.natW}x${m.natH}`);
+    assert(m.h <= 160, `預覽高度應 ≤160px，實際 ${m.h}`);
+    assert(m.rowTop < m.listBottom, `第一筆標注列應在清單可視範圍內（row.top ${m.rowTop} < list.bottom ${m.listBottom}）`);
+    assert(errs.length === 0, '不可有錯誤：' + errs.join(' / '));
+    await page4.close();
+  });
+
   // ── 附帶：註記的隱藏狀態要落盤（noteToDoc），重新訂閱後仍隱藏 ────────────────────
   await test('註記隱藏落盤：寫進 store 的 doc 帶 hidden，重新訂閱後仍是隱藏', async () => {
     const page2 = await browser.newPage({ viewport: { width: 800, height: 600 } });
