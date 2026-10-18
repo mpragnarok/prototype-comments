@@ -707,6 +707,8 @@ async function dragDraw(page, x1, y1, x2, y2) {
     assert(r.ariaLabel === '自訂顏色', `aria-label 應為「自訂顏色」，實際 ${r.ariaLabel}`);
     assert(r.total === 9 && r.lastIsCustom, `應為第 9 顆（8 預設 + 自訂），實際 total=${r.total} lastIsCustom=${r.lastIsCustom}`);
     assert(r.hasGradient, '自訂 swatch 應有彩虹漸層背景（邀請挑色）');
+    // 收回色盤：開著的 popover 會蓋住畫布下半，後面拖選取把手的測試會點到色票上
+    await page.click('.pc-draw-tool[data-action="color-menu"]');
   });
 
   // ── Bug 1：繪圖工具啟用時 picker 只設預設、不回頭改選取；切繪圖工具會取消選取 ──

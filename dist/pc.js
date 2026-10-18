@@ -1,4 +1,4 @@
-/* pc.js 0ba4ea8 2026-10-16T16:08:24Z */
+/* pc.js dd1331b 2026-10-18T04:59:41Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -2151,12 +2151,34 @@ const DRAW_STYLES = `
   border-bottom: 1px solid #eef0f2; font-weight: 700; color: var(--pc-accent-strong); }
 .pc-note-panel-head button { border: none; background: transparent; font-size: 18px; color: var(--pc-muted); cursor: pointer; }
 .pc-note-panel-body { padding: 16px; overflow-y: auto; }
+/* ── 宿主頁面的裸 button 規則不能漏進繪圖介面 ──────────────────────────────────────
+   設計稿常寫 button{padding:9px 14px;min-height:40px;…}、button:active{transform:scale(.97)}。
+   各按鈕 class 沒設的屬性會吃到它：工具鈕變 34×40、裡面 20px 的圖示被左右內距壓成 6px 寬。
+   做法分兩層，都用 revert 退回瀏覽器預設，不另訂新視覺：
+   1. 一般狀態：特異度 (0,0,2)，贏過宿主的 button (0,0,1)，輸給本檔每條 class 規則 (0,1,0)。
+   2. hover/active：宿主的 button:hover (0,1,1) 本來就贏過 class 規則，所以這層要 (0,1,2)；
+      為了不蓋掉本檔按鈕自己的樣式，下面每條按鈕 class 規則都同時寫成 .x, .x:is(:hover, :active)，
+      把 hover/active 時的特異度拉到 (0,2,0)。新增按鈕 class 時要照這個寫法。 */
+html :where(.pc-draw-toolbar, .pc-draw-context, .pc-draw-rec-drawer, .pc-draw-help-modal, .pc-draw-reply-layer) button,
+html button:where(.pc-draw-rec-tab, .pc-draw-fab, .pc-draw-feedback-box) {
+  padding: revert; margin: revert; width: revert; height: revert; min-width: revert; min-height: revert;
+  border: revert; border-radius: revert; background: revert; color: revert; font: revert;
+  letter-spacing: revert; text-transform: revert; text-shadow: revert; box-shadow: revert;
+  transform: revert; transition: revert; opacity: revert; filter: revert; cursor: revert; appearance: revert;
+}
+html :where(.pc-draw-toolbar, .pc-draw-context, .pc-draw-rec-drawer, .pc-draw-help-modal, .pc-draw-reply-layer) button:is(:hover, :active),
+html button:where(.pc-draw-rec-tab, .pc-draw-fab, .pc-draw-feedback-box):is(:hover, :active) {
+  background: revert; color: revert; border-color: revert; box-shadow: revert; transform: revert; opacity: revert; filter: revert;
+}
 .pc-draw-selection rect[data-handle] { cursor: nwse-resize; }
 .pc-draw-toolbar {
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
   z-index: 2147483600; display: flex; align-items: center; justify-content: center; gap: 4px;
-  /* 窄視窗（工具鈕多於一排放不下）→ 換行成多排置中，不溢出視窗（否則最右側鈕跑到畫面外點不到）。 */
-  flex-wrap: wrap; max-width: calc(100vw - 16px);
+  /* 窄視窗（工具鈕多於一排放不下）→ 換行成多排置中，不溢出視窗（否則最右側鈕跑到畫面外點不到）。
+     width:max-content 不能拿掉：left:50% 的 fixed 元素自動寬度最多只到「視窗寬－left」＝半個視窗，
+     沒有它，視窗窄於工具列兩倍寬（約 1800px）就會被擠成兩排，最後一排常只剩收合鈕。
+     border-box：max-width 要把 padding 算進去，否則換排時實際寬度多 12px，抽屜開時會貼到抽屜邊。 */
+  box-sizing: border-box; width: max-content; flex-wrap: wrap; max-width: calc(100vw - 16px);
   background: var(--pc-surface-dark); padding: 6px; border-radius: 12px;
   box-shadow: 0 6px 24px rgba(0,0,0,.35); font-family: system-ui, -apple-system, sans-serif;
 }
@@ -2166,7 +2188,7 @@ const DRAW_STYLES = `
 @media (min-width: 640px) {
   .pc-draw-toolbar.pc-draw-beside-record { left: calc((100% - 301px) / 2); max-width: calc(100% - 301px - 16px); }
 }
-.pc-draw-tool {
+.pc-draw-tool, .pc-draw-tool:is(:hover, :active) {
   position: relative;
   width: 34px; height: 34px; border: none; border-radius: 8px; cursor: pointer;
   background: transparent; color: var(--pc-on-dark); font-size: 16px; line-height: 1;
@@ -2184,7 +2206,7 @@ const DRAW_STYLES = `
   font: 9px/1 system-ui, -apple-system, sans-serif; color: rgba(229,231,235,.55);
 }
 .pc-draw-tool.active .pc-draw-kbd { color: rgba(255,255,255,.7); }
-.pc-draw-help-btn { font-weight: 700; font-size: 17px; }
+.pc-draw-help-btn, .pc-draw-help-btn:is(:hover, :active) { font-weight: 700; font-size: 17px; }
 /* 快捷鍵／使用說明 modal */
 .pc-draw-help-modal {
   position: fixed; inset: 0; z-index: 2147483602; display: flex;
@@ -2200,7 +2222,7 @@ const DRAW_STYLES = `
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 14px; border-bottom: 1px solid var(--pc-surface-dark-hover); font-weight: 600;
 }
-.pc-draw-help-x { background: transparent; border: none; color: #aaa; font-size: 15px; cursor: pointer; line-height: 1; }
+.pc-draw-help-x, .pc-draw-help-x:is(:hover, :active) { background: transparent; border: none; color: #aaa; font-size: 15px; cursor: pointer; line-height: 1; }
 .pc-draw-help-body { padding: 12px 14px; }
 .pc-draw-help-sec-t { font-size: 12px; color: var(--pc-on-dark-muted); margin: 14px 0 6px; }
 .pc-draw-help-sec-t:first-child { margin-top: 0; }
@@ -2217,7 +2239,7 @@ const DRAW_STYLES = `
 .pc-draw-help-link:hover { text-decoration: underline; }
 /* 收合 FAB（off 模式時取代整條工具列的右下小圓鈕） */
 .pc-draw-collapsed { display: none !important; }
-.pc-draw-fab {
+.pc-draw-fab, .pc-draw-fab:is(:hover, :active) {
   position: fixed; right: 20px; bottom: 20px; z-index: 2147483600;
   width: 48px; height: 48px; border-radius: 50%; border: none; cursor: pointer;
   background: var(--pc-surface-dark); color: var(--pc-on-dark); box-shadow: 0 6px 24px rgba(0,0,0,.35);
@@ -2228,7 +2250,7 @@ const DRAW_STYLES = `
 .pc-draw-fab svg { width: 22px; height: 22px; }
 /* 回饋匣（opt-in feedbackBox）：右下常駐單鍵，打包標註＋決策一次送出。
    放 bottom:80px 讓開它時（draw/note 模式）避開底部置中工具列，收合成 FAB 時也不疊到 FAB（right/bottom:20）。 */
-.pc-draw-feedback-box {
+.pc-draw-feedback-box, .pc-draw-feedback-box:is(:hover, :active) {
   position: fixed; right: 20px; bottom: 80px; z-index: 2147483601;
   border: none; border-radius: 999px; cursor: pointer;
   padding: 11px 20px; font-size: 14px; font-weight: 700; line-height: 1;
@@ -2251,7 +2273,7 @@ const DRAW_STYLES = `
 }
 .pc-draw-popover-width { width: auto; flex-wrap: nowrap; }
 .pc-draw-menu.open .pc-draw-popover { display: flex; }
-.pc-draw-swatch {
+.pc-draw-swatch, .pc-draw-swatch:is(:hover, :active) {
   width: 22px; height: 22px; border-radius: 50%; padding: 0; cursor: pointer;
   border: 2px solid transparent;
 }
@@ -2270,14 +2292,14 @@ const DRAW_STYLES = `
   position: absolute; inset: 0; width: 100%; height: 100%;
   opacity: 0; padding: 0; border: none; cursor: pointer;
 }
-.pc-draw-width {
+.pc-draw-width, .pc-draw-width:is(:hover, :active) {
   width: 30px; height: 30px; border: none; border-radius: 8px; cursor: pointer;
   background: transparent; display: flex; align-items: center; justify-content: center;
 }
 .pc-draw-width:hover { background: var(--pc-surface-dark-hover); }
 .pc-draw-width.active { background: var(--pc-accent); }
-.pc-draw-disabled { opacity: .35; cursor: not-allowed; }
-.pc-draw-eyedropper { color: var(--pc-on-dark); }
+.pc-draw-disabled, .pc-draw-disabled:is(:hover, :active) { opacity: .35; cursor: not-allowed; }
+.pc-draw-eyedropper, .pc-draw-eyedropper:is(:hover, :active) { color: var(--pc-on-dark); }
 /* 右鍵 context menu */
 .pc-draw-context {
   position: fixed; z-index: 2147483601; display: none; flex-direction: column;
@@ -2285,7 +2307,7 @@ const DRAW_STYLES = `
   box-shadow: 0 6px 24px rgba(0,0,0,.4); font-family: system-ui, -apple-system, sans-serif;
 }
 .pc-draw-context.open { display: flex; }
-.pc-draw-context-item {
+.pc-draw-context-item, .pc-draw-context-item:is(:hover, :active) {
   display: flex; align-items: center; gap: 8px; width: 100%;
   padding: 6px 8px; border: none; border-radius: 6px; cursor: pointer;
   background: transparent; color: var(--pc-on-dark); font-size: 13px; text-align: left;
@@ -2301,7 +2323,7 @@ const DRAW_STYLES = `
 /* ── P6 側邊「標注紀錄」面板（右緣 tab + 抽屜，沿用 spec-overlay 互動）──────────────
    position:fixed + 高 z-index；pointer-events 只在面板本身（tab/drawer），不擋畫布。
    預設 drawer 關閉（off by default）→ comment-only/一般使用不被打擾，靠 tab 才打開。 */
-.pc-draw-rec-tab {
+.pc-draw-rec-tab, .pc-draw-rec-tab:is(:hover, :active) {
   position: fixed; top: 62%; right: 0; transform: translateY(-50%); z-index: 2147483603;
   display: none; border: none; cursor: pointer; background: var(--pc-accent); color: #fff;
   padding: 14px 7px; border-radius: 10px 0 0 10px; box-shadow: -2px 0 12px rgba(0,0,0,.2);
@@ -2322,7 +2344,7 @@ const DRAW_STYLES = `
 .pc-draw-rec-hd-title { color: var(--pc-accent); font-weight: 700; font-size: 13px; }
 .pc-draw-rec-count { background: rgba(var(--pc-accent-rgb), .12); color: var(--pc-accent-strong); border-radius: 9px;
   font-size: 10px; padding: 1px 7px; line-height: 16px; }
-.pc-draw-rec-close { margin-left: auto; border: none; background: none; cursor: pointer;
+.pc-draw-rec-close, .pc-draw-rec-close:is(:hover, :active) { margin-left: auto; border: none; background: none; cursor: pointer;
   color: var(--pc-muted); font-size: 18px; line-height: 1; padding: 2px 4px; }
 .pc-draw-rec-close:hover { color: var(--pc-ink-2); }
 .pc-draw-rec-list { padding: 10px; overflow-y: auto; flex: 1; background: var(--pc-surface-muted); }
@@ -2352,13 +2374,13 @@ const DRAW_STYLES = `
   background: #fff; border: 1.5px solid var(--pc-accent); border-radius: 10px; padding: 10px 12px;
   box-shadow: 0 6px 24px rgba(var(--pc-accent-rgb), .22); font: 13px/1.5 system-ui, -apple-system, sans-serif; color: var(--pc-slate); }
 .pc-draw-reply-head { font-size: 11px; font-weight: 700; color: var(--pc-accent-strong); margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; }
-.pc-draw-reply-close { border: none; background: transparent; color: var(--pc-muted); font-size: 13px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.pc-draw-reply-close, .pc-draw-reply-close:is(:hover, :active) { border: none; background: transparent; color: var(--pc-muted); font-size: 13px; line-height: 1; cursor: pointer; padding: 0 2px; }
 .pc-draw-reply-close:hover { color: var(--pc-ink-2); }
-.pc-draw-rec-remove { flex: none; border: none; background: transparent; color: #b0bcc8; font-size: 12px; line-height: 1; cursor: pointer; padding: 2px 4px; }
+.pc-draw-rec-remove, .pc-draw-rec-remove:is(:hover, :active) { flex: none; border: none; background: transparent; color: #b0bcc8; font-size: 12px; line-height: 1; cursor: pointer; padding: 2px 4px; }
 .pc-draw-rec-remove:hover { color: var(--pc-danger-hover); }
 /* 篩選列（全部／待送／已送／有回覆）：只改看得到哪幾列，不改送出範圍。 */
 .pc-draw-rec-filters { display: flex; gap: 5px; padding: 8px 10px 0; background: var(--pc-surface-muted); }
-.pc-draw-rec-filter { flex: none; cursor: pointer; font: 600 10.5px/1 inherit; padding: 4px 9px; border-radius: 999px;
+.pc-draw-rec-filter, .pc-draw-rec-filter:is(:hover, :active) { flex: none; cursor: pointer; font: 600 10.5px/1 inherit; padding: 4px 9px; border-radius: 999px;
   border: 1px solid var(--pc-border-3); background: #fff; color: var(--pc-ink-2); }
 .pc-draw-rec-filter:hover { border-color: var(--pc-accent); color: var(--pc-accent-strong); }
 .pc-draw-rec-filter.is-on { background: var(--pc-accent); border-color: var(--pc-accent); color: #fff; }
@@ -2366,7 +2388,7 @@ const DRAW_STYLES = `
 .pc-draw-rec-row.is-sent-row { background: var(--pc-surface-muted); }
 .pc-draw-rec-row.is-hidden-row { opacity: .58; }
 /* 眼睛鈕：切換這一筆在畫布上顯示/隱藏（與送出勾選框是兩件事）。 */
-.pc-draw-rec-eye { flex: none; border: none; background: transparent; cursor: pointer; font-size: 13px; line-height: 1;
+.pc-draw-rec-eye, .pc-draw-rec-eye:is(:hover, :active) { flex: none; border: none; background: transparent; cursor: pointer; font-size: 13px; line-height: 1;
   padding: 2px 4px; border-radius: 5px; opacity: .85; }
 .pc-draw-rec-eye:hover { background: rgba(var(--pc-accent-rgb), .12); opacity: 1; }
 .pc-draw-rec-eye.is-off { opacity: .35; text-decoration: line-through; }
@@ -2405,7 +2427,7 @@ const DRAW_STYLES = `
 .pc-draw-rec-empty { color: var(--pc-muted); font-size: 12px; text-align: center; padding: 28px 12px; line-height: 1.6; }
 /* ── 抽屜 footer：「送給 AI（N）」主要送出按鈕（teal 主色）── */
 .pc-draw-rec-footer { padding: 10px 14px; border-top: 1px solid var(--pc-border-3); background: #fff; }
-.pc-draw-rec-send-btn {
+.pc-draw-rec-send-btn, .pc-draw-rec-send-btn:is(:hover, :active) {
   width: 100%; padding: 8px; border: none; border-radius: 7px; cursor: pointer;
   background: var(--pc-accent); color: #fff; font: 600 13px/1.4 system-ui, -apple-system, sans-serif;
   transition: background .12s, opacity .12s;
@@ -6003,7 +6025,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = '0ba4ea8';
+export const PC_VERSION = 'dd1331b';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';
