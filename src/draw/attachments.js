@@ -99,6 +99,29 @@ function attachThumbEl(name, size, src) {
   el.appendChild(box);
   return el;
 }
+// 輸入中縮圖的大圖浮層：點背景、按 ✕ 或 Esc 關閉。掛在 document.body（卡片有 transform，fixed 會被它困住）；
+// Esc 用 window capture 攔下，避免同時觸發輸入框的 Esc（取消整張卡）。回傳 close()。
+function attachOpenLightbox(src, name) {
+  const prevFocus = document.activeElement;
+  const box = drawHtmlEl('div', 'pc-att-lightbox'); box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-label', `放大檢視 ${name}`);
+  const img = document.createElement('img'); img.src = src; img.alt = name;
+  const x = drawHtmlEl('button', 'pc-att-lightbox-x'); x.type = 'button'; x.textContent = '✕'; x.setAttribute('aria-label', '關閉大圖');
+  box.append(img, x);
+  const onKey = ev => {
+    if (ev.key !== 'Escape') return;
+    ev.preventDefault(); ev.stopImmediatePropagation(); close();
+  };
+  function close() {
+    window.removeEventListener('keydown', onKey, true);
+    box.remove();
+    if (prevFocus && prevFocus.focus && prevFocus.isConnected) prevFocus.focus();
+  }
+  box.onclick = ev => { if (ev.target !== img) close(); }; // 點圖本身不關；點背景或 ✕ 才關
+  window.addEventListener('keydown', onKey, true);
+  document.body.appendChild(box);
+  x.focus();
+  return close;
+}
 // 檔案條（非圖片、上傳中或失敗的圖片）：副檔名＋檔名＋狀態文字。
 function attachFileEl(name, statusText) {
   const el = drawHtmlEl('div', 'pc-att-file');
@@ -130,7 +153,7 @@ function attachMakeLink(el, href) {
 // 拖曳中的虛線遮罩。
 export function attachDropVeilEl() {
   const veil = drawHtmlEl('div', 'pc-drop-veil');
-  const inner = drawHtmlEl('div'); inner.textContent = '放開就加入附件';
+  const inner = drawHtmlEl('div'); inner.textContent = '放開就貼上';
   const small = drawHtmlEl('small'); small.textContent = `圖片或檔案，單檔 ${attachLimitLabel()} 以內`;
   inner.appendChild(small); veil.appendChild(inner);
   return veil;
@@ -160,7 +183,7 @@ export function createAttachmentTray({ upload, initial = [] }) {
     count: () => t.items.length,
     onChange: fn => { t.listeners.push(fn); },
     // 卡片拆掉時呼叫：釋放所有圖片預覽的 object URL。之後才回來的上傳結果一律丟掉。
-    dispose: () => { t.items.forEach(attachRevokePreview); t.items = []; t.listeners = []; },
+    dispose: () => { if (t.closeLightbox) t.closeLightbox(); t.items.forEach(attachRevokePreview); t.items = []; t.listeners = []; },
   };
 }
 // 加檔：逐一檢查上限，超過的就近顯示紅框，不加入；其餘加入並開始上傳。
@@ -225,7 +248,9 @@ function trayItemEl(t, item) {
   const isImg = isImageAttachment(item.att || item.file);
   let el;
   if (isImg && item.status !== 'failed') {
-    el = attachThumbEl(name, size, item.preview || attachHref(item.att.url));
+    const src = item.preview || attachHref(item.att.url);
+    el = attachThumbEl(name, size, src);
+    if (src) trayMakeZoomable(t, el, src, name);
     if (item.status === 'uploading') { el.classList.add('is-uploading'); el.appendChild(attachBarEl()); }
   } else el = trayFileEl(t, item, name, size);
   const x = drawHtmlEl('button', 'pc-att-x'); x.type = 'button'; x.textContent = '✕';
@@ -234,6 +259,13 @@ function trayItemEl(t, item) {
   el.appendChild(x);
   if (!item.shown) { item.shown = true; el.classList.add('is-new'); } // 只有第一次畫出來時淡入
   return el;
+}
+// 輸入中的縮圖：點一下（或 Enter／空白鍵）放大看。× 自己 stopPropagation，不會被這裡吃掉。
+function trayMakeZoomable(t, el, src, name) {
+  el.classList.add('is-zoom'); el.tabIndex = 0; el.setAttribute('role', 'button'); el.setAttribute('aria-label', `放大檢視 ${name}`);
+  const open = () => { if (t.closeLightbox) t.closeLightbox(); t.closeLightbox = attachOpenLightbox(src, name); };
+  el.onclick = open;
+  el.onkeydown = ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); } };
 }
 function trayFileEl(t, item, name, size) {
   if (item.status === 'done') return attachFileEl(name, formatAttachBytes(size));

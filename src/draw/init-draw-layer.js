@@ -449,6 +449,7 @@ export function initDrawLayer(target, opts = {}) {
     const card = noteLayer.querySelector('.pc-note-card');
     if (!card) { unbindNoteOutsideClose(); return; }
     if (card.contains(e.target)) return; // 點在卡片本身 → 交回卡內各自 handler，不處理
+    if (e.target.closest && e.target.closest('.pc-att-lightbox')) return; // 縮圖大圖浮層（掛在 body）不算點外面，不然看圖會把卡存掉關掉
     if (activeNoteEditor) {
       const { ta, c, isEdit, tray } = activeNoteEditor;
       const text = ta.value.trim();
@@ -527,9 +528,14 @@ export function initDrawLayer(target, opts = {}) {
     if (c.id) { const cur = body.closest('.pc-note-card'); if (cur) dropNoteCard(cur); openNoteCard(c); }
     else closeNoteCard();
   }
-  // 把附件列掛上卡片：迴紋針＋計數在按鈕列左邊、附件與錯誤在輸入框下方；⌘V 貼檔、拖檔進卡片都進附件。
+  // 把附件列掛上卡片：迴紋針＋計數縮小放在卡片標題列右上角（✕ 左邊）、附件與錯誤在輸入框下方；⌘V 貼檔、拖檔進卡片都進附件。
   function mountAttachTray(body, ta, row, send, tray) {
-    row.prepend(tray.clip, tray.countEl, drawHtmlEl('span', 'spacer'));
+    const head = body.closest('.pc-note-card') && body.closest('.pc-note-card').querySelector('.pc-note-card-head');
+    if (head) {
+      const old = head.querySelector('.pc-attach-corner'); if (old) old.remove();
+      const corner = drawHtmlEl('span', 'pc-attach-corner'); corner.append(tray.countEl, tray.clip);
+      head.insertBefore(corner, head.lastElementChild); // lastElementChild＝✕ 關閉鈕
+    } else row.prepend(tray.clip, tray.countEl, drawHtmlEl('span', 'spacer'));
     body.insertBefore(tray.listEl, row); body.insertBefore(tray.errEl, row); body.appendChild(tray.input);
     tray.onChange(() => { send.disabled = tray.isUploading(); }); // 上傳中「存紀錄」不能按
     // 只在輸入框有焦點時攔檔案貼上；純文字貼上照舊。畫布的「貼圖成參考圖」本來就在打字時不動作。
