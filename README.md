@@ -230,8 +230,9 @@ npx serve .
 
 ```bash
 # 從 prototype-comments repo 根目錄執行
-python3 build.py
-# → 輸出到 ../jubo-line-badminton-check-in-system/docs/design/pc.js
+python3 build.py ../jubo-line-badminton-check-in-system/docs/design/pc.js
+# → 寫到你指定的路徑，同時更新 dist/pc.js
+# （不帶路徑時只寫 dist/pc.js，不會動到其他專案）
 
 # 驗證語法
 node --input-type=module < ../jubo-line-badminton-check-in-system/docs/design/pc.js

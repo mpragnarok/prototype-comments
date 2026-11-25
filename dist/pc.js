@@ -1,4 +1,4 @@
-/* pc.js dd1331b 2026-10-18T04:59:41Z */
+/* pc.js 069639a 2026-11-25T10:36:51Z */
 const STYLES = `
 /* ── prototype-comments ──────────────────────────── */
 
@@ -2092,9 +2092,28 @@ const DRAW_STYLES = `
 .pc-note-card-body { position: relative; } /* 拖曳遮罩以卡片內容區為定位基準 */
 .pc-note-row .spacer { flex: 1; }
 .pc-note-row button:disabled { opacity: .45; cursor: not-allowed; }
-.pc-note-row button.pc-attach-btn { display: inline-flex; align-items: center; padding: 4px 7px; background: #fff; color: var(--pc-ink); }
-.pc-attach-btn svg { width: 14px; height: 14px; }
-.pc-attach-count { font-size: 11px; color: var(--pc-ink-3); align-self: center; }
+/* 迴紋針縮小放在標題列右上角：圖示 13px，但按鈕本身仍有 24×24 可點範圍（負 margin 不撐高標題列） */
+.pc-attach-corner { margin-left: auto; display: inline-flex; align-items: center; gap: 1px; }
+.pc-note-card-head button.pc-attach-btn { display: inline-grid; place-items: center; width: 24px; height: 24px; margin: -4px 0; padding: 0; border-radius: 6px; color: var(--pc-ink-3); transition: color 120ms, background-color 120ms; }
+.pc-note-card-head button.pc-attach-btn:hover:not(:disabled) { color: var(--pc-ink-strong); background: rgba(0,0,0,.06); }
+.pc-note-card-head button.pc-attach-btn:focus-visible { outline: 2px solid var(--pc-accent); outline-offset: 1px; }
+.pc-note-card-head button.pc-attach-btn:disabled { opacity: .4; cursor: not-allowed; }
+.pc-attach-btn svg { width: 13px; height: 13px; }
+.pc-attach-corner { flex: none; }
+.pc-attach-count { white-space: nowrap; font-size: 10.5px; font-weight: 600; color: var(--pc-ink-3); font-variant-numeric: tabular-nums; }
+/* 輸入中縮圖可點放大 */
+.pc-att-thumb.is-zoom { cursor: zoom-in; }
+.pc-att-thumb.is-zoom:focus-visible { outline: 2px solid var(--pc-accent); outline-offset: 1px; }
+.pc-att-lightbox { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; padding: 24px; box-sizing: border-box;
+  background: rgba(15,23,42,.72); backdrop-filter: blur(6px); cursor: zoom-out; animation: pc-att-lb-in 200ms cubic-bezier(.16,1,.3,1); }
+.pc-att-lightbox img { max-width: min(92vw, 1100px); max-height: 88vh; object-fit: contain; border-radius: 8px; background: #fff; box-shadow: 0 18px 60px rgba(0,0,0,.45); cursor: default; animation: pc-att-lb-img 240ms cubic-bezier(.16,1,.3,1); }
+.pc-att-lightbox-x { position: absolute; top: 14px; right: 14px; width: 36px; height: 36px; border-radius: 50%; border: none; background: rgba(255,255,255,.16); color: #fff; font-size: 15px; cursor: pointer; }
+.pc-att-lightbox-x:hover { background: rgba(255,255,255,.28); }
+.pc-att-lightbox-x:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+@keyframes pc-att-lb-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pc-att-lb-img { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .pc-att-lightbox, .pc-att-lightbox img { animation: none; } }
+@media (prefers-reduced-transparency: reduce) { .pc-att-lightbox { backdrop-filter: none; background: rgba(15,23,42,.92); } }
 .pc-attach-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .pc-attach-list:empty, .pc-att-err-slot:empty { display: none; }
 .pc-att-thumb { position: relative; width: 52px; height: 52px; box-sizing: border-box; border: 1.5px solid var(--pc-ink); border-radius: 7px 5px 8px 4px; background: #fff; }
@@ -3313,6 +3332,29 @@ function attachThumbEl(name, size, src) {
   el.appendChild(box);
   return el;
 }
+// 輸入中縮圖的大圖浮層：點背景、按 ✕ 或 Esc 關閉。掛在 document.body（卡片有 transform，fixed 會被它困住）；
+// Esc 用 window capture 攔下，避免同時觸發輸入框的 Esc（取消整張卡）。回傳 close()。
+function attachOpenLightbox(src, name) {
+  const prevFocus = document.activeElement;
+  const box = drawHtmlEl('div', 'pc-att-lightbox'); box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-label', `放大檢視 ${name}`);
+  const img = document.createElement('img'); img.src = src; img.alt = name;
+  const x = drawHtmlEl('button', 'pc-att-lightbox-x'); x.type = 'button'; x.textContent = '✕'; x.setAttribute('aria-label', '關閉大圖');
+  box.append(img, x);
+  const onKey = ev => {
+    if (ev.key !== 'Escape') return;
+    ev.preventDefault(); ev.stopImmediatePropagation(); close();
+  };
+  function close() {
+    window.removeEventListener('keydown', onKey, true);
+    box.remove();
+    if (prevFocus && prevFocus.focus && prevFocus.isConnected) prevFocus.focus();
+  }
+  box.onclick = ev => { if (ev.target !== img) close(); }; // 點圖本身不關；點背景或 ✕ 才關
+  window.addEventListener('keydown', onKey, true);
+  document.body.appendChild(box);
+  x.focus();
+  return close;
+}
 // 檔案條（非圖片、上傳中或失敗的圖片）：副檔名＋檔名＋狀態文字。
 function attachFileEl(name, statusText) {
   const el = drawHtmlEl('div', 'pc-att-file');
@@ -3344,7 +3386,7 @@ function attachMakeLink(el, href) {
 // 拖曳中的虛線遮罩。
 function attachDropVeilEl() {
   const veil = drawHtmlEl('div', 'pc-drop-veil');
-  const inner = drawHtmlEl('div'); inner.textContent = '放開就加入附件';
+  const inner = drawHtmlEl('div'); inner.textContent = '放開就貼上';
   const small = drawHtmlEl('small'); small.textContent = `圖片或檔案，單檔 ${attachLimitLabel()} 以內`;
   inner.appendChild(small); veil.appendChild(inner);
   return veil;
@@ -3374,7 +3416,7 @@ function createAttachmentTray({ upload, initial = [] }) {
     count: () => t.items.length,
     onChange: fn => { t.listeners.push(fn); },
     // 卡片拆掉時呼叫：釋放所有圖片預覽的 object URL。之後才回來的上傳結果一律丟掉。
-    dispose: () => { t.items.forEach(attachRevokePreview); t.items = []; t.listeners = []; },
+    dispose: () => { if (t.closeLightbox) t.closeLightbox(); t.items.forEach(attachRevokePreview); t.items = []; t.listeners = []; },
   };
 }
 // 加檔：逐一檢查上限，超過的就近顯示紅框，不加入；其餘加入並開始上傳。
@@ -3439,7 +3481,9 @@ function trayItemEl(t, item) {
   const isImg = isImageAttachment(item.att || item.file);
   let el;
   if (isImg && item.status !== 'failed') {
-    el = attachThumbEl(name, size, item.preview || attachHref(item.att.url));
+    const src = item.preview || attachHref(item.att.url);
+    el = attachThumbEl(name, size, src);
+    if (src) trayMakeZoomable(t, el, src, name);
     if (item.status === 'uploading') { el.classList.add('is-uploading'); el.appendChild(attachBarEl()); }
   } else el = trayFileEl(t, item, name, size);
   const x = drawHtmlEl('button', 'pc-att-x'); x.type = 'button'; x.textContent = '✕';
@@ -3448,6 +3492,13 @@ function trayItemEl(t, item) {
   el.appendChild(x);
   if (!item.shown) { item.shown = true; el.classList.add('is-new'); } // 只有第一次畫出來時淡入
   return el;
+}
+// 輸入中的縮圖：點一下（或 Enter／空白鍵）放大看。× 自己 stopPropagation，不會被這裡吃掉。
+function trayMakeZoomable(t, el, src, name) {
+  el.classList.add('is-zoom'); el.tabIndex = 0; el.setAttribute('role', 'button'); el.setAttribute('aria-label', `放大檢視 ${name}`);
+  const open = () => { if (t.closeLightbox) t.closeLightbox(); t.closeLightbox = attachOpenLightbox(src, name); };
+  el.onclick = open;
+  el.onkeydown = ev => { if (ev.target === el && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); open(); } }; // 內層 × 的按鍵不攔
 }
 function trayFileEl(t, item, name, size) {
   if (item.status === 'done') return attachFileEl(name, formatAttachBytes(size));
@@ -3873,6 +3924,7 @@ function initDrawLayer(target, opts = {}) {
     const card = noteLayer.querySelector('.pc-note-card');
     if (!card) { unbindNoteOutsideClose(); return; }
     if (card.contains(e.target)) return; // 點在卡片本身 → 交回卡內各自 handler，不處理
+    if (e.target.closest && e.target.closest('.pc-att-lightbox')) return; // 縮圖大圖浮層（掛在 body）不算點外面，不然看圖會把卡存掉關掉
     if (activeNoteEditor) {
       const { ta, c, isEdit, tray } = activeNoteEditor;
       const text = ta.value.trim();
@@ -3951,9 +4003,14 @@ function initDrawLayer(target, opts = {}) {
     if (c.id) { const cur = body.closest('.pc-note-card'); if (cur) dropNoteCard(cur); openNoteCard(c); }
     else closeNoteCard();
   }
-  // 把附件列掛上卡片：迴紋針＋計數在按鈕列左邊、附件與錯誤在輸入框下方；⌘V 貼檔、拖檔進卡片都進附件。
+  // 把附件列掛上卡片：迴紋針＋計數縮小放在卡片標題列右上角（✕ 左邊）、附件與錯誤在輸入框下方；⌘V 貼檔、拖檔進卡片都進附件。
   function mountAttachTray(body, ta, row, send, tray) {
-    row.prepend(tray.clip, tray.countEl, drawHtmlEl('span', 'spacer'));
+    const head = body.closest('.pc-note-card') && body.closest('.pc-note-card').querySelector('.pc-note-card-head');
+    if (head) {
+      const old = head.querySelector('.pc-attach-corner'); if (old) old.remove();
+      const corner = drawHtmlEl('span', 'pc-attach-corner'); corner.append(tray.countEl, tray.clip);
+      head.insertBefore(corner, head.lastElementChild); // lastElementChild＝✕ 關閉鈕
+    } else row.prepend(tray.clip, tray.countEl, drawHtmlEl('span', 'spacer'));
     body.insertBefore(tray.listEl, row); body.insertBefore(tray.errEl, row); body.appendChild(tray.input);
     tray.onChange(() => { send.disabled = tray.isUploading(); }); // 上傳中「存紀錄」不能按
     // 只在輸入框有焦點時攔檔案貼上；純文字貼上照舊。畫布的「貼圖成參考圖」本來就在打字時不動作。
@@ -6025,7 +6082,7 @@ function resolveDrawStore(persist) {
 
 // Build stamp: build.py rewrites this to the git short SHA when it bundles
 // dist/pc.js. Stays 'dev' when index.js is imported directly from source.
-export const PC_VERSION = 'dd1331b';
+export const PC_VERSION = '069639a';
 
 // ─── Firebase SDK (ESM, gstatic CDN) ────────────────────────────────────────
 const FB_VER = '12.13.0';

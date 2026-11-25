@@ -125,9 +125,28 @@ export const DRAW_STYLES = `
 .pc-note-card-body { position: relative; } /* 拖曳遮罩以卡片內容區為定位基準 */
 .pc-note-row .spacer { flex: 1; }
 .pc-note-row button:disabled { opacity: .45; cursor: not-allowed; }
-.pc-note-row button.pc-attach-btn { display: inline-flex; align-items: center; padding: 4px 7px; background: #fff; color: var(--pc-ink); }
-.pc-attach-btn svg { width: 14px; height: 14px; }
-.pc-attach-count { font-size: 11px; color: var(--pc-ink-3); align-self: center; }
+/* 迴紋針縮小放在標題列右上角：圖示 13px，但按鈕本身仍有 24×24 可點範圍（負 margin 不撐高標題列） */
+.pc-attach-corner { margin-left: auto; display: inline-flex; align-items: center; gap: 1px; }
+.pc-note-card-head button.pc-attach-btn { display: inline-grid; place-items: center; width: 24px; height: 24px; margin: -4px 0; padding: 0; border-radius: 6px; color: var(--pc-ink-3); transition: color 120ms, background-color 120ms; }
+.pc-note-card-head button.pc-attach-btn:hover:not(:disabled) { color: var(--pc-ink-strong); background: rgba(0,0,0,.06); }
+.pc-note-card-head button.pc-attach-btn:focus-visible { outline: 2px solid var(--pc-accent); outline-offset: 1px; }
+.pc-note-card-head button.pc-attach-btn:disabled { opacity: .4; cursor: not-allowed; }
+.pc-attach-btn svg { width: 13px; height: 13px; }
+.pc-attach-corner { flex: none; }
+.pc-attach-count { white-space: nowrap; font-size: 10.5px; font-weight: 600; color: var(--pc-ink-3); font-variant-numeric: tabular-nums; }
+/* 輸入中縮圖可點放大 */
+.pc-att-thumb.is-zoom { cursor: zoom-in; }
+.pc-att-thumb.is-zoom:focus-visible { outline: 2px solid var(--pc-accent); outline-offset: 1px; }
+.pc-att-lightbox { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; padding: 24px; box-sizing: border-box;
+  background: rgba(15,23,42,.72); backdrop-filter: blur(6px); cursor: zoom-out; animation: pc-att-lb-in 200ms cubic-bezier(.16,1,.3,1); }
+.pc-att-lightbox img { max-width: min(92vw, 1100px); max-height: 88vh; object-fit: contain; border-radius: 8px; background: #fff; box-shadow: 0 18px 60px rgba(0,0,0,.45); cursor: default; animation: pc-att-lb-img 240ms cubic-bezier(.16,1,.3,1); }
+.pc-att-lightbox-x { position: absolute; top: 14px; right: 14px; width: 36px; height: 36px; border-radius: 50%; border: none; background: rgba(255,255,255,.16); color: #fff; font-size: 15px; cursor: pointer; }
+.pc-att-lightbox-x:hover { background: rgba(255,255,255,.28); }
+.pc-att-lightbox-x:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+@keyframes pc-att-lb-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pc-att-lb-img { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .pc-att-lightbox, .pc-att-lightbox img { animation: none; } }
+@media (prefers-reduced-transparency: reduce) { .pc-att-lightbox { backdrop-filter: none; background: rgba(15,23,42,.92); } }
 .pc-attach-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .pc-attach-list:empty, .pc-att-err-slot:empty { display: none; }
 .pc-att-thumb { position: relative; width: 52px; height: 52px; box-sizing: border-box; border: 1.5px solid var(--pc-ink); border-radius: 7px 5px 8px 4px; background: #fff; }

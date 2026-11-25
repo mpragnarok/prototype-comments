@@ -82,7 +82,7 @@ const listInfo = page => page.evaluate(() => ({
 (async () => {
   await new Promise(r => server.listen(0, r));
   PORT = server.address().port;
-  browser = await chromium.launch();
+  browser = await chromium.launch({ channel: process.env.PW_CHANNEL || undefined, args: ['--window-position=-3000,0'] }); // PW_CHANNEL=chrome：沒裝 headless shell 時改用系統 Chrome
   console.log('note attachments e2e:');
 
   await test('有 uploadAttachment：迴紋針出現；選兩個檔＋貼一張圖 → 3／3、迴紋針停用；第 4 個被擋並說明', async () => {
@@ -255,7 +255,7 @@ const listInfo = page => page.evaluate(() => ({
       over: document.querySelector('.pc-note-card').classList.contains('is-dragover'),
       veil: (document.querySelector('.pc-note-card .pc-drop-veil') || {}).textContent || '',
     }));
-    assert(during.over && during.veil.includes('放開就加入附件'), `拖曳中應變色＋遮罩，實際 ${JSON.stringify(during)}`);
+    assert(during.over && during.veil.includes('放開就貼上') && !during.veil.includes('加入附件'), `拖曳中應變色＋遮罩，實際 ${JSON.stringify(during)}`);
     await page.evaluate(() => {
       const card = document.querySelector('.pc-note-card');
       card.dispatchEvent(new DragEvent('drop', { dataTransfer: window.__dt, bubbles: true, cancelable: true }));
@@ -351,7 +351,7 @@ const listInfo = page => page.evaluate(() => ({
     await page.evaluate(() => { window.__uploadMode = 'hold'; });
     await openCard(page, '#t2');
     await pasteImage(page, 'e.png');
-    await page.click('.pc-note-card .pc-note-card-head button');
+    await page.click('.pc-note-card .pc-note-card-head button[title="關閉"]'); // 迴紋針也在標題列，用 title 認 ✕
     await page.evaluate(() => window.__release());
     await page.waitForTimeout(60);
     assert(await made() === 5, `應建了 5 個預覽網址，實際 ${await made()}`);
@@ -395,6 +395,99 @@ const listInfo = page => page.evaluate(() => ({
     const res = await page.evaluate(() => ({ opened: window.__opened, pwned: window.__pwned || null }));
     assert(res.opened.length === 0, `不該呼叫 window.open，實際 ${JSON.stringify(res.opened)}`);
     assert(res.pwned === null, '不該執行到 javascript: 網址');
+    assert(!page.__errors.length, 'page errors: ' + page.__errors.join('; '));
+    await page.close();
+  });
+
+  await test('迴紋針縮小放在標題列右上角：圖示不大於 16px、可點範圍仍 ≥24px、有 aria-label，真的點下去會開選檔視窗', async () => {
+    const page = await boot(true);
+    await openCard(page);
+    const m = await page.evaluate(() => {
+      const clip = document.querySelector('.pc-note-card .pc-attach-btn');
+      const r = clip.getBoundingClientRect(), svg = clip.querySelector('svg').getBoundingClientRect();
+      const head = document.querySelector('.pc-note-card-head');
+      const row = document.querySelector('.pc-note-card .pc-note-row');
+      return { w: r.width, h: r.height, svgW: svg.width, label: clip.getAttribute('aria-label'),
+        inHead: head.contains(clip), inRow: row.contains(clip),
+        beforeX: head.lastElementChild.textContent === '✕' && head.lastElementChild.previousElementSibling.contains(clip) };
+    });
+    assert(m.inHead && !m.inRow && m.beforeX, `迴紋針應在標題列、✕ 左邊，不在按鈕列，實際 ${JSON.stringify(m)}`);
+    assert(m.svgW <= 16, `圖示應縮小到 16px 以內，實際 ${m.svgW}`);
+    assert(m.w >= 24 && m.h >= 24, `可點範圍至少 24×24，實際 ${m.w}×${m.h}`);
+    assert(m.label === '附加圖片或檔案', `應有 aria-label，實際「${m.label}」`);
+    const chooser = page.waitForEvent('filechooser', { timeout: 2000 });
+    await page.click('.pc-note-card .pc-attach-btn');
+    const fc = await chooser;
+    await fc.setFiles([pngFile('從迴紋針選的.png')]);
+    await page.waitForTimeout(80);
+    const info = await listInfo(page);
+    assert(info.thumbs === 1 && info.count === '1／3', `用迴紋針選檔後應加入 1 張、計數 1／3，實際 ${JSON.stringify(info)}`);
+    assert(!page.__errors.length, 'page errors: ' + page.__errors.join('; '));
+    await page.close();
+  });
+
+  await test('拖檔遮罩寫「放開就貼上」，舊文字「放開就加入附件」不見了', async () => {
+    const page = await boot(true);
+    await openCard(page);
+    const veil = await page.evaluate(() => {
+      const card = document.querySelector('.pc-note-card');
+      const dt = new DataTransfer(); dt.items.add(new File(['x'], 'a.txt', { type: 'text/plain' }));
+      card.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true, cancelable: true }));
+      const v = document.querySelector('.pc-note-card .pc-drop-veil');
+      return v ? v.firstChild.firstChild.textContent : null; // veil > 主文字 div > 文字節點（small 在後面）
+    });
+    assert(veil === '放開就貼上', `遮罩主文字應為「放開就貼上」，實際「${veil}」`);
+    await page.close();
+  });
+
+  await test('輸入中縮圖點開放大：Esc 只關大圖不關卡、點背景關閉、× 仍是刪除；沒點過的縮圖與卡內容不變', async () => {
+    const page = await boot(true);
+    await openCard(page);
+    await page.fill('.pc-note-card textarea', '要保留的字');
+    await page.setInputFiles('.pc-note-card .pc-attach-input', [pngFile('一.png'), pngFile('二.png'), pngFile('三.png')]);
+    await page.waitForTimeout(80);
+    const snap = () => page.evaluate(() => [...document.querySelectorAll('.pc-note-card .pc-attach-list .pc-att-thumb')]
+      .map(t => ({ title: t.title, src: t.querySelector('img').getAttribute('src') })));
+    const before = await snap();
+    const docsBefore = await page.evaluate(() => window.__h.docs().length);
+    assert(before.length === 3, `應有 3 張縮圖，實際 ${before.length}`);
+    // 點第 2 張 → 大圖出現，來源就是那張的圖
+    await page.click('.pc-note-card .pc-attach-list .pc-att-thumb:nth-child(2)');
+    const open1 = await page.evaluate(() => { const lb = document.querySelector('.pc-att-lightbox'); return lb ? { src: lb.querySelector('img').getAttribute('src'), label: lb.getAttribute('aria-label') } : null; });
+    assert(open1 && open1.src === before[1].src && open1.label.includes('二.png'), `應放大第 2 張，實際 ${JSON.stringify(open1)}`);
+    // Esc → 只關大圖；卡、輸入的字、3 張縮圖都還在
+    await page.keyboard.press('Escape');
+    assert(!(await page.$('.pc-att-lightbox')), 'Esc 應關閉大圖');
+    assert(await page.$('.pc-note-card textarea'), 'Esc 不該把整張卡關掉');
+    assert((await page.inputValue('.pc-note-card textarea')) === '要保留的字', '輸入的字不該不見');
+    assert(JSON.stringify(await snap()) === JSON.stringify(before), '沒碰過的縮圖不該變');
+    // 點背景關閉（卡也不該因為「點在卡外」被自動存掉）
+    await page.click('.pc-note-card .pc-attach-list .pc-att-thumb:nth-child(1)');
+    await page.mouse.click(20, 20);
+    assert(!(await page.$('.pc-att-lightbox')), '點背景應關閉大圖');
+    assert(await page.$('.pc-note-card textarea'), '點大圖背景不該被當成點卡外而存檔關卡');
+    assert((await page.evaluate(() => window.__h.docs().length)) === docsBefore, '點背景不該存出紀錄');
+    // × 仍是刪除，不會被縮圖點擊吃掉
+    await page.click('.pc-note-card .pc-attach-list .pc-att-thumb:nth-child(3) .pc-att-x');
+    assert(!(await page.$('.pc-att-lightbox')), '按 × 不該同時開大圖');
+    const after = await snap();
+    assert(after.length === 2 && after[0].title === before[0].title && after[1].title === before[1].title, `× 應只刪掉第 3 張，實際 ${JSON.stringify(after)}`);
+    assert(!page.__errors.length, 'page errors: ' + page.__errors.join('; '));
+    await page.close();
+  });
+
+  await test('焦點在縮圖的 × 上按 Enter 或空白鍵：刪掉那張圖，不開大圖', async () => {
+    const page = await boot(true);
+    await openCard(page);
+    await page.setInputFiles('.pc-note-card .pc-attach-input', [pngFile('一.png'), pngFile('二.png'), pngFile('三.png')]);
+    await page.waitForTimeout(80);
+    const count = () => page.$$eval('.pc-note-card .pc-attach-list .pc-att-thumb', n => n.length);
+    for (const [key, left] of [['Enter', 2], ['Space', 1]]) {
+      await page.focus('.pc-note-card .pc-attach-list .pc-att-thumb:last-child .pc-att-x');
+      await page.keyboard.press(key);
+      assert(!(await page.$('.pc-att-lightbox')), `${key} 在 × 上不該開大圖`);
+      assert((await count()) === left, `${key} 應刪到剩 ${left} 張，實際 ${await count()}`);
+    }
     assert(!page.__errors.length, 'page errors: ' + page.__errors.join('; '));
     await page.close();
   });
