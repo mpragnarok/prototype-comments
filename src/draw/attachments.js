@@ -265,7 +265,7 @@ function trayMakeZoomable(t, el, src, name) {
   el.classList.add('is-zoom'); el.tabIndex = 0; el.setAttribute('role', 'button'); el.setAttribute('aria-label', `放大檢視 ${name}`);
   const open = () => { if (t.closeLightbox) t.closeLightbox(); t.closeLightbox = attachOpenLightbox(src, name); };
   el.onclick = open;
-  el.onkeydown = ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); } };
+  el.onkeydown = ev => { if (ev.target === el && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); open(); } }; // 內層 × 的按鍵不攔
 }
 function trayFileEl(t, item, name, size) {
   if (item.status === 'done') return attachFileEl(name, formatAttachBytes(size));

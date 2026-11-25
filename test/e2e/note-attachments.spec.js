@@ -476,6 +476,22 @@ const listInfo = page => page.evaluate(() => ({
     await page.close();
   });
 
+  await test('焦點在縮圖的 × 上按 Enter 或空白鍵：刪掉那張圖，不開大圖', async () => {
+    const page = await boot(true);
+    await openCard(page);
+    await page.setInputFiles('.pc-note-card .pc-attach-input', [pngFile('一.png'), pngFile('二.png'), pngFile('三.png')]);
+    await page.waitForTimeout(80);
+    const count = () => page.$$eval('.pc-note-card .pc-attach-list .pc-att-thumb', n => n.length);
+    for (const [key, left] of [['Enter', 2], ['Space', 1]]) {
+      await page.focus('.pc-note-card .pc-attach-list .pc-att-thumb:last-child .pc-att-x');
+      await page.keyboard.press(key);
+      assert(!(await page.$('.pc-att-lightbox')), `${key} 在 × 上不該開大圖`);
+      assert((await count()) === left, `${key} 應刪到剩 ${left} 張，實際 ${await count()}`);
+    }
+    assert(!page.__errors.length, 'page errors: ' + page.__errors.join('; '));
+    await page.close();
+  });
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
