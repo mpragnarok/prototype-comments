@@ -19,8 +19,8 @@ live-markup courses. The guard fails closed so that can never ship unnoticed.
 Usage:
     python3 build.py [output_path]
 
-Default output: ../jubo-line-badminton-check-in-system/docs/design/pc.js
-Always also writes: dist/pc.js (CDN release artifact + e2e harness source).
+Always writes: dist/pc.js (CDN release artifact + e2e harness source).
+Writes nowhere else unless output_path is given; then that file is written too.
 """
 import re, os, sys, subprocess
 from datetime import datetime, timezone
@@ -29,9 +29,6 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(ROOT, 'src')
 ENTRY = 'index.js'          # bundle entry, relative to SRC
 MIN_BYTES = 250 * 1024      # regression guard; healthy bundle is ~300KB
-
-DEFAULT_OUTPUT = os.path.join(
-    ROOT, '../jubo-line-badminton-check-in-system/docs/design/pc.js')
 
 # Captures the specifier of a static import or a re-export-from, including the
 # multi-line `export { a, b, ... } from '...'` barrel form.
@@ -136,9 +133,9 @@ def main():
             'broken barrel).\n  Expected ~300KB; not overwriting dist/pc.js.'
             % (format(nbytes, ','), format(MIN_BYTES, ',')))
 
-    output = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else DEFAULT_OUTPUT)
-    targets = [output, os.path.join(ROOT, 'dist', 'pc.js')]
-    for path in targets:
+    dist = os.path.join(ROOT, 'dist', 'pc.js')
+    extra = [os.path.abspath(p) for p in sys.argv[1:2]]
+    for path in [dist] + [p for p in extra if p != dist]:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:
             f.write(result)
